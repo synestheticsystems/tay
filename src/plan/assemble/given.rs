@@ -1,6 +1,8 @@
 //! The values a unit gives, as the plan prints them: each seen from the host
 //! and from a container, since an address depends on who asks.
 
+use std::collections::HashSet;
+
 use crate::definition::{GiveValue, Mechanism};
 use crate::diagnostic::source::Loc;
 use crate::syntax::expr::{Expr, ExprKind, Part, Reference, Target, UnitRef};
@@ -13,8 +15,15 @@ use crate::plan::resolve::{Asker, Fail, Scope, ViewProblem};
 use crate::plan::reach::usage::view_error;
 
 impl Planner<'_> {
-    /// Each value the unit gives, as the host and as a container would see it.
-    pub(super) fn gives(&mut self, unit: usize, mechanism: &Mechanism) -> Vec<Option<GivenLine>> {
+    /// Each value the unit gives, as the host and as a container would see
+    /// it. An address through a published port is one the host can have only
+    /// if the port is opened: by `always`, or by a use in `opened`.
+    pub(super) fn gives(
+        &mut self,
+        unit: usize,
+        mechanism: &Mechanism,
+        opened: &HashSet<(String, i64)>,
+    ) -> Vec<Option<GivenLine>> {
         let unit_name = &self.resolver.stack.units[unit].name.name;
         let mut lines = Vec::new();
         for give in &mechanism.gives {
@@ -32,6 +41,7 @@ impl Planner<'_> {
                 give.name.loc,
                 target,
                 endpoint,
+                opened,
             ));
         }
         for output in mechanism.outputs() {
@@ -46,6 +56,7 @@ impl Planner<'_> {
                 output.name.loc,
                 target,
                 false,
+                opened,
             ));
         }
         lines
@@ -58,6 +69,7 @@ impl Planner<'_> {
         loc: Loc,
         target: Target,
         endpoint: bool,
+        opened: &HashSet<(String, i64)>,
     ) -> Option<GivenLine> {
         let reference = Expr {
             loc,
@@ -70,7 +82,23 @@ impl Planner<'_> {
         let mut seen = |asker: Asker| -> Option<(Seen, Option<Resolved>)> {
             let scope = Scope { unit: None, asker };
             let problems = match self.resolver.resolve(&reference, scope) {
-                Ok(value) => return Some((Seen::Value(Shown::of(&value)), Some(value))),
+                Ok(value) => {
+                    let closed: Vec<String> = value
+                        .published_uses
+                        .iter()
+                        .filter(|used| {
+                            !used.always && !opened.contains(&(used.container.clone(), used.port))
+                        })
+                        .map(|used| format!(
+                            "its port {} is published, but nothing in the plan opens it on the host",
+                            used.port
+                        ))
+                        .collect();
+                    return Some(match closed.is_empty() {
+                        true => (Seen::Value(Shown::of(&value)), Some(value)),
+                        false => (Seen::Unreachable(closed.join("; ")), None),
+                    });
+                }
                 Err(Fail::Reported) => return None,
                 Err(Fail::View(problems)) => problems,
             };
@@ -80,9 +108,6 @@ impl Planner<'_> {
                     ViewProblem::NotPublished { port, .. } => {
                         unreachable.push(format!("its port {port} is not published to the host"));
                     }
-                    ViewProblem::NotOpened { port, .. } => unreachable.push(format!(
-                        "its port {port} is published, but nothing in the plan opens it on the host"
-                    )),
                     // An address with no view in a value of a unit that is
                     // made has no form for anyone.
                     ViewProblem::NeedsView { at, .. } => {

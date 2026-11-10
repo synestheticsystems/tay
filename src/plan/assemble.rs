@@ -61,7 +61,7 @@ impl Planner<'_> {
         let order = order::order(&units, &name, &is_made, &edges, &mut self.resolver.d)?;
         // What each unit gives is shown as the plan leaves it, so an address
         // through a published port that nothing opens is not shown as one.
-        self.resolver.opened = Some(opened_ports(&reached.visits));
+        let opened = opened_ports(&reached.visits);
         let mut openers: HashMap<(String, i64), Vec<_>> = HashMap::new();
         for opening in reached.visits.iter().flat_map(|(_, visit)| &visit.opens) {
             openers
@@ -78,7 +78,7 @@ impl Planner<'_> {
                 Chosen::Group(_) => None,
             };
             let gives: Option<Vec<_>> = match mechanism {
-                Some(mechanism) => self.gives(unit, mechanism).into_iter().collect(),
+                Some(mechanism) => self.gives(unit, mechanism, &opened).into_iter().collect(),
                 None => Some(Vec::new()),
             };
             let mut unit_plan = visit.planned?;

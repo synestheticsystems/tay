@@ -68,9 +68,6 @@ pub enum ViewProblem {
         at: Loc,
         endpoint: Loc,
     },
-    /// The host asks for a container's address through a published port
-    /// that nothing in the plan opens.
-    NotOpened { owner: String, port: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -128,10 +125,6 @@ pub struct Resolver<'s> {
     /// The folder of each source's file, by source, which a path beginning
     /// `./` is relative to.
     folders: Vec<Option<PathBuf>>,
-    /// Once every unit that comes up has used its values: the published
-    /// ports something in the plan opens, by container unit and container
-    /// port. Until then a use from the host opens the port it reaches.
-    pub opened: Option<HashSet<(String, i64)>>,
 }
 
 impl<'s> Resolver<'s> {
@@ -158,7 +151,6 @@ impl<'s> Resolver<'s> {
             resolving: Vec::new(),
             circles: HashSet::new(),
             unset: BTreeMap::new(),
-            opened: None,
         }
     }
 

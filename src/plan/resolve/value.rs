@@ -6,6 +6,16 @@ use std::collections::BTreeSet;
 
 use crate::value::Value;
 
+/// A published port a value reaches from the host.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct PublishedUse {
+    /// The unit whose container publishes the port.
+    pub container: String,
+    pub port: i64,
+    /// Whether its entry opens it with no use, by `always: true`.
+    pub always: bool,
+}
+
 /// A resolved value, and what it is built from.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Resolved {
@@ -16,9 +26,8 @@ pub struct Resolved {
     /// The units that are made whose values it is built from, each with the
     /// value used.
     pub made: BTreeMap<String, String>,
-    /// The published ports it reaches from the host, by container unit and
-    /// container port: using it opens them.
-    pub published_uses: BTreeSet<(String, i64)>,
+    /// The published ports it reaches from the host: using it opens them.
+    pub published_uses: BTreeSet<PublishedUse>,
     /// Whether it begins with a setting's value, written there directly or
     /// reached through a value that begins with one.
     pub begins_with_setting: bool,

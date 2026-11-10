@@ -13,7 +13,7 @@ use crate::module::{Form, Published, Runs, UnitKind};
 use crate::syntax::expr::{Part, Reference};
 
 use super::{Asker, Fail, Res, Resolver, Scope, ViewProblem};
-use crate::plan::resolve::value::Resolved;
+use crate::plan::resolve::value::{PublishedUse, Resolved};
 use crate::value::{Bit, Exact, Value};
 
 /// The host's own address, which a unit on the host reaches another at and
@@ -162,22 +162,18 @@ impl<'s> Resolver<'s> {
                 let Some(entry) = self.published(container, number) else {
                     return not_published(&port);
                 };
-                let container_name = self.stack.units[container].name.name.clone();
-                if let Some(opened) = &self.opened
-                    && !entry.always
-                    && !opened.contains(&(container_name.clone(), number))
-                {
-                    return Err(Fail::View(vec![ViewProblem::NotOpened {
-                        owner: owner_name.clone(),
-                        port: port.value.shown(),
-                    }]));
-                }
                 let scope = Scope {
                     unit: Some(container),
                     asker: Asker::Container,
                 };
                 let mut host_port = self.resolve(&entry.host_port.expr, scope)?;
-                host_port.published_uses.insert((container_name, number));
+                // Whether something opens the port is known only once the
+                // whole plan is: whoever uses the value judges that.
+                host_port.published_uses.insert(PublishedUse {
+                    container: self.stack.units[container].name.name.clone(),
+                    port: number,
+                    always: entry.always,
+                });
                 (LOOPBACK.to_string(), host_port)
             }
             (Asker::Container, Runs::OnHost) => (HOST_SEEN_FROM_CONTAINERS.to_string(), port),

@@ -111,10 +111,10 @@ impl Planner<'_> {
             (false, Asker::Host) => OpenedBy::UnitOnHost,
             (false, _) => OpenedBy::View,
         };
-        for (container, port) in &value.published_uses {
+        for used in &value.published_uses {
             uses.opens.push(Opening {
-                container: container.clone(),
-                port: *port,
+                container: used.container.clone(),
+                port: used.port,
                 opener: Opener {
                     unit: user.name.to_string(),
                     how,
@@ -259,11 +259,5 @@ pub fn view_error(who: &str, at: Loc, problem: ViewProblem) -> Diagnostic {
             ),
         )
         .with(endpoint, "the endpoint is defined here"),
-        ViewProblem::NotOpened { owner, port } => Diagnostic::new(
-            at,
-            format!(
-                "{who}, and uses here an address of unit `{owner}` as the host sees it, but nothing in the plan opens its port {port} on the host"
-            ),
-        ),
     }
 }
