@@ -1,7 +1,7 @@
 format: 1
 stack: value-types
 settings:
-  port: { default: 8080 }
+  port: { default: 28080 }
   verbose: { default: true }
   pattern: { default: "${not.a.reference} and $${this}" }
 units:

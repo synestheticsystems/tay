@@ -6,4 +6,4 @@ settings:
   log.web: { default: info }
   images.api: {}
 units:
-  web-port: { uses: port, with: { prefer: 5173 } }
+  web-port: { uses: port, with: { prefer: 25173 } }

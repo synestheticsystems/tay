@@ -8,10 +8,10 @@ use serde_json::json;
 fn a_whole_string_reference_keeps_its_type_and_one_inside_text_becomes_text() {
     let plan = plan_json("value-types", &[]);
     let port = unit(&plan, "fixed-port");
-    assert_eq!(given(port, "whole")["from_host"]["value"], json!(8080));
+    assert_eq!(given(port, "whole")["from_host"]["value"], json!(28080));
     assert_eq!(
         given(port, "inside")["from_host"]["value"],
-        json!("port 8080")
+        json!("port 28080")
     );
     assert_eq!(given(port, "flag")["from_host"]["value"], json!(true));
 }
@@ -66,7 +66,7 @@ fn references_to_the_environment_and_the_host() {
 
 #[test]
 fn a_whole_string_reference_of_the_wrong_type_is_an_error() {
-    // The setting is the text "8080", and a port number is wanted.
+    // The setting is the text "28080", and a port number is wanted.
     let run = plan("value-type-error", &[]);
     assert_eq!(run.code, 2);
     assert_eq!(
