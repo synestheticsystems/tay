@@ -22,12 +22,57 @@ pub struct UnitShape {
     pub gives: Vec<Given>,
     /// The files the unit builds, used as `${unit.outputs.name}`.
     pub outputs: Vec<Given>,
+    /// The named volumes the unit owns.
+    pub volumes: Vec<NameAt>,
+    /// The volumes of other units it mounts.
+    pub volume_mounts: Vec<VolumeMount>,
+    /// What the unit makes that no other unit may make too.
+    pub claims: Vec<Claim>,
     /// What in these settings a production profile refuses, beyond running on
     /// the host, which the planner sees in `kind`.
     pub production: Vec<Concern>,
     /// How the unit is known to be ready when it has no `ready` check.
     pub ready_without_check: &'static str,
     pub restart_by_default: RestartDefault,
+}
+
+impl UnitShape {
+    /// A unit's shape with only its kind and its defaults: what it uses,
+    /// gives and makes is filled in by its module.
+    pub fn new(
+        kind: UnitKind,
+        ready_without_check: &'static str,
+        restart_by_default: RestartDefault,
+    ) -> UnitShape {
+        UnitShape {
+            kind,
+            slots: Vec::new(),
+            gives: Vec::new(),
+            outputs: Vec::new(),
+            volumes: Vec::new(),
+            volume_mounts: Vec::new(),
+            claims: Vec::new(),
+            production: Vec::new(),
+            ready_without_check,
+            restart_by_default,
+        }
+    }
+}
+
+/// Another unit's volume, mounted: `{ volume: "unit/name" }`.
+#[derive(Clone, Debug)]
+pub struct VolumeMount {
+    pub unit: NameAt,
+    pub volume: NameAt,
+}
+
+/// Something in the environment a unit makes, described for messages, such
+/// as a file at its place in the state folder. Two units may not make the
+/// same one.
+#[derive(Clone, Debug)]
+pub struct Claim {
+    pub what: String,
+    pub loc: Loc,
 }
 
 /// The module's answers to the two questions the planner asks of every
@@ -96,10 +141,11 @@ impl Slot {
 /// Where a value ends up, which decides whether a secret may go there.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Place {
-    /// `secret_env`: only secrets, only by reference.
+    /// `secret_env`: only values with a secret in them.
     SecretEnv,
-    /// A file only its owner can read.
-    PrivateFile,
+    /// A `file` unit's content, which is written for its owner alone when
+    /// it holds a secret and no `mode` is written.
+    FileContent,
     /// A place other programs can read, named for messages.
     Readable(&'static str),
 }
@@ -118,10 +164,11 @@ pub enum GivenValue {
     /// A host port this environment holds: a number, known before start,
     /// shown as `<port: unit>` until it is allocated.
     Port,
-    /// A generated secret: known before start, never shown.
-    Secret,
+    /// Generated once and kept: known before start, and never shown when
+    /// it is secret.
+    Generated { secret: bool },
     /// Written out by the unit when it runs.
-    Produced,
+    Produced { secret: bool },
     /// A file the unit builds when it runs.
     Output,
 }
@@ -130,7 +177,6 @@ pub enum GivenValue {
 #[derive(Clone, Debug)]
 pub enum Concern {
     BuildsImage(Loc),
-    Prepares(Loc),
     /// A host path made visible inside a container.
     MountsHostPath(Expr),
 }

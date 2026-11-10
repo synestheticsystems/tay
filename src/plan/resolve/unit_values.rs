@@ -89,25 +89,37 @@ impl Resolver<'_> {
                 ty: Some(Type::Number),
                 hole: Hole::Port(unit.name.name.clone()),
             })),
-            GiveValue::Module(GivenValue::Secret) => {
-                let mut value = Resolved::known(Shape::Opaque {
-                    ty: Some(Type::Text),
-                    hole: Hole::Secret,
-                });
-                value.secrets.insert(format!("{}.{name}", unit.name.name));
-                Ok(value)
-            }
-            GiveValue::Module(GivenValue::Produced) => {
-                let mut value = Resolved::known(Shape::Opaque {
-                    ty: None,
-                    hole: Hole::Produced {
+            GiveValue::Module(GivenValue::Generated { secret }) => {
+                let hole = match secret {
+                    true => Hole::Secret,
+                    false => Hole::Generated {
                         unit: unit.name.name.clone(),
                         name: name.to_string(),
                     },
+                };
+                let mut value = Resolved::known(Shape::Opaque {
+                    ty: Some(Type::Text),
+                    hole,
                 });
-                value
-                    .producers
-                    .insert(unit.name.name.clone(), format!("{}.{name}", unit.name.name));
+                if *secret {
+                    value.secrets.insert(format!("{}.{name}", unit.name.name));
+                }
+                Ok(value)
+            }
+            GiveValue::Module(GivenValue::Produced { secret }) => {
+                let hole = match secret {
+                    true => Hole::Secret,
+                    false => Hole::Produced {
+                        unit: unit.name.name.clone(),
+                        name: name.to_string(),
+                    },
+                };
+                let mut value = Resolved::known(Shape::Opaque { ty: None, hole });
+                let used = format!("{}.{name}", unit.name.name);
+                if *secret {
+                    value.secrets.insert(used.clone());
+                }
+                value.producers.insert(unit.name.name.clone(), used);
                 Ok(value)
             }
             GiveValue::Module(GivenValue::Output) => {

@@ -1,13 +1,13 @@
 //! Settings several modules share: command lines, environment variables and
 //! mounts. Each module still decides which of these it has.
 
-use crate::diagnostic::Diagnostics;
-use crate::syntax::expr::{self, ExprKind};
+use crate::diagnostic::{Diagnostic, Diagnostics};
+use crate::syntax::expr;
 use crate::syntax::fields::{self, Fields};
-use crate::syntax::names;
+use crate::syntax::names::{self, NameAt};
 use crate::syntax::yaml::Node;
 
-use crate::module::shape::{Concern, Place, Slot};
+use crate::module::shape::{Concern, Place, Slot, UnitShape, VolumeMount};
 use crate::module::want::Want;
 
 pub const COMMAND_LINE: Place = Place::Readable("a command line");
@@ -57,37 +57,32 @@ pub fn argv_list(node: &Node, what: &str, d: &mut Diagnostics) -> Option<Vec<Slo
 }
 
 /// `env` and `secret_env`. A variable may be set in one of them, not both.
+/// A value in `secret_env` must have a secret in it, so one written out in
+/// full is an error here; whether a reference brings a secret is known once
+/// it is resolved.
 pub fn environment(settings: &Fields<'_>, d: &mut Diagnostics) -> Vec<Slot> {
     let mut slots = Vec::new();
-    let plain = settings
-        .get("env")
-        .map(|node| {
-            fields::keyed(
-                node,
-                "an environment variable",
-                names::variable_name_problem,
-                d,
-            )
-        })
-        .unwrap_or_default();
+    let variables = |key: &str, d: &mut Diagnostics| {
+        settings
+            .get(key)
+            .map(|node| {
+                fields::keyed(
+                    node,
+                    "an environment variable",
+                    names::variable_name_problem,
+                    d,
+                )
+            })
+            .unwrap_or_default()
+    };
+    let plain = variables("env", d);
     for (_, node) in &plain {
         slots.extend(Slot::read(node, Want::Scalar, ENV, d));
     }
-    let secret = settings
-        .get("secret_env")
-        .map(|node| {
-            fields::keyed(
-                node,
-                "an environment variable",
-                names::variable_name_problem,
-                d,
-            )
-        })
-        .unwrap_or_default();
-    for (name, node) in &secret {
+    for (name, node) in variables("secret_env", d) {
         if let Some(first) = plain.iter().find(|(p, _)| p.name == name.name) {
             d.push(
-                crate::diagnostic::Diagnostic::new(
+                Diagnostic::new(
                     name.loc,
                     format!("`{}` is set in both `env` and `secret_env`", name.name),
                 )
@@ -97,10 +92,10 @@ pub fn environment(settings: &Fields<'_>, d: &mut Diagnostics) -> Vec<Slot> {
         let Some(expr) = expr::from_node(node, d) else {
             continue;
         };
-        if !matches!(expr.kind, ExprKind::Ref(_)) {
+        if expr.references().is_empty() {
             d.error(
                 node.loc,
-                "`secret_env` takes only a reference to a secret value; a secret written into a definition is not a secret",
+                "a value in `secret_env` must have a secret in it, and this one is written out: a secret written into a definition is not a secret",
             );
             continue;
         }
@@ -113,34 +108,74 @@ pub fn environment(settings: &Fields<'_>, d: &mut Diagnostics) -> Vec<Slot> {
     slots
 }
 
-/// `mounts`: host files or folders made visible in a container.
-pub fn mounts(node: &Node, d: &mut Diagnostics) -> (Vec<Slot>, Vec<Concern>) {
+/// `mounts`: each a host file or folder made visible in a container,
+/// `{ from, to, readonly }`, or a volume another unit owns,
+/// `{ volume: "unit/name", to, readonly }`.
+pub fn mounts(node: &Node, shape: &mut UnitShape, d: &mut Diagnostics) {
     const MOUNT: Place = Place::Readable("a mount");
-    let (mut slots, mut concerns) = (Vec::new(), Vec::new());
     let Some(items) = fields::list(node, "`mounts`", d) else {
-        return (slots, concerns);
+        return;
     };
     for item in items {
-        let Some(mount) = Fields::of(item, "a mount", &["from", "to", "readonly"], d) else {
+        let Some(mount) = Fields::of(item, "a mount", &["from", "volume", "to", "readonly"], d)
+        else {
             continue;
         };
-        if let Some(from) = mount
-            .require("from", d)
-            .and_then(|n| Slot::read(n, Want::Text, MOUNT, d))
-        {
-            concerns.push(Concern::MountsHostPath(from.expr.clone()));
-            slots.push(from);
+        match (mount.entry("from"), mount.entry("volume")) {
+            (Some((_, from)), None) => {
+                if let Some(from) = Slot::read(from, Want::Text, MOUNT, d) {
+                    shape
+                        .production
+                        .push(Concern::MountsHostPath(from.expr.clone()));
+                    shape.slots.push(from);
+                }
+            }
+            (None, Some((_, volume))) => shape.volume_mounts.extend(volume_mount(volume, d)),
+            (Some(_), Some((key, _))) => d.error(
+                key.loc,
+                "a mount has one of `from` and `volume`; this one has both",
+            ),
+            (None, None) => d.error(
+                mount.loc(),
+                "a mount needs `from`, a host file or folder, or `volume`, another unit's volume",
+            ),
         }
-        slots.extend(
+        shape.slots.extend(
             mount
                 .require("to", d)
                 .and_then(|n| Slot::read(n, Want::Text, MOUNT, d)),
         );
-        slots.extend(
+        shape.slots.extend(
             mount
                 .get("readonly")
                 .and_then(|n| Slot::read(n, Want::Bool, MOUNT, d)),
         );
     }
-    (slots, concerns)
+}
+
+/// `"unit/name"`: the unit that owns the volume, and the volume's name.
+fn volume_mount(node: &Node, d: &mut Diagnostics) -> Option<VolumeMount> {
+    let text = fields::text(node, "`volume`", d)?;
+    let Some((unit, volume)) = text.split_once('/') else {
+        d.error(
+            node.loc,
+            format!("`volume` is written `unit/name`, the unit that owns it and its name; this is `{text}`"),
+        );
+        return None;
+    };
+    let name = |name: &str, d: &mut Diagnostics| match names::name_problem(name) {
+        None => Some(NameAt {
+            name: name.to_string(),
+            loc: node.loc,
+        }),
+        Some(problem) => {
+            d.error(node.loc, format!("`volume`: {problem}"));
+            None
+        }
+    };
+    let (unit, volume) = (name(unit, d), name(volume, d));
+    Some(VolumeMount {
+        unit: unit?,
+        volume: volume?,
+    })
 }

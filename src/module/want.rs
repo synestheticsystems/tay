@@ -191,7 +191,7 @@ mod tests {
     fn a_produced_value_passes_type_checks_but_not_a_file_read_before_start() {
         assert_eq!(Want::Number.problem(&Form::Unknown), None);
         assert!(
-            Want::TemplateFile(Place::PrivateFile)
+            Want::TemplateFile(Place::FileContent)
                 .problem(&Form::Unknown)
                 .is_some()
         );

@@ -149,7 +149,7 @@ impl Planner<'_> {
             ),
             Place::SecretEnv if !value.is_secret() => self.resolver.d.error(
                 loc,
-                "`secret_env` takes only references to secret values, and this value is not secret",
+                "a value in `secret_env` must have a secret in it, and this one has none",
             ),
             _ => {}
         }

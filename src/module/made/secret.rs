@@ -12,6 +12,11 @@ pub struct Secret;
 
 const SETTING: Place = Place::Readable("a secret's settings");
 
+/// How `bytes` are written as text: `base64` is padded, `base64url` is not.
+const ENCODINGS: &[&str] = &["hex", "base64", "base64url"];
+
+const ALGORITHMS: &[&str] = &["ed25519", "rsa-2048"];
+
 impl Module for Secret {
     fn name(&self) -> &'static str {
         "secret"
@@ -27,91 +32,109 @@ impl Module for Secret {
         let settings = Fields::of(
             with,
             "the settings of a `secret` unit",
-            &["kind", "length", "algorithm"],
+            &["kind", "length", "encoding", "algorithm"],
             d,
         )?;
-        let mut slots = Vec::new();
+        let mut shape = UnitShape::new(
+            UnitKind::Made,
+            "when it has been generated",
+            RestartDefault::Never,
+        );
         // The kind decides which values the unit gives, and those names are
-        // checked before anything is resolved, so it is written out.
+        // checked before anything is resolved, so it is written out. Each is
+        // a value's name and whether it is secret.
         let kind_node = settings.require("kind", d)?;
-        let gives: &[&str] = match fields::text(kind_node, "`kind`", d)? {
-            "password" | "hex" => &["value"],
-            "keypair" => &["public", "private"],
+        let kind = fields::text(kind_node, "`kind`", d)?;
+        let gives: &[(&str, bool)] = match kind {
+            "password" | "bytes" => &[("value", true)],
+            "keypair" => &[("public", false), ("private", true)],
             other => {
                 d.error(
                     kind_node.loc,
-                    format!("`kind` is `password`, `hex` or `keypair`; this is `{other}`"),
+                    format!("`kind` is `password`, `bytes` or `keypair`; this is `{other}`"),
                 );
                 return None;
             }
         };
-        let keypair = gives.len() == 2;
-        match (settings.entry("length"), keypair) {
-            (Some((key, _)), true) => d.error(
-                key.loc,
-                "`length` is for `password` and `hex`, not `keypair`",
-            ),
-            (Some((_, length)), false) => {
-                slots.extend(Slot::read(length, Want::Number, SETTING, d))
+        let only_for = |field: &str, kinds: &[&str], d: &mut crate::diagnostic::Diagnostics| {
+            let (key, node) = settings.entry(field)?;
+            if kinds.contains(&kind) {
+                return Some(node);
             }
-            (None, _) => {}
+            let kinds: Vec<String> = kinds.iter().map(|kind| format!("`{kind}`")).collect();
+            d.error(
+                key.loc,
+                format!("`{field}` is for {}, not `{kind}`", kinds.join(" and ")),
+            );
+            None
+        };
+        if let Some(length) = only_for("length", &["password", "bytes"], d) {
+            shape
+                .slots
+                .extend(Slot::read(length, Want::Number, SETTING, d));
         }
-        match (settings.entry("algorithm"), keypair) {
-            (Some((_, algorithm)), true) => slots.extend(Slot::read(
-                algorithm,
-                Want::OneOf(&["ed25519", "rsa-2048"]),
-                SETTING,
-                d,
-            )),
-            (Some((key, _)), false) => d.error(key.loc, "`algorithm` is for `keypair`"),
-            (None, true) => d.error(
+        if let Some(encoding) = only_for("encoding", &["bytes"], d) {
+            shape
+                .slots
+                .extend(Slot::read(encoding, Want::OneOf(ENCODINGS), SETTING, d));
+        }
+        match only_for("algorithm", &["keypair"], d) {
+            Some(algorithm) => {
+                shape
+                    .slots
+                    .extend(Slot::read(algorithm, Want::OneOf(ALGORITHMS), SETTING, d))
+            }
+            None if kind == "keypair" && settings.get("algorithm").is_none() => d.error(
                 settings.loc(),
                 "a `keypair` secret needs `algorithm`: `ed25519` or `rsa-2048`",
             ),
-            (None, false) => {}
+            None => {}
         }
-        (cx.d.len() == errors_before).then(|| UnitShape {
-            kind: UnitKind::Made,
-            slots,
-            gives: gives
-                .iter()
-                .map(|name| Given {
-                    name: NameAt {
-                        name: (*name).to_string(),
-                        loc: cx.uses,
-                    },
-                    value: GivenValue::Secret,
-                })
-                .collect(),
-            outputs: Vec::new(),
-            production: Vec::new(),
-            ready_without_check: "when it has been generated",
-            restart_by_default: RestartDefault::Never,
-        })
+        shape.gives = gives
+            .iter()
+            .map(|(name, secret)| Given {
+                name: NameAt {
+                    name: (*name).to_string(),
+                    loc: cx.uses,
+                },
+                value: GivenValue::Generated { secret: *secret },
+            })
+            .collect();
+        (cx.d.len() == errors_before).then_some(shape)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::module::GivenValue;
     use crate::module::testing::check;
 
-    fn gives(with: &str) -> Vec<String> {
+    /// What the unit gives, each with whether it is secret.
+    fn gives(with: &str) -> Vec<(String, bool)> {
         check("secret", with)
             .0
             .unwrap()
             .gives
             .into_iter()
-            .map(|g| g.name.name)
+            .map(|g| {
+                let GivenValue::Generated { secret } = g.value else {
+                    panic!("a secret's values are generated");
+                };
+                (g.name.name, secret)
+            })
             .collect()
     }
 
     #[test]
-    fn the_kind_decides_what_is_given() {
-        assert_eq!(gives("kind: password\n"), ["value"]);
-        assert_eq!(gives("kind: hex\nlength: 16\n"), ["value"]);
+    fn the_kind_decides_what_is_given_and_a_public_key_is_not_secret() {
+        assert_eq!(gives("kind: password\n"), [("value".to_string(), true)]);
+        assert_eq!(
+            gives("kind: bytes\nlength: 16\nencoding: base64url\n"),
+            [("value".to_string(), true)]
+        );
         assert_eq!(
             gives("kind: keypair\nalgorithm: ed25519\n"),
-            ["public", "private"]
+            [("public".to_string(), false), ("private".to_string(), true)]
         );
     }
 
@@ -122,18 +145,20 @@ mod tests {
             errors,
             [
                 "1:1: a `keypair` secret needs `algorithm`: `ed25519` or `rsa-2048`",
-                "2:1: `length` is for `password` and `hex`, not `keypair`",
+                "2:1: `length` is for `password` and `bytes`, not `keypair`",
             ]
         );
-        let (_, errors) = check("secret", "kind: token\n");
+        let (_, errors) = check("secret", "kind: password\nencoding: hex\n");
+        assert_eq!(errors, ["2:1: `encoding` is for `bytes`, not `password`"]);
+        let (_, errors) = check("secret", "kind: hex\n");
         assert_eq!(
             errors,
-            ["1:7: `kind` is `password`, `hex` or `keypair`; this is `token`"]
+            ["1:7: `kind` is `password`, `bytes` or `keypair`; this is `hex`"]
         );
-        let (_, errors) = check("secret", "kind: keypair\nalgorithm: dsa\n");
+        let (_, errors) = check("secret", "kind: bytes\nencoding: base32\n");
         assert_eq!(
             errors,
-            ["2:12: this must be one of `ed25519`, `rsa-2048`; this is `dsa`"]
+            ["2:11: this must be one of `hex`, `base64`, `base64url`; this is `base32`"]
         );
     }
 }

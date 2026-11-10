@@ -2,17 +2,22 @@
 
 use crate::diagnostic::source::Loc;
 use crate::syntax::expr::{EnvField, Expr, ExprKind, Piece, Reference, Target};
-use crate::syntax::fields::Fields;
+use crate::syntax::fields::{self, Fields};
 use crate::syntax::names::NameAt;
 use crate::syntax::yaml::Node;
 
-use crate::module::shape::{Given, GivenValue, Place, RestartDefault, Slot, UnitKind, UnitShape};
+use crate::module::shape::{
+    Claim, Given, GivenValue, Place, RestartDefault, Slot, UnitKind, UnitShape,
+};
 use crate::module::want::Want;
 use crate::module::{Cx, Module};
 
 pub struct File;
 
-const FIELDS: &[&str] = &["content", "template", "name", "mode"];
+const FIELDS: &[&str] = &["content", "template", "name", "folder", "mode", "overwrite"];
+
+/// The folder under the state folder that file units write in.
+const FILES: &str = "files";
 
 impl Module for File {
     fn name(&self) -> &'static str {
@@ -30,26 +35,23 @@ impl Module for File {
         let errors_before = cx.d.len();
         let d = &mut *cx.d;
         let settings = Fields::of(with, "the settings of a `file` unit", FIELDS, d)?;
-        let mut slots = Vec::new();
-        let mode = settings
-            .get("mode")
-            .and_then(|node| Slot::read(node, Want::FileMode, Place::Readable("a file's mode"), d));
-        // A secret may go only into a file its owner alone can read. With no
-        // mode written, the file is made that way when it holds a secret.
-        let content_place = match &mode {
-            None => Place::PrivateFile,
-            Some(mode) if mode.expr.literal_text().as_deref() == Some("0600") => Place::PrivateFile,
-            Some(_) => Place::Readable("a file whose mode is not \"0600\""),
-        };
-        slots.extend(mode);
+        let mut shape = UnitShape::new(
+            UnitKind::Made,
+            "when it has been written",
+            RestartDefault::Never,
+        );
+        // A secret may go in the content: the file is then written for its
+        // owner alone, unless a `mode` written here says otherwise.
         match (settings.entry("content"), settings.entry("template")) {
             (Some((_, content)), None) => {
-                slots.extend(Slot::read(content, Want::Scalar, content_place, d));
+                shape
+                    .slots
+                    .extend(Slot::read(content, Want::Scalar, Place::FileContent, d));
             }
             (None, Some((_, template))) => {
-                slots.extend(Slot::read(
+                shape.slots.extend(Slot::read(
                     template,
-                    Want::TemplateFile(content_place),
+                    Want::TemplateFile(Place::FileContent),
                     Place::Readable("a file path"),
                     d,
                 ));
@@ -63,6 +65,22 @@ impl Module for File {
                 "a `file` unit needs exactly one of `content` and `template`",
             ),
         }
+        if let Some(mode) = settings.get("mode") {
+            shape.slots.extend(Slot::read(
+                mode,
+                Want::FileMode,
+                Place::Readable("a file's mode"),
+                d,
+            ));
+        }
+        if let Some(overwrite) = settings.get("overwrite") {
+            shape.slots.extend(Slot::read(
+                overwrite,
+                Want::Bool,
+                Place::Readable("a file's settings"),
+                d,
+            ));
+        }
         let name = settings
             .get("name")
             .and_then(|node| Slot::read(node, Want::FileName, Place::Readable("a file name"), d));
@@ -75,11 +93,31 @@ impl Module for File {
             },
             None => vec![Piece::Lit(cx.unit.to_string())],
         };
-        slots.extend(name);
+        shape.slots.extend(name);
+        let folder = match settings.get("folder") {
+            Some(node) => fields::name(node, "`folder`", d).map(|folder| folder.name),
+            None => Some(cx.unit.to_string()),
+        };
         if cx.d.len() != errors_before {
             return None;
         }
-        let dir = vec![state_folder(cx.uses), Piece::Lit(format!("/{}", cx.unit))];
+        let folder = folder?;
+        // Files in one folder are compared by their names as written.
+        let written_name: String = name_pieces
+            .iter()
+            .map(|piece| match piece {
+                Piece::Lit(text) => text.clone(),
+                Piece::Ref(reference) => reference.written(),
+            })
+            .collect();
+        shape.claims.push(Claim {
+            what: format!("the file `{FILES}/{folder}/{written_name}` in the state folder"),
+            loc: settings.get("name").map_or(cx.uses, |node| node.loc),
+        });
+        let dir = vec![
+            state_folder(cx.uses),
+            Piece::Lit(format!("/{FILES}/{folder}")),
+        ];
         let mut path = dir.clone();
         path.push(Piece::Lit("/".to_string()));
         path.extend(name_pieces);
@@ -93,15 +131,8 @@ impl Module for File {
                 kind: ExprKind::Text(pieces),
             }),
         };
-        Some(UnitShape {
-            kind: UnitKind::Made,
-            slots,
-            gives: vec![given("path", path), given("dir", dir)],
-            outputs: Vec::new(),
-            production: Vec::new(),
-            ready_without_check: "when it has been written",
-            restart_by_default: RestartDefault::Never,
-        })
+        shape.gives = vec![given("path", path), given("dir", dir)];
+        Some(shape)
     }
 }
 
@@ -134,43 +165,52 @@ mod tests {
             errors,
             ["2:7: this must be a file name with no folder in it; this is `conf/a`"]
         );
+        let (_, errors) = check("file", "content: x\nfolder: Conf\noverwrite: no\n");
+        assert_eq!(
+            errors,
+            [
+                "2:9: `folder`: `Conf` must start with a lower-case letter",
+                "3:12: this must be true or false; this is text",
+            ]
+        );
     }
 
     #[test]
-    fn a_secret_may_go_in_only_when_the_mode_keeps_the_file_private() {
-        let content = |with: &str| {
+    fn a_secret_may_go_in_the_content_whatever_mode_is_written() {
+        for with in ["content: x\n", "content: x\nmode: \"0644\"\n"] {
             let shape = check("file", with).0.unwrap();
-            shape
-                .slots
-                .iter()
-                .find(|s| s.want == Want::Scalar)
-                .unwrap()
-                .place
-        };
-        assert_eq!(content("content: x\n"), Place::PrivateFile);
-        assert_eq!(content("content: x\nmode: \"0600\"\n"), Place::PrivateFile);
-        assert!(matches!(
-            content("content: x\nmode: \"0644\"\n"),
-            Place::Readable(_)
-        ));
+            let content = shape.slots.iter().find(|s| s.want == Want::Scalar).unwrap();
+            assert_eq!(content.place, Place::FileContent, "{with}");
+        }
     }
 
     #[test]
-    fn it_gives_its_path_and_folder_in_the_state_folder() {
-        let (shape, _) = check("file", "content: x\nname: app.conf\n");
-        let shape = shape.unwrap();
-        let names: Vec<_> = shape.gives.iter().map(|g| g.name.name.as_str()).collect();
-        assert_eq!(names, ["path", "dir"]);
-        let GivenValue::Expr(path) = &shape.gives[0].value else {
-            panic!("the path is built from values");
+    fn it_gives_its_path_and_folder_under_files_in_the_state_folder() {
+        let written = |with: &str| {
+            let shape = check("file", with).0.unwrap();
+            let names: Vec<_> = shape.gives.iter().map(|g| g.name.name.as_str()).collect();
+            assert_eq!(names, ["path", "dir"]);
+            let GivenValue::Expr(path) = &shape.gives[0].value else {
+                panic!("the path is built from values");
+            };
+            let ExprKind::Text(pieces) = &path.kind else {
+                panic!("the path is text");
+            };
+            (
+                crate::syntax::expr::write_pieces(pieces).unwrap(),
+                shape.claims[0].what.clone(),
+            )
         };
         assert_eq!(
-            crate::syntax::expr::write_pieces(match &path.kind {
-                ExprKind::Text(pieces) => pieces,
-                _ => panic!("the path is text"),
-            })
-            .as_deref(),
-            Some("${environment.state}/the-unit/app.conf")
+            written("content: x\nname: app.conf\n"),
+            (
+                "${environment.state}/files/the-unit/app.conf".to_string(),
+                "the file `files/the-unit/app.conf` in the state folder".to_string()
+            )
+        );
+        assert_eq!(
+            written("content: x\nfolder: shared\n").0,
+            "${environment.state}/files/shared/the-unit"
         );
     }
 }

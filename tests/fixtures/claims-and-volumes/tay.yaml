@@ -1,0 +1,24 @@
+format: 1
+stack: claims-and-volumes
+up: []
+units:
+  first-config:
+    uses: file
+    with: { content: a, folder: proxy, name: routes.yaml }
+  second-config:
+    uses: file
+    with: { content: b, folder: proxy, name: routes.yaml }
+  other-config:
+    uses: file
+    with: { content: c, folder: other, name: routes.yaml }
+  database:
+    uses: container
+    with: { image: example/db, volumes: { data: /data } }
+  backup:
+    uses: container
+    with:
+      image: example/backup
+      mounts:
+        - { volume: database/data, to: /data }
+        - { volume: database/logs, to: /logs }
+        - { volume: nobody/data, to: /other }

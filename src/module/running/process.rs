@@ -5,7 +5,7 @@ use crate::syntax::names;
 use crate::syntax::yaml::Node;
 
 use super::common::{argv, argv_list, environment};
-use crate::module::shape::{Concern, Place, RestartDefault, Runs, Slot, UnitKind, UnitShape};
+use crate::module::shape::{Place, RestartDefault, Runs, Slot, UnitKind, UnitShape};
 use crate::module::want::Want;
 use crate::module::{Cx, Module};
 
@@ -39,8 +39,12 @@ impl Module for Process {
         };
         let errors_before = cx.d.len();
         let settings = Fields::of(with, "the settings of a `process` unit", FIELDS, cx.d)?;
-        let mut slots = Vec::new();
-        let mut production = Vec::new();
+        let mut shape = UnitShape::new(
+            UnitKind::Runs(Runs::OnHost),
+            "when it has started",
+            RestartDefault::OnFailure,
+        );
+        let slots = &mut shape.slots;
         if let Some(command) = settings.require("command", cx.d) {
             slots.extend(argv(command, "`command`", cx.d).unwrap_or_default());
         }
@@ -61,24 +65,10 @@ impl Module for Process {
                 cx.d,
             );
         }
-        if let Some((key, prepare)) = settings.entry("prepare") {
+        if let Some(prepare) = settings.get("prepare") {
             slots.extend(argv_list(prepare, "each command in `prepare`", cx.d).unwrap_or_default());
-            if prepare
-                .as_seq()
-                .is_some_and(|commands| !commands.is_empty())
-            {
-                production.push(Concern::Prepares(key.loc));
-            }
         }
-        (cx.d.len() == errors_before).then_some(UnitShape {
-            kind: UnitKind::Runs(Runs::OnHost),
-            slots,
-            gives: Vec::new(),
-            outputs: Vec::new(),
-            production,
-            ready_without_check: "when it has started",
-            restart_by_default: RestartDefault::OnFailure,
-        })
+        (cx.d.len() == errors_before).then_some(shape)
     }
 }
 
@@ -118,7 +108,7 @@ mod tests {
     }
 
     #[test]
-    fn preparation_is_a_production_concern_and_the_unit_runs_on_the_host() {
+    fn preparation_commands_are_values_the_unit_uses_on_the_host() {
         let (shape, errors) = check("process", "command: [a]\nprepare: [[bun, install]]\n");
         assert!(errors.is_empty(), "{errors:?}");
         let shape = shape.unwrap();
@@ -126,7 +116,6 @@ mod tests {
             shape.kind,
             crate::module::UnitKind::Runs(crate::module::Runs::OnHost)
         ));
-        assert_eq!(shape.production.len(), 1);
         assert_eq!(shape.slots.len(), 3);
     }
 }

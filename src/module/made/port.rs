@@ -43,7 +43,6 @@ impl Module for Port {
             }
         }
         (cx.d.len() == errors_before).then(|| UnitShape {
-            kind: UnitKind::Made,
             slots,
             gives: vec![Given {
                 name: NameAt {
@@ -52,10 +51,7 @@ impl Module for Port {
                 },
                 value: GivenValue::Port,
             }],
-            outputs: Vec::new(),
-            production: Vec::new(),
-            ready_without_check: "when it is held",
-            restart_by_default: RestartDefault::Never,
+            ..UnitShape::new(UnitKind::Made, "when it is held", RestartDefault::Never)
         })
     }
 }

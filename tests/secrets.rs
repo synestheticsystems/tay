@@ -9,6 +9,8 @@ const LICENCE: &str = "LICENCE-VALUE-0451";
 
 #[test]
 fn a_secret_may_go_in_secret_env_a_file_and_a_value_given() {
+    // `secret_env` takes text built around a secret, and a file whose mode
+    // is written may hold one.
     let plan = plan_json("secrets-allowed", &[]);
     let database = unit(&plan, "database");
     let dsn = given(database, "dsn");
@@ -42,7 +44,7 @@ fn a_literal_in_secret_env_is_an_error() {
     assert_eq!(
         run.errors(),
         [
-            "tay.yaml:8:28: `secret_env` takes only a reference to a secret value; a secret written into a definition is not a secret"
+            "tay.yaml:8:28: a value in `secret_env` must have a secret in it, and this one is written out: a secret written into a definition is not a secret"
         ]
     );
     assert!(!run.stderr.contains("hunter2-literal"));
@@ -57,10 +59,23 @@ fn a_secret_where_other_programs_can_read_it_is_an_error() {
         [
             "tay.yaml:9:22: a secret (`db-password.value`) cannot go in a command line: other programs can read it",
             "tay.yaml:10:24: a secret (`db-password.value`) cannot go in an environment variable in `env` (a secret goes in `secret_env`): other programs can read it",
-            "tay.yaml:11:27: `secret_env` takes only references to secret values, and this value is not secret",
+            "tay.yaml:11:27: a value in `secret_env` must have a secret in it, and this one has none",
             "tay.yaml:16:27: a secret (`db-password.value`) cannot go in a label: other programs can read it",
             "tay.yaml:17:31: a secret (`db-password.value`) cannot go in a readiness check: other programs can read it",
-            "tay.yaml:20:22: a secret (`db-password.value`) cannot go in a file whose mode is not \"0600\": other programs can read it",
+            "tay.yaml:20:45: a secret (`db-password.value`) cannot go in a container's settings: other programs can read it",
         ]
     );
+}
+
+#[test]
+fn a_key_pairs_public_key_is_not_secret_and_a_produced_value_may_be() {
+    let plan = plan_json("secrets-allowed", &[]);
+    let database = unit(&plan, "database");
+    let public = given(database, "public");
+    assert_eq!(public["secret"], false);
+    assert_eq!(public["from_host"]["text"], "<generated: signing.public>");
+    let token = given(database, "token");
+    assert_eq!(token["secret"], true);
+    assert_eq!(token["known_before_start"], false);
+    assert_eq!(token["from_host"]["text"], "<secret>");
 }

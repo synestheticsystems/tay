@@ -23,6 +23,7 @@ const FIELDS: &[&str] = &[
     "secret_env",
     "volumes",
     "mounts",
+    "tmpfs",
     "publish",
     "aliases",
     "labels",
@@ -56,11 +57,18 @@ impl Module for Container {
         let errors_before = cx.d.len();
         let d = &mut *cx.d;
         let settings = Fields::of(with, "the settings of a `container` unit", FIELDS, d)?;
-        let mut slots = Vec::new();
-        let mut production = Vec::new();
+        let published = settings
+            .get("publish")
+            .map(|node| publish_settings(node, d))
+            .unwrap_or_default();
+        let mut shape = UnitShape::new(
+            UnitKind::Runs(Runs::OwnContainer { published }),
+            "when its image's own health check passes, or when it has started if the image has none",
+            RestartDefault::OnFailure,
+        );
         match (settings.entry("image"), settings.entry("build")) {
             (Some((_, image)), None) => {
-                slots.extend(Slot::read(
+                shape.slots.extend(Slot::read(
                     image,
                     Want::Text,
                     Place::Readable("an image name"),
@@ -68,8 +76,8 @@ impl Module for Container {
                 ));
             }
             (None, Some((key, build))) => {
-                slots.extend(build_settings(build, d));
-                production.push(Concern::BuildsImage(key.loc));
+                shape.slots.extend(build_settings(build, d));
+                shape.production.push(Concern::BuildsImage(key.loc));
             }
             (Some(_), Some((key, _))) => d.error(
                 key.loc,
@@ -82,28 +90,31 @@ impl Module for Container {
         }
         for list in ["command", "entrypoint"] {
             if let Some(node) = settings.get(list) {
-                slots.extend(argv(node, &format!("`{list}`"), d).unwrap_or_default());
+                shape
+                    .slots
+                    .extend(argv(node, &format!("`{list}`"), d).unwrap_or_default());
             }
         }
-        slots.extend(environment(&settings, d));
+        shape.slots.extend(environment(&settings, d));
         if let Some(volumes) = settings.get("volumes") {
-            slots.extend(volume_settings(volumes, d));
+            volume_settings(volumes, &mut shape, d);
         }
         if let Some(mounts) = settings.get("mounts") {
-            let (mount_slots, concerns) = common::mounts(mounts, d);
-            slots.extend(mount_slots);
-            production.extend(concerns);
+            common::mounts(mounts, &mut shape, d);
         }
-        let published = settings
-            .get("publish")
-            .map(|node| publish_settings(node, d))
-            .unwrap_or_default();
+        if let Some(tmpfs) = settings.get("tmpfs")
+            && let Some(paths) = fields::list(tmpfs, "`tmpfs`", d)
+        {
+            for path in paths {
+                shape.slots.extend(Slot::read(path, Want::Text, SETTING, d));
+            }
+        }
         if let Some(aliases) = settings.get("aliases") {
             fields::name_list(aliases, "an alias", names::name_problem, d);
         }
         if let Some(labels) = settings.get("labels") {
             for (_, label) in fields::keyed(labels, "a label", label_key_problem, d) {
-                slots.extend(Slot::read(
+                shape.slots.extend(Slot::read(
                     label,
                     Want::Scalar,
                     Place::Readable("a label"),
@@ -119,25 +130,17 @@ impl Module for Container {
             ("pids_limit", Want::Number),
         ] {
             if let Some(node) = settings.get(field) {
-                slots.extend(Slot::read(node, want, SETTING, d));
+                shape.slots.extend(Slot::read(node, want, SETTING, d));
             }
         }
         if let Some(options) = settings.get("security_opt")
             && let Some(items) = fields::list(options, "`security_opt`", d)
         {
             for item in items {
-                slots.extend(Slot::read(item, Want::Text, SETTING, d));
+                shape.slots.extend(Slot::read(item, Want::Text, SETTING, d));
             }
         }
-        (cx.d.len() == errors_before).then_some(UnitShape {
-            kind: UnitKind::Runs(Runs::OwnContainer { published }),
-            slots,
-            gives: Vec::new(),
-            outputs: Vec::new(),
-            production,
-            ready_without_check: "when its image's own health check passes, or when it has started if the image has none",
-            restart_by_default: RestartDefault::OnFailure,
-        })
+        (cx.d.len() == errors_before).then_some(shape)
     }
 }
 
@@ -170,27 +173,30 @@ fn build_settings(node: &Node, d: &mut Diagnostics) -> Vec<Slot> {
     slots
 }
 
-fn volume_settings(node: &Node, d: &mut Diagnostics) -> Vec<Slot> {
+/// `volumes`: the named volumes the unit owns, each a path in the
+/// container, or `{ to, owner }`.
+fn volume_settings(node: &Node, shape: &mut UnitShape, d: &mut Diagnostics) {
     const VOLUME: Place = Place::Readable("a volume");
-    let mut slots = Vec::new();
-    for (_, volume) in fields::keyed(node, "a volume", names::name_problem, d) {
+    for (name, volume) in fields::keyed(node, "a volume", names::name_problem, d) {
+        shape.volumes.push(name);
         if volume.as_map().is_none() {
-            slots.extend(Slot::read(volume, Want::Text, VOLUME, d));
+            shape
+                .slots
+                .extend(Slot::read(volume, Want::Text, VOLUME, d));
             continue;
         }
         let Some(long) = Fields::of(volume, "a volume", &["to", "owner"], d) else {
             continue;
         };
-        slots.extend(
+        shape.slots.extend(
             long.require("to", d)
                 .and_then(|n| Slot::read(n, Want::Text, VOLUME, d)),
         );
-        slots.extend(
+        shape.slots.extend(
             long.get("owner")
                 .and_then(|n| Slot::read(n, Want::Number, VOLUME, d)),
         );
     }
-    slots
 }
 
 /// `publish`: container ports, as keys, each made reachable at a host port
@@ -310,6 +316,35 @@ mod tests {
         assert!(
             errors[1].starts_with("2:21: a key of `publish`"),
             "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn a_mount_is_a_host_path_or_another_units_volume_and_volumes_are_owned() {
+        let (shape, errors) = check(
+            "container",
+            "image: app\nvolumes: { cache: /cache }\nmounts:\n  - { from: config, to: /config }\n  - { volume: database/data, to: /data }\ntmpfs: [/tmp]\n",
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+        let shape = shape.unwrap();
+        assert_eq!(shape.volumes[0].name, "cache");
+        let mounted = &shape.volume_mounts[0];
+        assert_eq!(
+            (mounted.unit.name.as_str(), mounted.volume.name.as_str()),
+            ("database", "data")
+        );
+        // Only the host path is something a production profile looks at.
+        assert_eq!(shape.production.len(), 1);
+        let (_, errors) = check(
+            "container",
+            "image: app\nmounts:\n  - { volume: data, to: /data }\n  - { from: a, volume: b/c, to: /x }\n",
+        );
+        assert_eq!(
+            errors,
+            [
+                "3:15: `volume` is written `unit/name`, the unit that owns it and its name; this is `data`",
+                "4:16: a mount has one of `from` and `volume`; this one has both",
+            ]
         );
     }
 

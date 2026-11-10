@@ -4,7 +4,7 @@
 
 use crate::definition::{Check, Choices, GiveValue, SettingValue, Stack, Unit, Way};
 use crate::diagnostic::{Diagnostic, Diagnostics};
-use crate::module::{GivenValue, Runs, UnitKind};
+use crate::module::{GivenValue, Runs, UnitKind, VolumeMount};
 use crate::syntax::expr::{Expr, Part, Reference, Target, UnitRef, View};
 use crate::syntax::names::NameAt;
 
@@ -13,6 +13,13 @@ pub fn check(stack: &Stack, places: &[&Choices], d: &mut Diagnostics) {
         for way in &unit.ways {
             for name in way.needs.iter().chain(&way.after) {
                 unit_named(stack, name, d);
+            }
+            for mounted in way
+                .module
+                .iter()
+                .flat_map(|module| &module.shape.volume_mounts)
+            {
+                volume_owned(stack, mounted, d);
             }
             if let Some(module) = &way.module
                 && let UnitKind::Runs(Runs::InsideUnit(inner)) = &module.shape.kind
@@ -208,6 +215,46 @@ fn reference_target(
         ),
         Target::Environment(_) | Target::HostListen => {}
     }
+}
+
+/// A mounted volume belongs to a unit that owns a volume of that name, in
+/// one of its ways.
+fn volume_owned(stack: &Stack, mounted: &VolumeMount, d: &mut Diagnostics) {
+    let Some(owner) = unit_named(stack, &mounted.unit, d) else {
+        return;
+    };
+    if owner.ways.is_empty() {
+        return;
+    }
+    let mut owned: Vec<&str> = owner
+        .ways
+        .iter()
+        .filter_map(|way| way.module.as_ref())
+        .flat_map(|module| module.shape.volumes.iter().map(|v| v.name.as_str()))
+        .collect();
+    if owned.contains(&mounted.volume.name.as_str()) {
+        return;
+    }
+    owned.sort_unstable();
+    owned.dedup();
+    let list = match owned.as_slice() {
+        [] => "it owns none".to_string(),
+        names => format!(
+            "its volumes are {}",
+            names
+                .iter()
+                .map(|n| format!("`{n}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    };
+    d.error(
+        mounted.volume.loc,
+        format!(
+            "unit `{}` owns no volume `{}`; {list}",
+            owner.name.name, mounted.volume.name
+        ),
+    );
 }
 
 /// The unit a view names after `@` exists and runs in some way; under the

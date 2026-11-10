@@ -15,7 +15,7 @@ units:
       image: example/box
       labels: { password: "${db-password.value}" }
     ready: { command: [check, "${db-password.value}"], within: 1m }
-  shared-file:
-    uses: file
-    with: { content: "${db-password.value}", mode: "0644" }
-  all: { needs: [app, box, shared-file] }
+  shared:
+    uses: container
+    with: { image: example/shared, workdir: "${db-password.value}" }
+  all: { needs: [app, box, shared] }

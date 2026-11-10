@@ -37,9 +37,6 @@ impl Planner<'_> {
                     Concern::BuildsImage(loc) => {
                         refusals.push((*loc, "it builds an image".to_string()))
                     }
-                    Concern::Prepares(loc) => {
-                        refusals.push((*loc, "it runs preparation commands".to_string()));
-                    }
                     Concern::MountsHostPath(from) => {
                         let asker = Asker::of(&module.shape.kind);
                         if let Some(why) = self.mount_outside(chosen.unit, from, asker) {

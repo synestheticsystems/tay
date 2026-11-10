@@ -20,10 +20,8 @@ fn each_thing_the_format_lists_is_refused_naming_its_unit() {
     assert_eq!(
         run.errors(),
         [
-            // A process, which runs on the host, with preparation commands.
+            // A process, which runs on the host.
             "tay.yaml:8:5: the production profile `deploy` refuses unit `site`: it runs on the host",
-            marked,
-            "tay.yaml:9:31: the production profile `deploy` refuses unit `site`: it runs preparation commands",
             marked,
             // A command run on the host.
             "tay.yaml:11:5: the production profile `deploy` refuses unit `migrate`: it runs on the host",

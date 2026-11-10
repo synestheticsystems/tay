@@ -12,6 +12,13 @@ pub enum Hole {
     /// A port this environment has not allocated yet.
     Port(String),
     Secret,
+    /// A value generated once and kept, such as a key pair's public key,
+    /// that is not secret but is not made until the environment is first
+    /// brought up.
+    Generated {
+        unit: String,
+        name: String,
+    },
     /// A value a unit writes out when it runs.
     Produced {
         unit: String,
@@ -32,6 +39,7 @@ impl Hole {
         match self {
             Hole::Port(unit) => format!("<port: {unit}>"),
             Hole::Secret => "<secret>".to_string(),
+            Hole::Generated { unit, name } => format!("<generated: {unit}.{name}>"),
             Hole::Produced { unit, name } => format!("<produced: {unit}.{name}>"),
             Hole::Output { unit, name } => format!("<output: {unit}.{name}>"),
             Hole::HostListen => "<host.listen>".to_string(),

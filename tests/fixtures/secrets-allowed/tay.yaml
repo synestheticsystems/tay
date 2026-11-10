@@ -5,17 +5,28 @@ settings:
 units:
   db-password: { uses: secret, with: { kind: password } }
   signing: { uses: secret, with: { kind: keypair, algorithm: ed25519 } }
+  issuer:
+    uses: command
+    with: { run: [issue], produces: { token: { secret: true }, id: {} } }
   database:
     uses: container
     with:
       image: example/db
+      env: { PUBLIC_KEY: "${signing.public}" }
       secret_env:
         PASSWORD: "${db-password.value}"
         LICENCE: "${settings.licence_key}"
+        DSN: "db://app:${db-password.value}@database/app"
+        TOKEN: "${issuer.token}"
     gives:
       dsn: "db://app:${db-password.value}@database/app"
       licence: "${settings.licence_key}"
+      public: "${signing.public}"
+      token: "${issuer.token}"
   credentials:
     uses: file
     with: { content: "password=${db-password.value}" }
-  all: { needs: [database, credentials] }
+  shared-credentials:
+    uses: file
+    with: { content: "password=${db-password.value}", mode: "0644" }
+  all: { needs: [database, credentials, shared-credentials] }

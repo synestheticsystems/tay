@@ -8,6 +8,7 @@ mod settings;
 mod unit;
 mod version;
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use crate::definition::{Choices, Profile, Stack, Unit};
@@ -87,6 +88,7 @@ pub fn read(root: &Path, sources: &mut Sources, d: &mut Diagnostics) -> Outcome 
     }
     units.extend(reader.unit_files(units_dir, &templates));
     let units = unique_units(units, reader.d);
+    unique_claims(&units, reader.d);
     let profiles = reader.profiles(profiles_dir);
     check_default_profile(node.loc, default_profile.as_ref(), &profiles, reader.d);
     let environment_choices = reader.environment_choices();
@@ -148,6 +150,37 @@ fn unique_units(units: Vec<Unit>, d: &mut Diagnostics) -> Vec<Unit> {
         }
     }
     kept
+}
+
+/// No two units make the same thing, such as a file at one place in the
+/// state folder. The ways of one unit may, since only one of them runs.
+fn unique_claims(units: &[Unit], d: &mut Diagnostics) {
+    let mut first: HashMap<&str, (&str, Loc)> = HashMap::new();
+    for unit in units {
+        let claims = unit
+            .ways
+            .iter()
+            .filter_map(|way| way.module.as_ref())
+            .flat_map(|module| &module.shape.claims);
+        for claim in claims {
+            match first.get(claim.what.as_str()) {
+                Some((owner, _)) if *owner == unit.name.name => {}
+                Some((owner, at)) => d.push(
+                    Diagnostic::new(
+                        claim.loc,
+                        format!(
+                            "unit `{}` makes {}, as unit `{owner}` does",
+                            unit.name.name, claim.what
+                        ),
+                    )
+                    .with(*at, format!("`{owner}` makes it here")),
+                ),
+                None => {
+                    first.insert(&claim.what, (&unit.name.name, claim.loc));
+                }
+            }
+        }
+    }
 }
 
 fn check_default_profile(
