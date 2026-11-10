@@ -6,7 +6,7 @@
 use super::left::docker_of;
 use super::{ContainerSettings, volume_name};
 use crate::disk::Environment;
-use crate::module::operations::{Failure, Keeping, Removing, UnitPlace};
+use crate::module::operations::{Failure, Keeping, PartlyRemoved, Removing, UnitPlace};
 use crate::module::running::{RECORD, remove_record};
 use crate::module::settings::Keeps;
 use crate::value::{Filled, Placeholder, Unfilled, Value};
@@ -35,8 +35,12 @@ impl Keeps for ContainerSettings<Value> {
             .map(|volume| volume_name(&place, &place.unit, &volume.name.name))
             .collect();
         Ok(Box::pin(async move {
-            remove_volumes(&place.environment, &names).await?;
-            remove_record(&place)
+            for (removed, name) in names.iter().enumerate() {
+                remove_volumes(&place.environment, std::slice::from_ref(name))
+                    .await
+                    .map_err(PartlyRemoved::after(removed))?;
+            }
+            remove_record(&place).map_err(PartlyRemoved::after(names.len()))
         }))
     }
 }

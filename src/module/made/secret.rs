@@ -13,7 +13,7 @@ use crate::module::description::OpenedPort;
 use crate::module::description::{
     Description, ModuleGive, ModuleValue, ReadyWithoutCheck, RestartOn, UnitKind,
 };
-use crate::module::operations::{Keeping, Operations, Removing, UnitPlace};
+use crate::module::operations::{Keeping, Operations, PartlyRemoved, Removing, UnitPlace};
 use crate::module::settings::{Destination, Keeps, MapValues, Operate, Slot, maybe};
 use crate::module::want::Want;
 use crate::module::{Cx, Module};
@@ -100,7 +100,7 @@ impl Keeps for SecretSettings<Value> {
         _: &mut dyn FnMut(&Placeholder) -> Result<Filled, Unfilled>,
     ) -> Result<Removing, Unfilled> {
         Ok(Box::pin(async move {
-            Ok(remove_if_there(&generate::path(&place))?)
+            remove_if_there(&generate::path(&place)).map_err(PartlyRemoved::after(0))
         }))
     }
 }

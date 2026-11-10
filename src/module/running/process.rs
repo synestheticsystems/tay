@@ -14,7 +14,7 @@ use super::variables::{Variables, variables};
 use super::{RECORD, remove_record};
 use crate::module::description::OpenedPort;
 use crate::module::description::{Description, ReadyWithoutCheck, RestartOn, Runs, UnitKind};
-use crate::module::operations::{Keeping, Operations, Removing, UnitPlace};
+use crate::module::operations::{Keeping, Operations, PartlyRemoved, Removing, UnitPlace};
 use crate::module::settings::{Destination, Keeps, MapValues, Operate, Slot, each, maybe};
 use crate::module::want::{PathUse, Want};
 use crate::module::{Cx, Module};
@@ -90,7 +90,9 @@ impl Keeps for ProcessSettings<Value> {
         place: UnitPlace,
         _: &mut dyn FnMut(&Placeholder) -> Result<Filled, Unfilled>,
     ) -> Result<Removing, Unfilled> {
-        Ok(Box::pin(async move { remove_record(&place) }))
+        Ok(Box::pin(async move {
+            remove_record(&place).map_err(PartlyRemoved::after(0))
+        }))
     }
 }
 

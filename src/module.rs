@@ -21,8 +21,8 @@ pub use description::{
     RestartOn, Runs, UnitKind, VolumeMount,
 };
 pub use operations::{
-    Driving, Exists, Found, Keeping, Made, Operations, Outcome, Running, Step, UnderWay, UnitPlace,
-    Values,
+    Driving, Exists, Found, Keeping, Made, Operations, Outcome, PartlyRemoved, Running, Step,
+    UnderWay, UnitPlace, Values,
 };
 pub use running::command_line::argv;
 pub use running::container::{HOST_IN_CONTAINERS, HOST_LISTEN_BEFORE_START, Occasion, host_listen};

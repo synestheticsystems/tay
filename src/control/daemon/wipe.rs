@@ -1,9 +1,11 @@
 //! Wiping: `tay wipe --yes` as the daemon makes it. Of units named, each
-//! running unit that needs one is stopped, then each named unit, then what
-//! each keeps is removed, as its module answers, and on an environment
-//! meant to be up everything is brought up again as `tay up` would. A unit
-//! whose removal runs something of its own, as a command's `undo`, needs
-//! what it needs to be up, and the wipe is refused when it is not. With
+//! running unit that needs one, directly or through others, or that mounts
+//! one of its volumes, is stopped, then each named unit, then what each
+//! keeps is removed, as its module answers, and on an environment meant to
+//! be up everything is brought up again as `tay up` would. A removal that
+//! fails stops the wipe, which says what was removed and what was not. A
+//! unit whose removal runs something of its own, as a command's `undo`,
+//! needs what it needs to be up, and the wipe is refused when it is not. With
 //! `--all`, the environment is taken down and everything it keeps removed:
 //! every volume, and `.tay/` but for `choices.yaml`; then the daemon exits.
 
@@ -15,16 +17,17 @@ use super::change::{Change, NotBegun};
 use super::down::Down;
 use super::{Daemon, log, options};
 use crate::control::protocol::{Event, FOLDER_WIPED, LISTING_WIPED, Refused};
+use crate::diagnostic::quoted_list;
 use crate::disk::{Asked, Intent, List};
 use crate::engine::{State, UnitState, runs};
 use crate::module;
 use crate::plan::PlannedUnit;
 
-/// What a wipe of units acts on: the units named, and each that needs one
-/// of them, in the order units start in.
+/// What a wipe of units acts on: the units named, and each that would hold
+/// what one of them keeps, in the order units start in.
 pub struct Wiping {
     named: Vec<Arc<PlannedUnit>>,
-    needing: Vec<Arc<PlannedUnit>>,
+    holding: Vec<Arc<PlannedUnit>>,
     /// The home folder whose choices the stack is planned with again.
     home: Option<PathBuf>,
 }
@@ -53,10 +56,10 @@ impl Daemon {
             }
             named.push(Arc::clone(&known.planned));
         }
-        let needing = table.needing(units);
+        let holding = table.holding(units);
         let stopped = |unit: &str| {
             units.iter().any(|named| named == unit)
-                || needing.iter().any(|needing| needing.name == unit)
+                || holding.iter().any(|holding| holding.name == unit)
         };
         for planned in &named {
             if !self.supervisor.kept(planned).runs {
@@ -78,27 +81,27 @@ impl Daemon {
         }
         Ok(Wiping {
             named,
-            needing,
+            holding,
             home,
         })
     }
 
-    /// Stops each unit that needs one named and each named, removes what
-    /// each named keeps, and brings everything up again if the environment
-    /// is meant to be up, telling `change`'s followers each change of state
-    /// and what was removed.
+    /// Stops each unit that would hold what one named keeps and each named,
+    /// removes what each named keeps, and brings everything up again if
+    /// the environment is meant to be up, telling `change`'s followers each
+    /// change of state and what was removed.
     pub async fn wipe(self: Arc<Self>, change: Arc<Change>, wiping: Wiping) {
         log(&format!("change: {}", change.describe()));
         change.say(Event::Units {
-            units: (wiping.needing.iter())
+            units: (wiping.holding.iter())
                 .chain(&wiping.named)
                 .map(|planned| planned.name.clone())
                 .collect(),
         });
         // What holds what is removed is stopped first, the last to start
         // the first to stop.
-        let needing = wiping.needing.iter().rev();
-        let running = needing.filter(|planned| self.supervisor.is_tended(&planned.name));
+        let holding = wiping.holding.iter().rev();
+        let running = holding.filter(|planned| self.supervisor.is_tended(&planned.name));
         for planned in running.chain(wiping.named.iter().rev()) {
             if runs(planned).is_none() {
                 continue;
@@ -111,12 +114,31 @@ impl Daemon {
             let stopped = UnitState::new(State::Stopped, "stopped by `tay wipe`");
             self.supervisor.record(&planned.name, stopped, None);
         }
-        for planned in &wiping.named {
+        for (index, planned) in wiping.named.iter().enumerate() {
             let kept = self.supervisor.kept(planned);
-            if let Err(why) = self.supervisor.wipe(planned).await {
+            if let Err(partly) = self.supervisor.wipe(planned).await {
+                let (removed, not_removed) =
+                    kept.what.split_at(partly.removed.min(kept.what.len()));
+                if !removed.is_empty() {
+                    change.say(Event::Removed {
+                        unit: Some(planned.name.clone()),
+                        removed: removed.to_vec(),
+                    });
+                }
+                let not_reached = &wiping.named[index + 1..];
+                let nor = match not_reached {
+                    [] => String::new(),
+                    [one] => format!(", nor what `{}` keeps", one.name),
+                    _ => format!(
+                        ", nor what {} keep",
+                        quoted_list(not_reached.iter().map(|planned| planned.name.as_str()))
+                    ),
+                };
                 let reason = format!(
-                    "what `{}` keeps could not be removed: {why}; what was stopped for the wipe stays stopped until `tay up`",
-                    planned.name
+                    "what `{}` keeps could not be removed: {}; not removed: {}{nor}; what was stopped for the wipe stays stopped until `tay up`",
+                    planned.name,
+                    partly.failure,
+                    not_removed.join("; "),
                 );
                 self.fail(&change, &reason);
                 return;

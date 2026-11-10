@@ -126,6 +126,9 @@ impl<'s> Planner<'s> {
             restart: restart?,
             watch: watch.into_iter().collect::<Option<_>>()?,
             publishes: Vec::new(),
+            mounts_volumes_of: (description.volume_mounts.iter())
+                .map(|mounted| mounted.unit.name.clone())
+                .collect(),
         })
     }
 

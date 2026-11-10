@@ -14,7 +14,7 @@ use crate::module::description::OpenedPort;
 use crate::module::description::{
     Description, ModuleGive, ModuleValue, ReadyWithoutCheck, RestartOn, UnitKind,
 };
-use crate::module::operations::{Keeping, Operations, Removing, UnitPlace};
+use crate::module::operations::{Keeping, Operations, PartlyRemoved, Removing, UnitPlace};
 use crate::module::settings::{Destination, Keeps, MapValues, Operate, Slot};
 use crate::module::want::Want;
 use crate::module::{Cx, Module};
@@ -77,12 +77,13 @@ impl Keeps for PortSettings<Value> {
         Ok(Box::pin(async move {
             // The machine's list is changed under its lock, which may be
             // waited for.
-            let forgotten = tokio::task::spawn_blocking(move || {
+            tokio::task::spawn_blocking(move || {
                 Ports::lock(&place.environment)?.forget(&place.unit)
             })
             .await
-            .map_err(|error| PortPanicked(error.to_string()))?;
-            Ok(forgotten?)
+            .map_err(|error| PortPanicked(error.to_string()))
+            .map_err(PartlyRemoved::after(0))?
+            .map_err(PartlyRemoved::after(0))
         }))
     }
 }

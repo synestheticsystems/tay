@@ -88,6 +88,8 @@ pub struct PlannedMechanism {
     /// The ports a unit in a container of its own publishes, each opened or
     /// not.
     pub publishes: Vec<PublishedPort>,
+    /// The units whose volumes it mounts.
+    pub mounts_volumes_of: Vec<String>,
 }
 
 impl PlannedMechanism {

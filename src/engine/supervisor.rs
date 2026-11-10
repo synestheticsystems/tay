@@ -22,7 +22,9 @@ use super::state::{State, UnitState};
 use super::units::Units;
 use crate::disk::unit_log::UnitLog;
 use crate::disk::{Counts, Environment};
-use crate::module::{self, Keeping, Occasion, Running, Runs, UnitKind, UnitPlace, Values};
+use crate::module::{
+    self, Keeping, Occasion, PartlyRemoved, Running, Runs, UnitKind, UnitPlace, Values,
+};
 use crate::plan::PlannedUnit;
 use crate::value::{Filled, Placeholder, Unfilled};
 
@@ -300,9 +302,9 @@ impl Supervisor {
     }
 
     /// Removes what `planned` keeps, once it is stopped, filling what
-    /// removing it uses from the values of the units that are ready; why
-    /// not, when it could not be.
-    pub async fn wipe(&self, planned: &PlannedUnit) -> Result<(), String> {
+    /// removing it uses from the values of the units that are ready; how
+    /// far it came, when something could not be removed.
+    pub async fn wipe(&self, planned: &PlannedUnit) -> Result<(), PartlyRemoved> {
         let Some(mechanism) = &planned.mechanism else {
             return Ok(());
         };
@@ -311,8 +313,8 @@ impl Supervisor {
         let removing = mechanism
             .settings
             .wipe(place, &mut |placeholder| self.fill(placeholder, &given))
-            .map_err(|why| why.to_string())?;
-        removing.await.map_err(|failure| failure.to_string())
+            .map_err(PartlyRemoved::after(0))?;
+        removing.await
     }
 
     /// Where `unit` is acted on.

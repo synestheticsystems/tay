@@ -37,9 +37,30 @@ pub struct Keeping {
     pub runs: bool,
 }
 
-/// What a unit keeps being removed: it ends with why it could not be, when
-/// it could not.
-pub type Removing = Pin<Box<dyn Future<Output = Result<(), Failure>> + Send>>;
+/// What a unit keeps being removed, in the order [`Keeping::what`] lists
+/// it: it stops at the first thing that could not be removed, and ends
+/// with how far it came.
+pub type Removing = Pin<Box<dyn Future<Output = Result<(), PartlyRemoved>> + Send>>;
+
+/// Removing what a unit keeps stopped at something that could not be
+/// removed: how many of the things [`Keeping::what`] lists, from the
+/// first, were removed before it, and why it could not be.
+#[derive(Debug)]
+pub struct PartlyRemoved {
+    pub removed: usize,
+    pub failure: Failure,
+}
+
+impl PartlyRemoved {
+    /// What a failure to remove the next thing, once `removed` things were,
+    /// comes to.
+    pub fn after<E: Into<Failure>>(removed: usize) -> impl FnOnce(E) -> PartlyRemoved {
+        move |failure| PartlyRemoved {
+            removed,
+            failure: failure.into(),
+        }
+    }
+}
 
 /// Where a module acts for a unit: the unit, and the environment it is in.
 #[derive(Clone)]

@@ -2,7 +2,7 @@
 //! and its record. Wiping it runs its `undo` where its steps run, which
 //! needs what it needs to be up, and then forgets the rest.
 
-use crate::module::operations::{Keeping, Removing, UnitPlace};
+use crate::module::operations::{Keeping, PartlyRemoved, Removing, UnitPlace};
 use crate::module::running::{RECORD, remove_record};
 use crate::module::settings::{Keeps, filled};
 use crate::value::{Filled, Placeholder, Unfilled, Value};
@@ -36,14 +36,21 @@ impl Keeps for CommandSettings<Value> {
             Some(_) => Some(filled(self, fill)?),
             None => None,
         };
+        let values_kept = self.keeps_values && !self.produces.is_empty();
         Ok(Box::pin(async move {
+            let mut removed = 0;
             if let Some(undoing) = undoing
                 && let Some(undo) = &undoing.undo
             {
-                undoing.undo(&place, undo).await?;
+                undoing
+                    .undo(&place, undo)
+                    .await
+                    .map_err(PartlyRemoved::after(removed))?;
+                removed += 1;
             }
-            produced::forget(&place)?;
-            remove_record(&place)
+            produced::forget(&place).map_err(PartlyRemoved::after(removed))?;
+            removed += usize::from(values_kept);
+            remove_record(&place).map_err(PartlyRemoved::after(removed))
         }))
     }
 }
