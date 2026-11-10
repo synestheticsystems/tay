@@ -113,3 +113,21 @@ fn planning_writes_nothing_even_where_the_environment_has_its_folder() {
     assert_eq!(plan("secrets-allowed", &["--json"]).code, 0);
     assert_eq!(snapshot(&root), before);
 }
+
+#[test]
+fn a_reader_that_closes_its_end_ends_the_printing_quietly() {
+    // The read end is closed before tay prints, as `tay plan | head` closes
+    // it once `head` has read enough.
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_tay"))
+        .args(["plan", "--root"])
+        .arg(fixture("shop"))
+        .env("HOME", home())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("the tay binary runs");
+    drop(child.stdout.take());
+    let output = child.wait_with_output().expect("tay ends");
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(String::from_utf8_lossy(&output.stderr), "");
+}

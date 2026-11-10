@@ -1,6 +1,7 @@
 //! The command line: `tay plan`, `tay --version` and `tay --help`.
 
 mod output;
+mod print;
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -11,6 +12,7 @@ use crate::diagnostic::Diagnostics;
 use crate::diagnostic::source::Sources;
 use crate::plan::{self, Options, Outcome};
 use output::{json, text};
+use print::{err, out};
 
 /// The plan is sound.
 const SOUND: u8 = 0;
@@ -51,38 +53,42 @@ errors; 3 this tay is too old for the definitions.
 pub fn run(args: impl IntoIterator<Item = OsString>) -> ExitCode {
     let mut args = args.into_iter();
     let Some(verb) = args.next() else {
-        eprint!("{HELP}");
+        err(HELP);
         return ExitCode::from(ERRORS);
     };
     match verb.to_str() {
         Some("--help" | "-h" | "help") => {
-            print!("{HELP}");
+            out(HELP);
             ExitCode::from(SOUND)
         }
         Some("--version" | "-V") => {
-            println!("tay {THIS_TAY}");
+            out(&format!("tay {THIS_TAY}\n"));
             ExitCode::from(SOUND)
         }
         Some("plan") => match PlanArgs::parse(args) {
             Ok(Some(plan_args)) => plan_args.run(),
             Ok(None) => {
-                print!("{HELP}");
+                out(HELP);
                 ExitCode::from(SOUND)
             }
             Err(message) => {
-                eprintln!("tay plan: {message}\nRun `tay --help` for how to use it.");
+                err(&format!(
+                    "tay plan: {message}\nRun `tay --help` for how to use it.\n"
+                ));
                 ExitCode::from(ERRORS)
             }
         },
         Some(other) if other.starts_with('-') => {
-            eprintln!("tay: unknown option `{other}`\nRun `tay --help` for how to use it.");
+            err(&format!(
+                "tay: unknown option `{other}`\nRun `tay --help` for how to use it.\n"
+            ));
             ExitCode::from(ERRORS)
         }
         _ => {
-            eprintln!(
-                "tay {}: not built yet. This version of tay reads a stack's definitions and plans it (`tay plan`); it starts nothing.",
+            err(&format!(
+                "tay {}: not built yet. This version of tay reads a stack's definitions and plans it (`tay plan`); it starts nothing.\n",
                 verb.to_string_lossy()
-            );
+            ));
             ExitCode::from(ERRORS)
         }
     }
@@ -168,7 +174,7 @@ impl PlanArgs {
                 if self.json {
                     print_json(&json::plan(&plan));
                 } else {
-                    print!("{}", text::plan(&plan));
+                    out(&text::plan(&plan));
                 }
                 ExitCode::from(SOUND)
             }
@@ -178,13 +184,15 @@ impl PlanArgs {
                     print_json(&json::errors("errors", &errors, &sources));
                 } else {
                     for error in &errors {
-                        eprintln!("{}", error.render(&sources));
+                        err(&format!("{}\n", error.render(&sources)));
                     }
                     let count = match errors.len() {
                         1 => "1 error".to_string(),
                         n => format!("{n} errors"),
                     };
-                    eprintln!("tay plan: {count} in the definitions; there is no plan.");
+                    err(&format!(
+                        "tay plan: {count} in the definitions; there is no plan.\n"
+                    ));
                 }
                 ExitCode::from(ERRORS)
             }
@@ -193,7 +201,7 @@ impl PlanArgs {
                     print_json(&json::errors("too_old", &reasons, &sources));
                 } else {
                     for reason in &reasons {
-                        eprintln!("{}", reason.render(&sources));
+                        err(&format!("{}\n", reason.render(&sources)));
                     }
                 }
                 ExitCode::from(TOO_OLD)
@@ -205,15 +213,13 @@ impl PlanArgs {
         if self.json {
             print_json(&json::error_without_place(message));
         } else {
-            eprintln!("tay plan: {message}");
+            err(&format!("tay plan: {message}\n"));
         }
         ExitCode::from(ERRORS)
     }
 }
 
 fn print_json(value: &serde_json::Value) {
-    println!(
-        "{}",
-        serde_json::to_string_pretty(value).expect("a JSON value always serializes")
-    );
+    let json = serde_json::to_string_pretty(value).expect("a JSON value always serializes");
+    out(&format!("{json}\n"));
 }
