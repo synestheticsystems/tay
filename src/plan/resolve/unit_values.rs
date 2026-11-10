@@ -153,7 +153,7 @@ impl Resolver<'_> {
         let path = self.remembered(key, None, reference.loc, Asker::Host, |this| {
             this.resolve(&output.path, scope)
         })?;
-        let mut value = self.host_path(path, output.path.loc);
+        let mut value = self.host_path(path);
         value
             .producers
             .insert(unit_name.clone(), format!("{unit_name}.outputs.{name}"));

@@ -4,6 +4,7 @@
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
+use crate::diagnostic::source::SourceId;
 use crate::value::Value;
 
 /// A published port a value reaches from the host.
@@ -31,6 +32,9 @@ pub struct Resolved {
     /// Whether it begins with a setting's value, written there directly or
     /// reached through a value that begins with one.
     pub begins_with_setting: bool,
+    /// Where the text it begins with was written, which a path beginning
+    /// `./` is relative to; `None` when it begins with nothing written.
+    pub written_in: Option<SourceId>,
 }
 
 impl Resolved {
@@ -41,6 +45,7 @@ impl Resolved {
             made: BTreeMap::new(),
             published_uses: BTreeSet::new(),
             begins_with_setting: false,
+            written_in: None,
         }
     }
 

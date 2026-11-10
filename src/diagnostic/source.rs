@@ -52,24 +52,6 @@ impl Sources {
     pub fn get(&self, id: SourceId) -> &Source {
         &self.list[id.0 as usize]
     }
-
-    /// The folder each source's file is in, by source; `None` for a
-    /// command-line argument.
-    pub fn folders(&self) -> Vec<Option<PathBuf>> {
-        self.list
-            .iter()
-            .map(|source| match source {
-                Source::File { path, .. } => path.parent().map(Path::to_path_buf),
-                Source::Argument { .. } => None,
-            })
-            .collect()
-    }
-}
-
-impl SourceId {
-    pub fn index(self) -> usize {
-        self.0 as usize
-    }
 }
 
 /// A position in a source: line and column, both counted from 1, columns in characters.

@@ -36,7 +36,7 @@ impl Resolver<'_> {
         let Some(decl) = self.stack.setting(name) else {
             return self.fail(at, format!("no setting `{name}` is declared in tay.yaml"));
         };
-        let value = match (self.layered.settings.get(name), &decl.default) {
+        let written = match (self.layered.settings.get(name), &decl.default) {
             (Some(value), _) => value.clone(),
             (None, Some(default)) => SettingValue::Written(default.clone()),
             (None, None) => {
@@ -45,7 +45,7 @@ impl Resolver<'_> {
             }
         };
         // A value of the wrong type was reported where it is written.
-        let literal = value.typed(decl.ty).ok_or(Fail::Reported)?;
+        let literal = written.typed(decl.ty).ok_or(Fail::Reported)?;
         let value = match literal {
             // A secret's value is kept, in a hole that is never shown.
             literal if decl.secret => Value::Hole(Hole::SecretSetting {
@@ -58,6 +58,7 @@ impl Resolver<'_> {
         };
         Ok(Resolved {
             begins_with_setting: true,
+            written_in: Some(written.loc().source),
             ..Resolved::known(value)
         })
     }

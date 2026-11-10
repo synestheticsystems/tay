@@ -44,7 +44,6 @@ pub enum Outcome {
 /// What the planner works with while it walks the units that come up.
 pub struct Planner<'s> {
     resolver: Resolver<'s>,
-    sources: &'s mut Sources,
     root: PathBuf,
     production: bool,
 }
@@ -115,10 +114,8 @@ pub fn plan(root: &Path, options: &Options, sources: &mut Sources, d: &mut Diagn
     else {
         return Outcome::Errors;
     };
-    let folders = sources.folders();
     let mut planner = Planner {
-        resolver: Resolver::new(&stack, &layered, environment, folders),
-        sources,
+        resolver: Resolver::new(&stack, &layered, environment, sources),
         root: root.to_path_buf(),
         production: production.is_some(),
     };

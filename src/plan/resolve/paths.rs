@@ -1,19 +1,24 @@
 //! Paths on the host, as tay uses them: one that begins `./` is relative to
-//! the folder of the file it is written in, any other relative one to the
-//! stack's root.
+//! the folder of the file it is written in, or for a `--set`, to the stack's
+//! root; any other relative one is relative to the stack's root.
 
 use std::path::{Component, Path, PathBuf};
 
-use crate::diagnostic::source::Loc;
+use crate::diagnostic::source::Source;
 use crate::plan::resolve::value::Resolved;
 use crate::value::{Bit, Value};
 
 use super::Resolver;
 
 impl Resolver<'_> {
-    /// The whole path a value written at `written` names. A value whose
-    /// start is not known before start (a produced path) is left as it is.
-    pub fn host_path(&self, mut value: Resolved, written: Loc) -> Resolved {
+    /// The whole path a value names. A value whose start is not known
+    /// before start (a produced path) is left as it is.
+    pub fn host_path(&self, mut value: Resolved) -> Resolved {
+        let root = PathBuf::from(&self.environment.root);
+        let folder = match value.written_in.map(|source| self.sources.get(source)) {
+            Some(Source::File { path, .. }) => path.parent().map(Path::to_path_buf),
+            Some(Source::Argument { .. }) | None => None,
+        };
         let Value::Text(bits) = &mut value.value else {
             return value;
         };
@@ -24,14 +29,8 @@ impl Resolver<'_> {
             return value;
         }
         let (base, rest) = match first.strip_prefix("./") {
-            Some(rest) => {
-                let folder = self.folders.get(written.source.index()).cloned().flatten();
-                (
-                    folder.unwrap_or_else(|| PathBuf::from(&self.environment.root)),
-                    rest,
-                )
-            }
-            None => (PathBuf::from(&self.environment.root), first.as_str()),
+            Some(rest) => (folder.unwrap_or(root), rest),
+            None => (root, first.as_str()),
         };
         *first = if rest.is_empty() {
             format!("{}/", base.display())

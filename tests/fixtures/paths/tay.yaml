@@ -4,6 +4,7 @@ up: [web, box, conf, named-conf]
 settings:
   port: { default: 8080 }
   conf_name: { default: site }
+  config_folder: { default: ./config }
 units:
   build:
     uses: command

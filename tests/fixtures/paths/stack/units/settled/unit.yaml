@@ -1,0 +1,4 @@
+uses: container
+with:
+  image: example/settled
+  mounts: [{ from: "${settings.config_folder}", to: /config }]

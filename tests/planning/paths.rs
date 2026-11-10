@@ -59,7 +59,7 @@ fn a_mount_source_must_exist_unless_in_the_state_or_shared_folder_or_produced() 
     assert_eq!(
         run.errors(),
         [format!(
-            "tay.yaml:24:24: the mount's source `{}/missing` does not exist; outside the state and shared folders it must exist when tay plans",
+            "tay.yaml:25:24: the mount's source `{}/missing` does not exist; outside the state and shared folders it must exist when tay plans",
             root()
         )]
     );
@@ -80,7 +80,31 @@ fn a_watched_path_must_exist() {
     assert_eq!(
         run.errors(),
         [format!(
-            "tay.yaml:33:13: `{}/nothing-here`, which this unit watches, does not exist",
+            "tay.yaml:34:13: `{}/nothing-here`, which this unit watches, does not exist",
+            root()
+        )]
+    );
+}
+
+#[test]
+fn a_dot_slash_path_in_a_settings_value_is_relative_to_where_the_value_is_written() {
+    // `settled`, in its own folder, mounts `${settings.config_folder}`,
+    // whose default `./config` is written in tay.yaml: the root's `config`.
+    assert_eq!(plan("paths", &["--set", "up=settled"]).code, 0);
+    // A value given with `--set` is relative to the stack's root.
+    let run = plan(
+        "paths",
+        &[
+            "--set",
+            "up=settled",
+            "--set",
+            "settings.config_folder=./elsewhere",
+        ],
+    );
+    assert_eq!(
+        run.errors(),
+        [format!(
+            "stack/units/settled/unit.yaml:4:20: the mount's source `{}/elsewhere` does not exist; outside the state and shared folders it must exist when tay plans",
             root()
         )]
     );

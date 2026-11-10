@@ -73,7 +73,7 @@ impl Planner<'_> {
             asker: user.asker,
         };
         let value = match self.resolver.resolve(expr, scope) {
-            Ok(value) if matches!(want, Want::Path(_)) => self.resolver.host_path(value, expr.loc),
+            Ok(value) if matches!(want, Want::Path(_)) => self.resolver.host_path(value),
             Ok(value) => value,
             Err(Fail::Reported) => return None,
             Err(Fail::View(problems)) => {
@@ -215,7 +215,7 @@ impl Planner<'_> {
                 return None;
             }
         };
-        let source = self.sources.add_file(file, &self.root);
+        let source = self.resolver.sources.add_file(file, &self.root);
         let pieces = match expr::parse_document(&text, source) {
             Ok(pieces) => pieces,
             Err(error) => {

@@ -17,10 +17,9 @@ pub mod value;
 pub use environment::Environment;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::path::PathBuf;
 
 use crate::definition::{Body, Mechanism, Stack};
-use crate::diagnostic::source::Loc;
+use crate::diagnostic::source::{Loc, SourceId, Sources};
 use crate::diagnostic::{Diagnostic, Diagnostics};
 use crate::module::{Runs, UnitKind};
 use crate::syntax::expr::{Expr, ExprKind, Part, Piece, Reference, Target, View};
@@ -122,9 +121,9 @@ pub struct Resolver<'s> {
     circles: HashSet<BTreeSet<Key>>,
     /// Each setting with no value and no default that the plan uses, and where.
     unset: BTreeMap<String, Vec<Loc>>,
-    /// The folder of each source's file, by source, which a path beginning
-    /// `./` is relative to.
-    folders: Vec<Option<PathBuf>>,
+    /// Every file and argument read, which a path beginning `./` is
+    /// relative to the folder of.
+    pub sources: &'s mut Sources,
 }
 
 impl<'s> Resolver<'s> {
@@ -132,13 +131,13 @@ impl<'s> Resolver<'s> {
         stack: &'s Stack,
         layered: &'s Layered,
         environment: Environment,
-        folders: Vec<Option<PathBuf>>,
+        sources: &'s mut Sources,
     ) -> Resolver<'s> {
         Resolver {
             stack,
             layered,
             environment,
-            folders,
+            sources,
             d: Diagnostics::default(),
             units: stack
                 .units
@@ -209,12 +208,12 @@ impl<'s> Resolver<'s> {
             ExprKind::Number(n) => Ok(Resolved::known(Value::Number(*n))),
             ExprKind::Bool(b) => Ok(Resolved::known(Value::Bool(*b))),
             ExprKind::Ref(reference) => self.reference(reference, scope),
-            ExprKind::Text(pieces) => self.text(pieces, scope),
+            ExprKind::Text(pieces) => self.text(pieces, expr.loc.source, scope),
         }
     }
 
-    /// Resolves a document's pieces (a template file) as text.
-    pub fn text(&mut self, pieces: &[Piece], scope: Scope) -> Res {
+    /// Resolves text written in `written_in`.
+    fn text(&mut self, pieces: &[Piece], written_in: SourceId, scope: Scope) -> Res {
         let mut text = Resolved::known(Value::Text(Vec::new()));
         let mut bits = Vec::new();
         // Every piece is resolved, so that every error in the text is found.
@@ -222,11 +221,19 @@ impl<'s> Resolver<'s> {
         let mut views = Vec::new();
         for (index, piece) in pieces.iter().enumerate() {
             match piece {
-                Piece::Lit(literal) => bits.push(Bit::Text(literal.clone())),
+                Piece::Lit(literal) => {
+                    if index == 0 {
+                        text.written_in = Some(written_in);
+                    }
+                    bits.push(Bit::Text(literal.clone()));
+                }
                 Piece::Ref(reference) => match self.reference(reference, scope) {
                     Ok(value) => {
                         text.absorb(&value);
-                        text.begins_with_setting |= index == 0 && value.begins_with_setting;
+                        if index == 0 {
+                            text.begins_with_setting = value.begins_with_setting;
+                            text.written_in = value.written_in;
+                        }
                         bits.extend(value.value.bits());
                     }
                     Err(Fail::Reported) => reported = true,
