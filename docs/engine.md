@@ -19,7 +19,7 @@ Four rules run through all of it.
 | `tay up [UNIT...]` | Brings the units up, in order, and returns when all are ready or one has failed | yes |
 | `tay down` | Stops everything the environment runs, checks that nothing is left, and says so | yes |
 | `tay status [UNIT]` | Each unit's state, from a check | yes |
-| `tay logs UNIT [--since 10m] [--follow]` | What the unit wrote, with the time of each line | no |
+| `tay logs UNIT [--since 10m] [--follow]` | What the unit wrote, with the time of each line | yes |
 | `tay ls` | The environments on this machine | yes |
 
 Every command takes `--root FOLDER`, and `--json` where it prints something a program would read. No command ever reads from the terminal. Without a terminal there is no colour, and nothing follows for ever unless asked to.
@@ -71,8 +71,6 @@ When a unit fails, `tay up` names it, gives the reason and the last lines it wro
 - `log`: a line the unit wrote contains the text.
 
 ## The daemon
-
-*Not built.*
 
 One daemon per environment. The first command that needs it starts it, detached from the terminal and from the shell that ran the command, so it survives both.
 
@@ -131,8 +129,6 @@ An environment leaves the machine's list when a check finds nothing of it left: 
 **`file`.** Written whole and then moved into place, so no reader sees half a file. Written again only when its content would differ, and never when `overwrite` is `false` and it exists.
 
 ## Units that run
-
-*Not built.*
 
 ### The keeper
 
