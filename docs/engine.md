@@ -19,8 +19,12 @@ Four rules run through all of it.
 | `tay up [UNIT...]` | Brings the units up, in order, and returns when all are ready or one has failed | yes |
 | `tay down` | Stops everything the environment runs, checks that nothing is left, and says so | yes |
 | `tay status [UNIT]` | Each unit's state, from a check | yes |
-| `tay logs UNIT [--since 10m] [--follow]` | What the unit wrote, with the time of each line | yes |
+| `tay logs [UNIT...] [--since 10m] [--follow]` | What the units wrote, with the time of each line. With several units, or none, each line also names its unit | one unit |
 | `tay ls` | The environments on this machine | yes |
+| `tay restart UNIT...` | Stops the units and starts them again | no |
+| `tay run ACTION [NAME=VALUE...]` | Runs an action, with its arguments | no |
+| `tay set PLACE=VALUE...`, `tay unset PLACE...` | Changes what the environment remembers being asked for | no |
+| `tay wipe UNIT... --yes`, `tay wipe --all --yes` | Removes what the units keep, or everything the environment keeps | no |
 
 Every command takes `--root FOLDER`, and `--json` where it prints something a program would read. No command ever reads from the terminal. Without a terminal there is no colour, and nothing follows for ever unless asked to.
 
@@ -205,6 +209,31 @@ Docker is a container's parent: it keeps the exit code, says whether the contain
 
 **An environment leaves the machine's list** only when no process, container, volume or network of it is left.
 
+## Changing an environment that is up
+
+*Not built.*
+
+Each of these is one change, taken by the daemon in turn like any other.
+
+**`tay restart UNIT...`** stops each unit named and starts it again, with a new first attempt. Units that need it are left running: one that suffers shows it by its own check and follows its own `restart`. A command is run again from its `check`. A unit that is made has nothing to restart, and naming one is an error.
+
+**`tay run ACTION [NAME=VALUE...]`** runs a unit that has `action: true`, with its arguments, after bringing up what it needs. It prints what the action prints and exits as the action did. An argument the action does not declare, or a missing one that has no default, is an error before anything runs. An action's values are given to whoever asked and are not kept.
+
+**`tay set PLACE=VALUE...`** and **`tay unset PLACE...`** change what the environment remembers being asked for, in the places `--set` takes, and nothing else: no unit is touched until the next `tay up`. `tay up --set` is the same thing followed by `up`. `tay unset` forgets one place, so the profile's or the stack's value holds again. `tay set` with nothing after it lists what is remembered. A secret setting's value is never printed.
+
+**`tay wipe UNIT... --yes`** removes what a unit keeps, so that it starts from nothing:
+
+| The unit is | What is removed |
+|---|---|
+| A container | Its volumes |
+| A command | What its `undo` undoes, and the values it produced. The units it needs must be up, or the wipe is refused and says which |
+| A secret, a file, a port | The stored secret, the written file, the kept number |
+| A process | Nothing beyond its record |
+
+In order: every running unit that needs the unit is stopped, the unit is stopped, what it keeps is removed, and, if the environment is meant to be up, everything is brought up again as `tay up` would, so commands that needed it check again and run again where their work is gone.
+
+**`tay wipe --all --yes`** takes the environment down and removes everything it keeps: every volume, and `.tay/` but for `choices.yaml`. No `undo` runs, since everything an undo would act on goes too. Without `--yes` either form changes nothing and says what it would remove.
+
 ## Not in this document yet
 
-What restarts when a definition changes. `restart`, `wipe`, `set` and `run`. Running on a server under a service manager. These are written when they are built.
+What restarts when a definition changes, for units other than containers. Watching files and running a unit again when they change. `when_removed: undo`. Running on a server under a service manager. These are written when they are built.
