@@ -1,4 +1,4 @@
-//! The values a unit gives, as the plan prints them: each seen from the host
+//! The values a unit gives, as the plan holds them: each seen from the host
 //! and from a container, since an address depends on who asks.
 
 use std::collections::HashSet;
@@ -25,7 +25,7 @@ impl Planner<'_> {
         opened: &HashSet<(String, i64)>,
     ) -> Vec<Option<Given>> {
         let unit_name = &self.resolver.stack.units[unit].name.name;
-        let mut lines = Vec::new();
+        let mut given = Vec::new();
         for give in &mechanism.gives {
             let endpoint = matches!(give.value, GiveValue::Endpoint(_));
             let has_scheme = matches!(&give.value, GiveValue::Endpoint(e) if e.scheme.is_some());
@@ -35,7 +35,7 @@ impl Planner<'_> {
                 part: has_scheme.then_some(Part::Url),
                 view: None,
             };
-            lines.push(self.given_line(
+            given.push(self.given(
                 unit_name,
                 give.name.name.clone(),
                 give.name.loc,
@@ -50,7 +50,7 @@ impl Planner<'_> {
                 name: output.name.name.clone(),
                 view: None,
             };
-            lines.push(self.given_line(
+            given.push(self.given(
                 unit_name,
                 format!("outputs.{}", output.name.name),
                 output.name.loc,
@@ -59,10 +59,11 @@ impl Planner<'_> {
                 opened,
             ));
         }
-        lines
+        given
     }
 
-    fn given_line(
+    /// One value the unit gives, by `target`, whose name is written at `loc`.
+    fn given(
         &mut self,
         unit_name: &str,
         name: String,

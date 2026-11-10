@@ -305,7 +305,7 @@ mod tests {
     }
 
     #[test]
-    fn each_setting_is_read_into_its_place_and_every_value_is_resolved() {
+    fn each_setting_is_read_into_its_own_field_and_every_value_is_resolved() {
         let read = settings(
             "build: { context: ., dockerfile: Dockerfile.dev, args: { V: 1 } }\ncommand: [serve]\nenv: { A: a }\nvolumes: { data: /data, logs: { to: /logs, owner: 999 } }\nmounts: [{ from: ./conf, to: /conf, readonly: false }]\ntmpfs: [/tmp]\naliases: [db]\nlabels: { team: core }\nuser: \"999\"\nworkdir: /app\nplatform: linux/amd64\nread_only: true\nsecurity_opt: [no-new-privileges]\npids_limit: 100\n",
         );

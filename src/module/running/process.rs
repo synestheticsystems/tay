@@ -183,7 +183,7 @@ mod tests {
     }
 
     #[test]
-    fn each_setting_is_read_into_its_place_and_resolved_there() {
+    fn each_setting_is_read_into_its_own_field_and_resolved_there() {
         let read = settings(
             "command: [serve, --port, 80]\nworkdir: ./app\nenv: { LOG: debug }\nsecret_env: { KEY: \"${key.value}\" }\ninherit: [PATH]\nprepare: [[bun, install], [bun, build]]\n",
         );

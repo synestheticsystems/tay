@@ -32,7 +32,7 @@ pub struct Options {
     pub profile: Option<String>,
     /// Each `--set KEY=VALUE`, in the order given.
     pub sets: Vec<String>,
-    /// The home folder, where the personal choices file is.
+    /// The home folder, where this person's own file of choices is.
     pub home: Option<PathBuf>,
 }
 

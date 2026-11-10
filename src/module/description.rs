@@ -198,7 +198,7 @@ pub enum RestartOn {
 impl RestartOn {
     const ALL: [RestartOn; 3] = [RestartOn::Failure, RestartOn::Always, RestartOn::Never];
 
-    /// The words `restart.on` is written with, each in the place of its
+    /// The words `restart.on` is written with, each at the index of its
     /// `RestartOn` in `ALL`.
     pub const WORDS: &[&str] = &["failure", "always", "never"];
 

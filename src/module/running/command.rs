@@ -489,7 +489,7 @@ mod tests {
     }
 
     #[test]
-    fn every_value_is_resolved_in_its_place() {
+    fn every_value_is_resolved_where_it_stands() {
         let read = settings(
             "run: [a, b]\ncheck: { shell: c }\nundo: [d]\nimage: e\nmounts: [{ from: f, to: g }]\nuser: h\nworkdir: i\nenv: { J: j }\nstdin: k\noutputs: { l: m }\n",
         );

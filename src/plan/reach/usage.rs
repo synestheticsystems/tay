@@ -195,7 +195,8 @@ impl Planner<'_> {
     /// resolves those references for `user`, whose setting at `at` names
     /// it: the text is the value used. Its references are checked as those
     /// written in a definition are. Each error in the file says which unit
-    /// it was found for, so that a file several units read is reported once.
+    /// it was found for, so that one found for several units is reported
+    /// once, naming each.
     fn use_template_file(
         &mut self,
         user: User<'_>,
