@@ -102,6 +102,21 @@ impl<'e> Ports<'e> {
     /// in the machine's list.
     pub fn keep(&mut self, unit: &str, number: u16) -> Result<(), DiskError> {
         self.kept.insert(unit.to_string(), number);
+        self.save()
+    }
+
+    /// Forgets the number `unit` keeps, in this environment's record and in
+    /// the machine's list, so that it is chosen afresh.
+    pub fn forget(&mut self, unit: &str) -> Result<(), DiskError> {
+        match self.kept.remove(unit) {
+            Some(_) => self.save(),
+            None => Ok(()),
+        }
+    }
+
+    /// Writes this environment's record, and its numbers in the machine's
+    /// list.
+    fn save(&mut self) -> Result<(), DiskError> {
         let state = self.environment.layout.state();
         std::fs::create_dir_all(&state).map_err(DiskError::io(&state, "made"))?;
         let written = Record {

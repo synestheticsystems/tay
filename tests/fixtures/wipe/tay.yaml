@@ -1,0 +1,29 @@
+format: 1
+stack: wipe
+up: [app]
+units:
+  app-port: { uses: port }
+  token: { uses: secret, with: { kind: password } }
+  conf:
+    uses: file
+    with: { content: "port ${app-port.number}\n" }
+  store:
+    doc: Ticks for ever; what the schema is made in.
+    uses: process
+    with: { command: ["${environment.root}/services/ticker.sh"] }
+  schema:
+    doc: Makes its marker, counting each run, and gives a version; its undo removes the marker.
+    uses: command
+    needs: [store]
+    with:
+      check: [test, -f, "${environment.state}/schema-made"]
+      run: ["${environment.root}/services/make.sh", "${environment.state}/schema-made", "${environment.state}/schema-runs"]
+      undo: [rm, -f, "${environment.state}/schema-made"]
+      produces: [version]
+  app:
+    doc: Needs the schema, its file and its token, and counts its starts.
+    uses: process
+    needs: [schema, conf]
+    with:
+      command: ["${environment.root}/services/app.sh", "${environment.state}/app-starts"]
+      secret_env: { TOKEN: "${token.value}" }

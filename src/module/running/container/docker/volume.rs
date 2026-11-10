@@ -45,14 +45,11 @@ impl Docker {
         }
     }
 
-    /// Removes the volume `name`, which [`Docker::make_volume`] has just made as
-    /// `owner`'s and which nothing has used yet.
-    pub async fn remove_made_volume(
-        &self,
-        owner: &Owner<'_>,
-        name: &str,
-    ) -> Result<(), DockerError> {
-        if !self.has_volume(owner.environment, name).await? {
+    /// Removes the volume `name`, once it is found to be `environment`'s;
+    /// one not there is gone already, and one of that name that is not the
+    /// environment's is an error, and is left alone.
+    pub async fn remove_volume(&self, environment: &str, name: &str) -> Result<(), DockerError> {
+        if !self.has_volume(environment, name).await? {
             return Ok(());
         }
         self.api

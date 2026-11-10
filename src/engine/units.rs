@@ -213,6 +213,28 @@ impl Units {
             .collect()
     }
 
+    /// Every unit that needs one of `named`, or needs in turn a unit that
+    /// does, in the order units start in: what would hold what `named`
+    /// keep while it runs.
+    pub fn needing(&self, named: &[String]) -> Vec<Arc<PlannedUnit>> {
+        let mut needed: HashSet<&str> = named.iter().map(String::as_str).collect();
+        let mut needing = Vec::new();
+        // A unit starts after what it needs, so going from the first finds
+        // each need before what needs it.
+        for known in &self.known {
+            let planned = &known.planned;
+            if planned
+                .needs
+                .iter()
+                .any(|need| needed.contains(need.unit.as_str()))
+                && needed.insert(planned.name.as_str())
+            {
+                needing.push(Arc::clone(planned));
+            }
+        }
+        needing
+    }
+
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = &Known> {
         self.known.iter()
     }

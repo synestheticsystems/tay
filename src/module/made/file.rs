@@ -2,20 +2,23 @@
 
 mod write;
 
+use std::path::PathBuf;
+
 use crate::diagnostic::Diagnostics;
 use crate::diagnostic::source::Loc;
+use crate::disk::remove_if_there;
 use crate::syntax::expr::{EnvField, Expr, ExprKind, Piece, Reference, Target};
 use crate::syntax::fields::{self, Fields};
 use crate::syntax::names::NameAt;
 use crate::syntax::yaml::Node;
-use crate::value::Filled;
+use crate::value::{Filled, Placeholder, Unfilled, Value};
 
 use crate::module::description::OpenedPort;
 use crate::module::description::{
     Claim, Description, ModuleGive, ModuleValue, ReadyWithoutCheck, RestartOn, UnitKind,
 };
-use crate::module::operations::Operations;
-use crate::module::settings::{Destination, MapValues, Operate, Slot, maybe};
+use crate::module::operations::{Keeping, Operations, Removing, UnitPlace};
+use crate::module::settings::{Destination, Keeps, MapValues, Operate, Slot, maybe};
 use crate::module::want::{PathUse, Want};
 use crate::module::{Cx, Module};
 
@@ -74,6 +77,40 @@ impl<V> MapValues for FileSettings<V> {
 impl Operate for FileSettings<Filled> {
     fn operate(self, _: Vec<OpenedPort<Filled>>) -> Operations {
         Operations::Made(Box::new(self))
+    }
+}
+
+impl<V> FileSettings<V> {
+    /// Where the unit's file is written: `files/<folder>/<name>` in the
+    /// state folder.
+    fn path(&self, place: &UnitPlace) -> PathBuf {
+        place
+            .environment
+            .layout
+            .state()
+            .join(FILES)
+            .join(&self.folder)
+            .join(&self.name.name)
+    }
+}
+
+/// A file unit keeps the file it wrote; the folder it is in may hold
+/// others' files, and stays.
+impl Keeps for FileSettings<Value> {
+    fn kept(&self, place: &UnitPlace) -> Keeping {
+        Keeping {
+            what: vec![format!("its file `{}`", self.path(place).display())],
+            runs: false,
+        }
+    }
+
+    fn wipe(
+        &self,
+        place: UnitPlace,
+        _: &mut dyn FnMut(&Placeholder) -> Result<Filled, Unfilled>,
+    ) -> Result<Removing, Unfilled> {
+        let path = self.path(&place);
+        Ok(Box::pin(async move { Ok(remove_if_there(&path)?) }))
     }
 }
 

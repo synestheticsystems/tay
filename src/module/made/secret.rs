@@ -3,17 +3,18 @@
 mod generate;
 
 use crate::diagnostic::Diagnostics;
+use crate::disk::remove_if_there;
 use crate::syntax::fields::{self, Fields};
 use crate::syntax::names::NameAt;
 use crate::syntax::yaml::Node;
-use crate::value::Filled;
+use crate::value::{Filled, Placeholder, Unfilled, Value};
 
 use crate::module::description::OpenedPort;
 use crate::module::description::{
     Description, ModuleGive, ModuleValue, ReadyWithoutCheck, RestartOn, UnitKind,
 };
-use crate::module::operations::Operations;
-use crate::module::settings::{Destination, MapValues, Operate, Slot, maybe};
+use crate::module::operations::{Keeping, Operations, Removing, UnitPlace};
+use crate::module::settings::{Destination, Keeps, MapValues, Operate, Slot, maybe};
 use crate::module::want::Want;
 use crate::module::{Cx, Module};
 
@@ -78,6 +79,29 @@ impl<V> MapValues for SecretSettings<V> {
 impl Operate for SecretSettings<Filled> {
     fn operate(self, _: Vec<OpenedPort<Filled>>) -> Operations {
         Operations::Made(Box::new(self))
+    }
+}
+
+/// A secret keeps what was generated for it.
+impl Keeps for SecretSettings<Value> {
+    fn kept(&self, place: &UnitPlace) -> Keeping {
+        Keeping {
+            what: vec![format!(
+                "the secret it keeps, in `{}`",
+                generate::path(place).display()
+            )],
+            runs: false,
+        }
+    }
+
+    fn wipe(
+        &self,
+        place: UnitPlace,
+        _: &mut dyn FnMut(&Placeholder) -> Result<Filled, Unfilled>,
+    ) -> Result<Removing, Unfilled> {
+        Ok(Box::pin(async move {
+            Ok(remove_if_there(&generate::path(&place))?)
+        }))
     }
 }
 

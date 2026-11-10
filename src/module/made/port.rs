@@ -3,17 +3,19 @@
 mod hold;
 mod kept;
 
+use kept::Ports;
+
 use crate::syntax::fields::Fields;
 use crate::syntax::names::NameAt;
 use crate::syntax::yaml::Node;
-use crate::value::Filled;
+use crate::value::{Filled, Placeholder, Unfilled, Value};
 
 use crate::module::description::OpenedPort;
 use crate::module::description::{
     Description, ModuleGive, ModuleValue, ReadyWithoutCheck, RestartOn, UnitKind,
 };
-use crate::module::operations::Operations;
-use crate::module::settings::{Destination, MapValues, Operate, Slot};
+use crate::module::operations::{Keeping, Operations, Removing, UnitPlace};
+use crate::module::settings::{Destination, Keeps, MapValues, Operate, Slot};
 use crate::module::want::Want;
 use crate::module::{Cx, Module};
 
@@ -56,6 +58,39 @@ impl Operate for PortSettings<Filled> {
         Operations::Made(Box::new(self))
     }
 }
+
+/// A port unit keeps its number, which is chosen afresh once it is
+/// forgotten.
+impl Keeps for PortSettings<Value> {
+    fn kept(&self, _: &UnitPlace) -> Keeping {
+        Keeping {
+            what: vec!["the number it keeps".to_string()],
+            runs: false,
+        }
+    }
+
+    fn wipe(
+        &self,
+        place: UnitPlace,
+        _: &mut dyn FnMut(&Placeholder) -> Result<Filled, Unfilled>,
+    ) -> Result<Removing, Unfilled> {
+        Ok(Box::pin(async move {
+            // The machine's list is changed under its lock, which may be
+            // waited for.
+            let forgotten = tokio::task::spawn_blocking(move || {
+                Ports::lock(&place.environment)?.forget(&place.unit)
+            })
+            .await
+            .map_err(|error| PortPanicked(error.to_string()))?;
+            Ok(forgotten?)
+        }))
+    }
+}
+
+/// Forgetting a port's number panicked, which is a fault in tay.
+#[derive(Debug, thiserror::Error)]
+#[error("tay failed while forgetting the number: {0}")]
+struct PortPanicked(String);
 
 impl Module for Port {
     fn name(&self) -> &'static str {

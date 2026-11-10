@@ -22,7 +22,7 @@ use super::state::{State, UnitState};
 use super::units::Units;
 use crate::disk::unit_log::UnitLog;
 use crate::disk::{Counts, Environment};
-use crate::module::{self, Occasion, Running, Runs, UnitKind, UnitPlace, Values};
+use crate::module::{self, Keeping, Occasion, Running, Runs, UnitKind, UnitPlace, Values};
 use crate::plan::PlannedUnit;
 use crate::value::{Filled, Placeholder, Unfilled};
 
@@ -286,6 +286,33 @@ impl Supervisor {
         module::remove_shared(&self.environment)
             .await
             .map_err(|left| (left.what, left.why.to_string()))
+    }
+
+    /// What `planned` keeps, as its module answers; nothing for a group.
+    pub fn kept(&self, planned: &PlannedUnit) -> Keeping {
+        match &planned.mechanism {
+            Some(mechanism) => mechanism.settings.kept(&self.place(&planned.name)),
+            None => Keeping {
+                what: Vec::new(),
+                runs: false,
+            },
+        }
+    }
+
+    /// Removes what `planned` keeps, once it is stopped, filling what
+    /// removing it uses from the values of the units that are ready; why
+    /// not, when it could not be.
+    pub async fn wipe(&self, planned: &PlannedUnit) -> Result<(), String> {
+        let Some(mechanism) = &planned.mechanism else {
+            return Ok(());
+        };
+        let given = self.given();
+        let place = self.place(&planned.name);
+        let removing = mechanism
+            .settings
+            .wipe(place, &mut |placeholder| self.fill(placeholder, &given))
+            .map_err(|why| why.to_string())?;
+        removing.await.map_err(|failure| failure.to_string())
     }
 
     /// Where `unit` is acted on.

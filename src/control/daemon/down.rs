@@ -19,6 +19,9 @@ pub enum Down {
     /// The environment's `.tay/` folder has gone, or the stack's root with
     /// it.
     Gone,
+    /// `tay wipe --all` asked, which then removes what the environment
+    /// keeps.
+    Wiped,
 }
 
 impl Down {
@@ -27,14 +30,16 @@ impl Down {
         match self {
             Down::Asked => "stopped by `tay down`",
             Down::Gone => "stopped: the environment's folder has gone",
+            Down::Wiped => "stopped by `tay wipe --all`",
         }
     }
 
     /// Why the daemon exits, as its log says it.
-    fn exit(self) -> &'static str {
+    pub(super) fn exit(self) -> &'static str {
         match self {
             Down::Asked => "taken down by `tay down`",
             Down::Gone => "the environment's folder has gone",
+            Down::Wiped => "everything the environment kept was removed by `tay wipe --all`",
         }
     }
 }
@@ -87,7 +92,7 @@ impl Daemon {
 
     /// Stops every unit, telling `change`'s followers each change; what
     /// could not be stopped, or was left.
-    async fn stop_everything(
+    pub(super) async fn stop_everything(
         &self,
         change: &Arc<Change>,
         because: Down,

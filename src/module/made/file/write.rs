@@ -7,7 +7,7 @@ use std::io;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use super::{DIR, FILES, FileSettings, PATH};
+use super::{DIR, FileSettings, PATH};
 use crate::disk::{DiskError, write_whole};
 use crate::module::operations::{self, Exists, Failure, Made, UnitPlace, Values, WrongType};
 use crate::value::Filled;
@@ -107,15 +107,8 @@ impl FileSettings<Filled> {
             Some(overwrite) => operations::boolean(overwrite, "overwrite")?,
             None => true,
         };
-        let path = place
-            .environment
-            .layout
-            .state()
-            .join(FILES)
-            .join(&self.folder)
-            .join(&self.name.name);
         Ok(Wanted {
-            path,
+            path: self.path(place),
             content: self.content.reveal(),
             mode,
             overwrite,

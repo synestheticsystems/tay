@@ -8,6 +8,8 @@ mod attempts;
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::disk::Environment;
@@ -24,6 +26,20 @@ pub enum Operations {
     /// A unit that runs.
     Running(Arc<dyn Running>),
 }
+
+/// What a unit keeps, which wiping it removes so that it starts from
+/// nothing: each thing, as a person reads it, and whether removing them
+/// runs something of the unit's, as a command's `undo` is run, which needs
+/// what the unit needs to be up.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Keeping {
+    pub what: Vec<String>,
+    pub runs: bool,
+}
+
+/// What a unit keeps being removed: it ends with why it could not be, when
+/// it could not.
+pub type Removing = Pin<Box<dyn Future<Output = Result<(), Failure>> + Send>>;
 
 /// Where a module acts for a unit: the unit, and the environment it is in.
 #[derive(Clone)]

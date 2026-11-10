@@ -103,6 +103,18 @@ impl List {
         }
     }
 
+    /// Takes the environment `id` off the list, with the ports it kept,
+    /// whatever its folder holds: it keeps nothing any more.
+    pub fn take_off(machine: &Machine, id: &Id) -> Result<(), DiskError> {
+        let mut list = List::lock(machine)?;
+        let before = list.environments.len();
+        list.environments.retain(|listed| listed.id != *id);
+        match list.environments.len() == before {
+            true => Ok(()),
+            false => list.save(),
+        }
+    }
+
     pub fn environments(&self) -> &[Listed] {
         &self.environments
     }

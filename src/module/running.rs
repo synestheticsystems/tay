@@ -13,7 +13,23 @@ mod variables;
 
 use super::description::Runs;
 use super::operations::{Failure, UnitPlace};
-use crate::disk::{Environment, Listed};
+use crate::disk::{DiskError, Environment, Listed};
+
+/// What a unit that runs keeps of itself, as a person reads it: its record,
+/// with its lock and what it noted of how its steps ended, in its folder of
+/// the state folder.
+const RECORD: &str = "its record";
+
+/// Removes what a unit that runs keeps of itself: its folder in the state
+/// folder. It is stopped, so nothing holds its lock.
+fn remove_record(place: &UnitPlace) -> Result<(), Failure> {
+    let folder = place.environment.layout.unit_state(&place.unit);
+    match std::fs::remove_dir_all(&folder) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(DiskError::io(folder, "removed")(error).into()),
+    }
+}
 
 /// Whether anything of a unit that runs where `runs` says is left now, from
 /// its place alone, whatever its settings: a process of it that runs, or a
@@ -81,6 +97,19 @@ pub async fn remove_shared(environment: &Environment) -> Result<(), SharedLeft> 
 pub struct SharedLeft {
     pub what: String,
     pub why: Failure,
+}
+
+/// What the environment keeps where its units run, beyond its folder, as a
+/// person reads each: its volumes.
+pub async fn kept_by_environment(environment: &Environment) -> Result<Vec<String>, Failure> {
+    container::kept_by_environment(environment).await
+}
+
+/// Removes what the environment keeps where its units run, once every
+/// unit of it is stopped: its volumes. Gives what was removed, as a person
+/// reads each.
+pub async fn remove_kept_by_environment(environment: &Environment) -> Result<Vec<String>, Failure> {
+    container::remove_kept_by_environment(environment).await
 }
 
 /// Whether anything of the environment `listed` is left where its units

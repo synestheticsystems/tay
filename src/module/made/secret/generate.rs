@@ -180,7 +180,7 @@ fn not_one_of(setting: &'static str, found: &str, wanted: &[&str]) -> SecretErro
 }
 
 /// The file the unit's secret is kept in.
-fn path(place: &UnitPlace) -> PathBuf {
+pub(super) fn path(place: &UnitPlace) -> PathBuf {
     place
         .environment
         .layout

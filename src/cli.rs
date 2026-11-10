@@ -1,6 +1,6 @@
 //! The command line: `tay plan`, `tay up`, `tay down`, `tay status`,
 //! `tay logs`, `tay ls`, `tay restart`, `tay run`, `tay set`, `tay unset`,
-//! `tay --version` and `tay --help`; `tay daemon`,
+//! `tay wipe`, `tay --version` and `tay --help`; `tay daemon`,
 //! which a command runs to start an environment's daemon; and `tay keep`,
 //! which the daemon runs to keep one program of a unit.
 
@@ -18,7 +18,7 @@ use crate::keeper;
 use crate::print::{err, out};
 
 use args::{Takes, Words};
-use commands::{down, logs, ls, plan, restart, run, set, status, unset, up};
+use commands::{down, logs, ls, plan, restart, run, set, status, unset, up, wipe};
 
 /// How a command ends, as its exit code says it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -74,6 +74,8 @@ Usage:
   tay run ACTION [NAME=VALUE...] [--root FOLDER] [--json]
   tay set [PLACE=VALUE...] [--root FOLDER] [--json]
   tay unset PLACE... [--root FOLDER] [--json]
+  tay wipe UNIT... [--yes] [--root FOLDER] [--json]
+  tay wipe --all [--yes] [--root FOLDER] [--json]
   tay --version
   tay --help
 
@@ -126,6 +128,17 @@ what is remembered for each place, so that the profile's or the stack's value
 holds again. Both list what is remembered afterwards, as tay set with nothing
 after it does; the value of a secret setting is never printed.
 
+tay wipe removes what each unit named keeps, so that it starts from nothing:
+a container's volumes, what a command's undo undoes and the values it
+produced, a stored secret, a written file, a kept port number, and the
+record of a unit that runs. Each running unit that needs one is stopped
+first, then the unit, and on an environment meant to be up everything is
+brought up again as tay up would, so that commands check and run again. A
+command whose undo needs a unit that is not up is refused. tay wipe --all
+takes the environment down and removes everything it keeps: every volume of
+it, and .tay/ but for choices.yaml. Without --yes nothing changes, and it
+says what it would remove.
+
 Options:
   --root FOLDER       look for tay.yaml from FOLDER instead of the current one
   --profile NAME      of plan and up: use this profile instead of the one
@@ -135,9 +148,11 @@ Options:
                       run.units.UNIT, settings.NAME or label; a list is
                       written with commas
   --json              print for programs, in schema 1: the plan, each event of
-                      up, down, restart and run as a JSON object on a line,
-                      the units of status, the environments of ls, and what
-                      set and unset list
+                      up, down, restart, run and wipe as a JSON object on a
+                      line, the units of status, the environments of ls,
+                      what set and unset list, and what wipe would remove
+  --yes               of wipe: remove what is kept, rather than say what it is
+  --all               of wipe: everything the environment keeps
   --since TIME        of logs: only what was written in the last TIME, a
                       whole number followed by s, m or h, such as 10m
   --follow            of logs: go on printing what the units write
@@ -157,6 +172,7 @@ const DAEMON: Takes = Takes {
     choices: false,
     json: false,
     follows: false,
+    wipes: false,
     words: Words::None,
 };
 
@@ -186,6 +202,7 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> ExitCode {
         Some("run") => (&run::TAKES, run::run),
         Some("set") => (&set::TAKES, set::run),
         Some("unset") => (&unset::TAKES, unset::run),
+        Some("wipe") => (&wipe::TAKES, wipe::run),
         Some("keep") => return keeper::keep(args),
         Some(other) if other.starts_with('-') => {
             err(&format!(

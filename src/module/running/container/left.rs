@@ -19,7 +19,7 @@ use crate::module::operations::{Failure, UnitPlace};
 
 /// Docker, to be asked about `environment`; `None` when the environment
 /// has never made anything there.
-fn docker_of(environment: &Environment) -> Result<Option<Docker>, Failure> {
+pub(super) fn docker_of(environment: &Environment) -> Result<Option<Docker>, Failure> {
     let made = List::read(&environment.machine)?
         .iter()
         .any(|listed| listed.id == environment.id && listed.made_outside);

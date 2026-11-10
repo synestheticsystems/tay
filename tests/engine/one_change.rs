@@ -1,7 +1,8 @@
 //! One change at a time. A second `tay up` that asks for the same joins the
 //! first and gets the same result; one that asks for something else is
-//! refused, saying which change runs and since when; `tay down` is always
-//! accepted and cancels what runs.
+//! refused, saying which change runs and since when, and so are `tay set`,
+//! `tay unset`, `tay restart`, `tay run` and `tay wipe`; `tay down` is
+//! always accepted and cancels what runs.
 //!
 //! To hold a change under way, the test holds the lock on the machine's
 //! list of environments, through which every port is chosen: the change
@@ -318,4 +319,24 @@ fn run_is_refused_while_another_change_runs() {
     drop(list);
     assert_eq!(up.finish().code, 0);
     assert_eq!(machine.at(&root, "run", &["note"]).code, 0);
+}
+
+#[test]
+fn wipe_is_refused_while_another_change_runs() {
+    let machine = Machine::new();
+    let root = up_once(&machine);
+    let list = hold_the_list(&machine);
+    let up = starting_port(&root, &machine);
+    let refused = machine.at(&root, "wipe", &["config", "--yes"]);
+    assert_eq!(refused.code, 4, "{}{}", refused.stdout, refused.stderr);
+    assert!(
+        refused
+            .stderr
+            .starts_with("tay wipe: another change is running: `tay up`, since 2"),
+        "{}",
+        refused.stderr
+    );
+    drop(list);
+    assert_eq!(up.finish().code, 0);
+    assert!(root.join(".tay/state/files/config/config").exists());
 }

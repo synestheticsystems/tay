@@ -33,6 +33,9 @@ pub const RESTART: &str = "/v1/restart";
 /// `POST` a [`RunRequest`]: runs an action, answering with [`Event`]s:
 /// each change of state, each line the action writes, and what it came to.
 pub const RUN: &str = "/v1/run";
+/// `POST` a [`WipeRequest`]: removes what units keep, or everything the
+/// environment keeps, answering with [`Event`]s.
+pub const WIPE: &str = "/v1/wipe";
 
 /// Who a daemon is.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -119,6 +122,29 @@ pub struct RunRequest {
     pub home: Option<PathBuf>,
 }
 
+/// What `tay wipe --all` removes of the environment's folder, as a person
+/// reads it.
+pub const FOLDER_WIPED: &str = "`.tay/` but for `choices.yaml`";
+
+/// What `tay wipe --all` removes of the machine's list, as a person reads
+/// it.
+pub const LISTING_WIPED: &str = "its place on this machine's list, with the ports it kept";
+
+/// What `tay wipe --yes` asks for.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "wipe", rename_all = "snake_case")]
+pub enum WipeRequest {
+    /// What the units named keep, and then, on an environment meant to be
+    /// up, everything brought up again with the choices of whoever has
+    /// `home`.
+    Units {
+        units: Vec<String>,
+        home: Option<PathBuf>,
+    },
+    /// Everything the environment keeps, once it is taken down.
+    All,
+}
+
 /// What `tay restart` asks for: the units to stop and start again.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Restart {
@@ -156,6 +182,16 @@ pub enum Event {
     Problem { problem: String },
     /// A line the action that is run wrote, as it wrote it.
     Output { line: String },
+    /// What a unit kept, or with no unit what the environment kept, has
+    /// been removed: each thing, as a person reads it.
+    Removed {
+        unit: Option<String>,
+        removed: Vec<String>,
+    },
+    /// The end of `tay wipe` on an environment that is down, or of
+    /// `tay wipe --all`: what was asked is removed, and nothing is brought
+    /// up.
+    Wiped,
     /// The end of `tay run`: what bringing the action up came to, how its
     /// own program exited when it came to an end, as a shell gives the exit
     /// status, and the values it produced.
@@ -181,13 +217,15 @@ impl Event {
             Event::Units { .. }
             | Event::State { .. }
             | Event::Notice { .. }
-            | Event::Output { .. } => false,
+            | Event::Output { .. }
+            | Event::Removed { .. } => false,
             Event::Errors { .. }
             | Event::Decided(_)
             | Event::Cancelled { .. }
             | Event::Down { .. }
             | Event::Problem { .. }
-            | Event::Ran { .. } => true,
+            | Event::Ran { .. }
+            | Event::Wiped => true,
         }
     }
 }

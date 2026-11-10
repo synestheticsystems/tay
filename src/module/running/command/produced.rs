@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value as Json};
 
-use crate::disk::{DiskError, write_whole};
+use crate::disk::{DiskError, remove_if_there, write_whole};
 use crate::module::operations::{Failure, UnitPlace, Values};
 use crate::syntax::names::NameAt;
 use crate::value::{Exact, Filled};
@@ -113,6 +113,12 @@ pub fn take(
     }
     clear(place)?;
     values(declared, &plain, &secret)
+}
+
+/// Forgets the values kept when the command was last done.
+pub fn forget(place: &UnitPlace) -> Result<(), Failure> {
+    remove_if_there(&kept_path(place))?;
+    Ok(remove_if_there(&secrets(place))?)
 }
 
 /// The values kept when the command was last done.

@@ -19,6 +19,7 @@ pub const TAKES: Takes = Takes {
     choices: true,
     json: true,
     follows: false,
+    wipes: false,
     words: Words::None,
 };
 

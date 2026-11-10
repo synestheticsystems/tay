@@ -12,7 +12,7 @@ use crate::syntax::yaml::Node;
 use crate::value::{Filled, Placeholder, Unfilled, Value};
 
 use super::description::OpenedPort;
-use super::operations::Operations;
+use super::operations::{Keeping, Operations, Removing, UnitPlace};
 use super::want::Want;
 
 /// A module's own settings for one unit as written: every value a [`Slot`]
@@ -28,9 +28,26 @@ pub trait WrittenSettings: fmt::Debug {
     -> Option<Box<dyn Settings>>;
 }
 
+/// What a unit keeps, as its module answers from the unit's settings as
+/// the planner resolved them, so that it is answered whether or not the
+/// values they use are known: what wiping the unit removes.
+pub trait Keeps {
+    /// What the unit at `place` keeps.
+    fn kept(&self, place: &UnitPlace) -> Keeping;
+
+    /// Removes what the unit at `place` keeps, once it is stopped; any
+    /// value removing it uses is filled by `fill`, and why one cannot be,
+    /// when one cannot, stops it before anything is removed.
+    fn wipe(
+        &self,
+        place: UnitPlace,
+        fill: &mut dyn FnMut(&Placeholder) -> Result<Filled, Unfilled>,
+    ) -> Result<Removing, Unfilled>;
+}
+
 /// A module's own settings for one unit with every value resolved: what the
 /// plan holds for the unit without knowing its module.
-pub trait Settings: fmt::Debug + Send + Sync {
+pub trait Settings: Keeps + fmt::Debug + Send + Sync {
     /// The unit's operations, from these settings with every placeholder
     /// filled by `fill`, and the ports the plan opens for it, filled
     /// already; why a value could not be filled, when one cannot.
@@ -91,7 +108,7 @@ where
 
 impl<S> Settings for S
 where
-    S: MapValues<Value = Value> + fmt::Debug + Send + Sync,
+    S: MapValues<Value = Value> + Keeps + fmt::Debug + Send + Sync,
     S::With<Filled>: Operate,
 {
     fn fill(
@@ -99,19 +116,28 @@ where
         opened: Vec<OpenedPort<Filled>>,
         fill: &mut dyn FnMut(&Placeholder) -> Result<Filled, Unfilled>,
     ) -> Result<Operations, Unfilled> {
-        let mut unfilled = None;
-        let filled = self.map_values(&mut |value| match value.fill(fill) {
-            Ok(filled) => Some(filled),
-            Err(why) => {
-                unfilled.get_or_insert(why);
-                None
-            }
-        });
-        match (filled, unfilled) {
-            (Some(filled), _) => Ok(filled.operate(opened)),
-            (None, Some(why)) => Err(why),
-            (None, None) => unreachable!("settings are left unfilled only by a value that was not"),
+        Ok(filled(self, fill)?.operate(opened))
+    }
+}
+
+/// `settings` with every placeholder filled by `fill`; why a value could
+/// not be filled, when one cannot.
+pub fn filled<S: MapValues<Value = Value>>(
+    settings: &S,
+    fill: &mut dyn FnMut(&Placeholder) -> Result<Filled, Unfilled>,
+) -> Result<S::With<Filled>, Unfilled> {
+    let mut unfilled = None;
+    let filled = settings.map_values(&mut |value| match value.fill(fill) {
+        Ok(filled) => Some(filled),
+        Err(why) => {
+            unfilled.get_or_insert(why);
+            None
         }
+    });
+    match (filled, unfilled) {
+        (Some(filled), _) => Ok(filled),
+        (None, Some(why)) => Err(why),
+        (None, None) => unreachable!("settings are left unfilled only by a value that was not"),
     }
 }
 

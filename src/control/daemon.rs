@@ -16,6 +16,7 @@ mod routes;
 mod run;
 mod serve;
 mod up;
+mod wipe;
 
 use std::fs::{File, OpenOptions};
 use std::io::Write;

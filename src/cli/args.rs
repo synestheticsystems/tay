@@ -15,6 +15,8 @@ pub struct Takes {
     pub json: bool,
     /// Whether it takes `--since` and `--follow`, as it reads a log.
     pub follows: bool,
+    /// Whether it takes `--all` and `--yes`, as it removes what is kept.
+    pub wipes: bool,
     /// How many words it takes that are not options.
     pub words: Words,
 }
@@ -39,6 +41,10 @@ pub struct Args {
     /// How far back to read a log, as `10m`.
     pub since: Option<String>,
     pub follow: bool,
+    /// Everything the environment keeps, rather than what units keep.
+    pub all: bool,
+    /// What is kept is removed, rather than said.
+    pub yes: bool,
 }
 
 impl Takes {
@@ -79,6 +85,8 @@ impl Takes {
                     parsed.since = Some(text(value("--since")?, "--since")?);
                 }
                 "--follow" if self.follows && inline.is_none() => parsed.follow = true,
+                "--all" if self.wipes && inline.is_none() => parsed.all = true,
+                "--yes" if self.wipes && inline.is_none() => parsed.yes = true,
                 word if !word.starts_with('-') && self.takes_another_word(&parsed) => {
                     parsed.words.push(word.to_string());
                 }

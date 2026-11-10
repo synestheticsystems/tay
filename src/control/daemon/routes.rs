@@ -23,10 +23,14 @@ use super::{Daemon, log};
 use crate::clock;
 use crate::control::protocol::{
     self, Problem, Refused, Remember, Restart, RunRequest, Status, UnitStatus, UpRequest,
+    WipeRequest,
 };
 use crate::engine;
 
 type Body = BoxBody<Bytes, Infallible>;
+
+/// A change being made, of whichever kind.
+type Changing = std::pin::Pin<Box<dyn Future<Output = ()> + Send>>;
 
 /// How many events may wait to be sent to a follower that reads slowly;
 /// past that, sending to it waits, and the change goes on without it.
@@ -68,6 +72,16 @@ pub async fn route(
             }),
             Err(problem) => json(StatusCode::BAD_REQUEST, &problem),
         },
+        (Method::POST, protocol::WIPE) => match asked::<WipeRequest>(request, "tay wipe").await {
+            Ok(wipe) => begin(&daemon, Kind::Wipe(wipe.clone()), |change| match wipe {
+                WipeRequest::Units { units, home } => {
+                    let wiping = daemon.wiping(&units, home)?;
+                    Ok(Box::pin(Arc::clone(&daemon).wipe(change, wiping)) as Changing)
+                }
+                WipeRequest::All => Ok(Box::pin(Arc::clone(&daemon).wipe_all(change))),
+            }),
+            Err(problem) => json(StatusCode::BAD_REQUEST, &problem),
+        },
         (Method::POST, protocol::REMEMBER) => {
             match asked::<Remember>(request, "tay set or tay unset").await {
                 Ok(remember) => remembered(&daemon, &remember),
@@ -88,7 +102,8 @@ pub async fn route(
             | protocol::EXIT
             | protocol::REMEMBER
             | protocol::RESTART
-            | protocol::RUN,
+            | protocol::RUN
+            | protocol::WIPE,
         ) => json(
             StatusCode::METHOD_NOT_ALLOWED,
             &Problem {

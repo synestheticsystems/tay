@@ -7,14 +7,15 @@ use std::sync::Arc;
 use crate::syntax::fields::{self, Fields};
 use crate::syntax::names;
 use crate::syntax::yaml::Node;
-use crate::value::Filled;
+use crate::value::{Filled, Placeholder, Unfilled, Value};
 
 use super::command_line::{COMMAND_LINE, argv, argv_list};
 use super::variables::{Variables, variables};
+use super::{RECORD, remove_record};
 use crate::module::description::OpenedPort;
 use crate::module::description::{Description, ReadyWithoutCheck, RestartOn, Runs, UnitKind};
-use crate::module::operations::Operations;
-use crate::module::settings::{Destination, MapValues, Operate, Slot, each, maybe};
+use crate::module::operations::{Keeping, Operations, Removing, UnitPlace};
+use crate::module::settings::{Destination, Keeps, MapValues, Operate, Slot, each, maybe};
 use crate::module::want::{PathUse, Want};
 use crate::module::{Cx, Module};
 
@@ -72,6 +73,24 @@ impl<V> MapValues for ProcessSettings<V> {
 impl Operate for ProcessSettings<Filled> {
     fn operate(self, _: Vec<OpenedPort<Filled>>) -> Operations {
         Operations::Running(Arc::new(self))
+    }
+}
+
+/// A process keeps nothing beyond its record.
+impl Keeps for ProcessSettings<Value> {
+    fn kept(&self, _: &UnitPlace) -> Keeping {
+        Keeping {
+            what: vec![RECORD.to_string()],
+            runs: false,
+        }
+    }
+
+    fn wipe(
+        &self,
+        place: UnitPlace,
+        _: &mut dyn FnMut(&Placeholder) -> Result<Filled, Unfilled>,
+    ) -> Result<Removing, Unfilled> {
+        Ok(Box::pin(async move { remove_record(&place) }))
     }
 }
 

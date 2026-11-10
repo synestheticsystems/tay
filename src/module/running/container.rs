@@ -6,6 +6,7 @@
 mod docker;
 mod ended;
 mod host;
+mod kept;
 mod left;
 mod read;
 mod step;
@@ -33,6 +34,7 @@ use crate::module::{Cx, Module};
 use unit::ContainerUnit;
 
 pub use host::{HOST_IN_CONTAINERS, Occasion, host_listen};
+pub use kept::{kept_by_environment, remove_kept_by_environment};
 pub use left::{anything_left, anything_left_of_environment, found_left, remove_shared, stop};
 pub use step::{
     CommandStep, ContainerStepEnd, FoundStep, found_inside, found_own, run_inside, run_own,

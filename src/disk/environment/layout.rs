@@ -1,6 +1,9 @@
 //! Where things are in an environment's folder, `.tay/` in the stack's root.
 
+use std::io;
 use std::path::{Path, PathBuf};
+
+use crate::disk::DiskError;
 
 /// The folder inside a stack's root that holds its environment's own
 /// choices and state.
@@ -91,6 +94,29 @@ impl Layout {
     /// `logs/<unit>/`: the folder of `unit`'s log files.
     pub fn unit_log(&self, unit: &str) -> PathBuf {
         self.logs().join(unit)
+    }
+
+    /// Removes everything in `.tay/` but `choices.yaml`, which people write,
+    /// and `daemon.lock`, which whoever runs as the daemon holds.
+    pub fn remove_kept(&self) -> Result<(), DiskError> {
+        let folder = self.folder();
+        let entries = match std::fs::read_dir(&folder) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(DiskError::io(folder, "read")(error)),
+        };
+        for entry in entries {
+            let path = entry.map_err(DiskError::io(&folder, "read"))?.path();
+            if path == self.choices() || path == self.daemon_lock() {
+                continue;
+            }
+            let removed = match path.is_dir() {
+                true => std::fs::remove_dir_all(&path),
+                false => std::fs::remove_file(&path),
+            };
+            removed.map_err(DiskError::io(&path, "removed"))?;
+        }
+        Ok(())
     }
 
     /// The daemon's own log.

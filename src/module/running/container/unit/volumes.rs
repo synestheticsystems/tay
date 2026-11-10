@@ -62,7 +62,7 @@ pub async fn make(
         // was just made and holds nothing, so that the next attempt makes
         // it again.
         if let Err(failure) = give(docker, &owner, place, image, &name, user).await {
-            docker.remove_made_volume(&owner, &name).await?;
+            docker.remove_volume(id, &name).await?;
             return Err(match failure {
                 Given::Ended(how) => VolumeError::NotOwned {
                     volume: volume.name.name.clone(),

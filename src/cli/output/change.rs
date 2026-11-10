@@ -66,7 +66,9 @@ impl Printer {
             Event::Units { .. }
             | Event::State { .. }
             | Event::Notice { .. }
-            | Event::Output { .. } => self.exit,
+            | Event::Output { .. }
+            | Event::Removed { .. } => self.exit,
+            Event::Wiped => Some(Exit::Done),
             Event::Ran {
                 decision: Decision::Ready,
                 ..
@@ -140,6 +142,18 @@ impl Printer {
             Event::Output { line } => {
                 out(&format!("{line}\n"));
             }
+            Event::Removed { unit, removed } => {
+                let removed = removed.join("; ");
+                match unit {
+                    Some(unit) => own(&format!(
+                        "{command}: removed what `{unit}` kept: {removed}\n"
+                    )),
+                    None => own(&format!("{command}: removed {removed}\n")),
+                }
+            }
+            Event::Wiped => own(&format!(
+                "{command}: done; the environment is down, so nothing was brought up again.\n"
+            )),
             Event::Ran {
                 decision, values, ..
             } => {
@@ -223,6 +237,10 @@ impl Printer {
             }),
             Event::Problem { problem } => json!({ "event": "problem", "problem": problem }),
             Event::Output { line } => json!({ "event": "output", "line": line }),
+            Event::Removed { unit, removed } => {
+                json!({ "event": "removed", "unit": unit, "removed": removed })
+            }
+            Event::Wiped => json!({ "event": "wiped" }),
             Event::Ran {
                 decision,
                 exit_status,

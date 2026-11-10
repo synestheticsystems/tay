@@ -12,7 +12,7 @@ pub mod unit_log;
 mod whole;
 
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub use environment::{Asked, Count, Counts, Environment, Id, Identity, Intent, Layout};
 pub use lock::Lock;
@@ -57,6 +57,15 @@ pub enum DiskError {
         "environment {id} is not in this machine's list of environments; `tay up` puts it there"
     )]
     NotListed { id: String },
+}
+
+/// Removes the file at `path`, when there is one.
+pub fn remove_if_there(path: &Path) -> Result<(), DiskError> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(DiskError::io(path, "removed")(error)),
+    }
 }
 
 impl DiskError {

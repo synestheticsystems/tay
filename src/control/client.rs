@@ -17,7 +17,7 @@ use rustix::io::Errno;
 use serde::de::DeserializeOwned;
 
 use crate::control::protocol::{
-    self, Event, Problem, Refused, Remember, Restart, RunRequest, Status, UpRequest,
+    self, Event, Problem, Refused, Remember, Restart, RunRequest, Status, UpRequest, WipeRequest,
 };
 use crate::definition::read::{THIS_TAY, parse_version};
 use crate::disk::{DiskError, Environment, Lock, socket_fits};
@@ -241,6 +241,22 @@ impl Client {
     ) -> Result<(), ClientError> {
         let body = serde_json::to_vec(request).expect("a request serializes");
         self.change(protocol::RUN, body, event).await
+    }
+
+    /// Removes what `request` asks to be removed, giving each event to
+    /// `event` as the daemon says it; after everything the environment
+    /// keeps is removed, waits for the daemon to exit, as it then does.
+    pub async fn wipe(
+        &self,
+        request: &WipeRequest,
+        event: &mut dyn FnMut(Event),
+    ) -> Result<(), ClientError> {
+        let body = serde_json::to_vec(request).expect("a request serializes");
+        self.change(protocol::WIPE, body, event).await?;
+        match request {
+            WipeRequest::All => self.gone().await,
+            WipeRequest::Units { .. } => Ok(()),
+        }
     }
 
     /// Takes the environment down, giving each event to `event`, and waits

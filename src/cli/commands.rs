@@ -10,6 +10,7 @@ pub mod set;
 pub mod status;
 pub mod unset;
 pub mod up;
+pub mod wipe;
 
 use std::future::Future;
 

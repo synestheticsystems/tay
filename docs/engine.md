@@ -24,7 +24,7 @@ Four rules run through all of it.
 | `tay restart UNIT...` | Stops the units and starts them again | yes |
 | `tay run ACTION [NAME=VALUE...]` | Runs an action, with its arguments | yes |
 | `tay set PLACE=VALUE...`, `tay unset PLACE...` | Changes what the environment remembers being asked for | yes |
-| `tay wipe UNIT... --yes`, `tay wipe --all --yes` | Removes what the units keep, or everything the environment keeps | no |
+| `tay wipe UNIT... --yes`, `tay wipe --all --yes` | Removes what the units keep, or everything the environment keeps | yes |
 
 Every command takes `--root FOLDER`, and `--json` where it prints something a program would read. No command ever reads from the terminal. Without a terminal there is no colour, and nothing follows for ever unless asked to.
 
@@ -210,8 +210,6 @@ Docker is a container's parent: it keeps the exit code, says whether the contain
 **An environment leaves the machine's list** only when no process, container, volume or network of it is left.
 
 ## Changing an environment that is up
-
-*Not built.*
 
 Each of these is one change, taken by the daemon in turn like any other.
 

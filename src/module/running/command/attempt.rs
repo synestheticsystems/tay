@@ -30,9 +30,11 @@ use crate::value::Filled;
 use super::CommandSettings;
 use super::produced;
 
-/// The steps of a command's attempt, as its record says them.
+/// The steps of a command's attempt, as its record says them, and the step
+/// wiping it runs.
 const CHECK: &str = "check";
 const RUN: &str = "run";
+const UNDO: &str = "undo";
 
 /// The variable that names the file a command writes its values to.
 const VALUES: &str = "TAY_VALUES";
@@ -43,6 +45,8 @@ enum CommandError {
     UnknownStep(String),
     #[error("a command run inside another unit's container is not found again under way")]
     NotFoundInside,
+    #[error("its `undo` {0}")]
+    NotUndone(String),
 }
 
 /// Where a command's steps run.
@@ -313,6 +317,7 @@ impl CommandSettings<Filled> {
     ) -> Result<StepOutcome, Failure> {
         let what = match step {
             CHECK => "`check`",
+            UNDO => "`undo`",
             _ => "`run`",
         };
         let argv = filled_run_form(form, what)?;
@@ -335,6 +340,23 @@ impl CommandSettings<Filled> {
                 StepOutcome::in_container(ended.await?)
             }
         })
+    }
+
+    /// Runs `undo` where the command runs, and waits for it to exit with 0.
+    /// It is no attempt of the unit's: it is noted as a first, and the
+    /// record it leaves goes with what else wiping the unit removes.
+    pub(super) async fn undo(
+        &self,
+        place: &UnitPlace,
+        undo: &RunForm<Filled>,
+    ) -> Result<(), Failure> {
+        let words = match self.step(place, 1, UNDO, undo, None, None).await? {
+            StepOutcome::Exited { status: 0, .. } => return Ok(()),
+            StepOutcome::Exited { words, .. } | StepOutcome::NotStarted(words) => words,
+            StepOutcome::Lost => "ended with no record of how: its keeper was lost".to_string(),
+            StepOutcome::Gone => host::GONE.to_string(),
+        };
+        Err(CommandError::NotUndone(words).into())
     }
 
     /// Waits for step `step` of attempt `attempt`, under way, which a daemon

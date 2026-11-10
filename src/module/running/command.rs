@@ -4,6 +4,7 @@
 
 mod attempt;
 mod produced;
+mod wipe;
 
 use std::sync::Arc;
 

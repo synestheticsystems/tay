@@ -2,8 +2,8 @@
 //! small images: what belongs to an environment and is never touched
 //! otherwise, bringing a container up from its settings and judging it
 //! ready, how it ended and what follows, finding it again, its logs,
-//! replacing it, taking it down, commands run in one, and the host and its
-//! containers reaching each other.
+//! replacing it, taking it down, commands run in one, wiping what it keeps,
+//! and the host and its containers reaching each other.
 
 mod bringing_up;
 mod commands;
@@ -13,6 +13,7 @@ mod finding_again;
 mod reaching;
 mod readiness;
 mod secrets;
+mod wiping;
 
 use std::path::Path;
 
