@@ -20,7 +20,7 @@ use crate::control::protocol::{Event, FOLDER_WIPED, LISTING_WIPED, Refused};
 use crate::diagnostic::quoted_list;
 use crate::disk::{Asked, Intent, List};
 use crate::engine::{State, UnitState, runs};
-use crate::module;
+use crate::module::{self, Keeping, PartlyRemoved};
 use crate::plan::PlannedUnit;
 
 /// What a wipe of units acts on: the units named, and each that would hold
@@ -117,30 +117,8 @@ impl Daemon {
         for (index, planned) in wiping.named.iter().enumerate() {
             let kept = self.supervisor.kept(planned);
             if let Err(partly) = self.supervisor.wipe(planned).await {
-                let (removed, not_removed) =
-                    kept.what.split_at(partly.removed.min(kept.what.len()));
-                if !removed.is_empty() {
-                    change.say(Event::Removed {
-                        unit: Some(planned.name.clone()),
-                        removed: removed.to_vec(),
-                    });
-                }
                 let not_reached = &wiping.named[index + 1..];
-                let nor = match not_reached {
-                    [] => String::new(),
-                    [one] => format!(", nor what `{}` keeps", one.name),
-                    _ => format!(
-                        ", nor what {} keep",
-                        quoted_list(not_reached.iter().map(|planned| planned.name.as_str()))
-                    ),
-                };
-                let reason = format!(
-                    "what `{}` keeps could not be removed: {}; not removed: {}{nor}; what was stopped for the wipe stays stopped until `tay up`",
-                    planned.name,
-                    partly.failure,
-                    not_removed.join("; "),
-                );
-                self.fail(&change, &reason);
+                self.partly_wiped(&change, planned, kept, &partly, not_reached);
                 return;
             }
             let wiped = UnitState::new(State::Stopped, "what it kept was removed by `tay wipe`");
@@ -173,6 +151,42 @@ impl Daemon {
         if let Some(plan) = self.plan(&change, options(remembered, wiping.home)).await {
             self.bring_up_plan(&change, plan).await;
         }
+    }
+
+    /// The wipe stopped at what `planned`, which keeps `kept`, could not
+    /// remove, as `partly` says, and did not reach `not_reached`: its
+    /// followers are told what of it was removed, and why the rest, and
+    /// what those keep, was not.
+    fn partly_wiped(
+        &self,
+        change: &Arc<Change>,
+        planned: &PlannedUnit,
+        kept: Keeping,
+        partly: &PartlyRemoved,
+        not_reached: &[Arc<PlannedUnit>],
+    ) {
+        let (removed, not_removed) = kept.what.split_at(partly.removed.min(kept.what.len()));
+        if !removed.is_empty() {
+            change.say(Event::Removed {
+                unit: Some(planned.name.clone()),
+                removed: removed.to_vec(),
+            });
+        }
+        let nor = match not_reached {
+            [] => String::new(),
+            [one] => format!(", nor what `{}` keeps", one.name),
+            _ => format!(
+                ", nor what {} keep",
+                quoted_list(not_reached.iter().map(|planned| planned.name.as_str()))
+            ),
+        };
+        let reason = format!(
+            "what `{}` keeps could not be removed: {}; not removed: {}{nor}; what was stopped for the wipe stays stopped until `tay up`",
+            planned.name,
+            partly.failure,
+            not_removed.join("; "),
+        );
+        self.fail(change, &reason);
     }
 
     /// Takes the environment down and removes everything it keeps, telling
