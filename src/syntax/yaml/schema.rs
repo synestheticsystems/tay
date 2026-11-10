@@ -21,7 +21,7 @@ pub fn resolve_plain(text: &str) -> Scalar {
     }
     Scalar::Str(super::Str {
         text: text.to_string(),
-        content_column: None,
+        placement: super::Placement::AtStart,
     })
 }
 

@@ -1,0 +1,7 @@
+params:
+  name: {}
+unit:
+  uses: command
+  with:
+    env: { DB: "db-${params.name}-x" }
+    run: ["createdb", "${params.name}"]

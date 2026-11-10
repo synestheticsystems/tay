@@ -57,10 +57,34 @@ fn a_missing_required_parameter_and_an_undeclared_one_are_errors() {
 
 #[test]
 fn a_parameter_may_be_a_mapping_or_a_list_put_in_place_before_the_unit_is_read() {
-    // The template's unit-wide `env` is a parameter: the mapping given joins
-    // with the way's own `env`, and `command` is a list.
+    // `ready` is a mapping parameter and `watch` a list one, each put in
+    // place of the template's default.
     let plan = plan_json("template-ok", &[]);
     let service = unit(&plan, "service");
     assert_eq!(service["way"], "source");
-    assert_eq!(service["module"], "process");
+    assert_eq!(service["ready"]["check"], "log");
+    assert_eq!(service["ready"]["target"][0]["value"], "listening");
+    assert_eq!(service["ready"]["within"]["value"], "30s");
+    let root = crate::support::fixture("template-ok")
+        .canonicalize()
+        .unwrap();
+    assert_eq!(
+        service["watch"][0]["value"],
+        root.join("tay.yaml").display().to_string()
+    );
+}
+
+#[test]
+fn a_reference_a_parameter_brings_is_reported_where_the_unit_writes_it() {
+    // The template puts `name` inside text and as a whole word; either way
+    // the reference in it is the unit's, and is reported once, there.
+    let run = plan("template-references", &[]);
+    assert_eq!(run.code, 2);
+    assert_eq!(
+        run.errors(),
+        [
+            "tay.yaml:5:37: `${settings.missing}`: no setting `missing` is declared in tay.yaml",
+            "tay.yaml:6:41: `${nosuch.value}`: there is no unit `nosuch`",
+        ]
+    );
 }

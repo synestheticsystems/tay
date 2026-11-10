@@ -4,5 +4,11 @@ run: { default: source }
 units:
   app-db: { from: database, params: { name: app } }
   report-db: { from: database, params: { name: report, owner: reports } }
-  service: { from: service, params: { env: { MODE: fast }, command: [serve, --fast] } }
+  service:
+    from: service
+    params:
+      env: { MODE: fast }
+      command: [serve, --fast]
+      ready: { log: listening, within: 30s }
+      watch: [tay.yaml]
   all: { needs: [app-db, report-db, service] }

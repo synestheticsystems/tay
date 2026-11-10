@@ -6,7 +6,7 @@ pub mod reference;
 
 use crate::diagnostic::source::{Loc, SourceId};
 use crate::diagnostic::{Diagnostic, Diagnostics};
-use crate::syntax::yaml::{Kind, Node, Scalar};
+use crate::syntax::yaml::{Kind, Node, Placement, Scalar};
 
 pub use reference::{EnvField, Part, Reference, Target, UnitRef, View};
 
@@ -117,7 +117,7 @@ pub fn from_node(node: &Node, d: &mut Diagnostics) -> Option<Expr> {
     let kind = match &node.kind {
         Kind::Scalar(Scalar::Int(n)) => ExprKind::Number(*n),
         Kind::Scalar(Scalar::Bool(b)) => ExprKind::Bool(*b),
-        Kind::Scalar(Scalar::Str(s)) => match parse_string(&s.text, node.loc, s.content_column) {
+        Kind::Scalar(Scalar::Str(s)) => match parse_string(&s.text, node.loc, &s.placement) {
             Ok(kind) => kind,
             Err(error) => {
                 d.push(error);
@@ -141,15 +141,10 @@ pub fn from_node(node: &Node, d: &mut Diagnostics) -> Option<Expr> {
     })
 }
 
-/// Reads the references in a string that sits at `loc`. When the string's
-/// characters are in the file as they are (`content_column`), each reference
-/// is placed at its own column; otherwise at the string's start.
-pub fn parse_string(
-    text: &str,
-    loc: Loc,
-    content_column: Option<u32>,
-) -> Result<ExprKind, Diagnostic> {
-    let pieces = parse_pieces(text, loc, content_column)?;
+/// Reads the references in a string that sits at `loc`, each placed where
+/// `placement` says it was written.
+pub fn parse_string(text: &str, loc: Loc, placement: &Placement) -> Result<ExprKind, Diagnostic> {
+    let pieces = parse_pieces(text, loc, placement)?;
     Ok(match pieces.as_slice() {
         [Piece::Ref(reference)] => ExprKind::Ref(reference.clone()),
         _ => ExprKind::Text(pieces),
@@ -158,16 +153,28 @@ pub fn parse_string(
 
 /// The literal pieces and references of a string that sits at `loc`,
 /// placed as [`parse_string`] places them.
-pub fn parse_pieces(
-    text: &str,
-    loc: Loc,
-    content_column: Option<u32>,
-) -> Result<Vec<Piece>, Diagnostic> {
-    let place = |offset: usize| match content_column {
-        Some(column) => Loc { column, ..loc }.shifted(offset),
-        None => loc,
-    };
-    split(text, &place)
+pub fn parse_pieces(text: &str, loc: Loc, placement: &Placement) -> Result<Vec<Piece>, Diagnostic> {
+    match placement {
+        Placement::Column(column) => split(text, &|offset| {
+            Loc {
+                column: *column,
+                ..loc
+            }
+            .shifted(offset)
+        }),
+        Placement::AtStart => split(text, &|_| loc),
+        Placement::References(written) => {
+            let mut pieces = split(text, &|_| loc)?;
+            let references = pieces.iter_mut().filter_map(|piece| match piece {
+                Piece::Ref(reference) => Some(reference),
+                Piece::Lit(_) => None,
+            });
+            for (reference, at) in references.zip(written) {
+                reference.loc = *at;
+            }
+            Ok(pieces)
+        }
+    }
 }
 
 /// Reads the references in the whole text of a file, placing each at its own
@@ -268,7 +275,7 @@ mod tests {
     }
 
     fn kind(text: &str) -> ExprKind {
-        parse_string(text, loc(), Some(10)).unwrap()
+        parse_string(text, loc(), &Placement::Column(10)).unwrap()
     }
 
     #[test]
@@ -302,10 +309,33 @@ mod tests {
 
     #[test]
     fn an_unclosed_or_malformed_reference_is_an_error_at_its_column() {
-        let error = parse_string("x ${a.b", loc(), Some(10)).unwrap_err();
+        let error = parse_string("x ${a.b", loc(), &Placement::Column(10)).unwrap_err();
         assert_eq!(error.loc.column, 12);
-        let error = parse_string("${}", loc(), None).unwrap_err();
+        let error = parse_string("${}", loc(), &Placement::AtStart).unwrap_err();
         assert_eq!(error.loc.column, 7);
+    }
+
+    #[test]
+    fn text_made_from_a_templates_parameters_places_each_reference_where_it_was_written() {
+        let mut sources = Sources::default();
+        let first = Loc::new(sources.add_argument("template"), 4, 9);
+        let second = Loc::new(sources.add_argument("unit"), 2, 30);
+        let ExprKind::Text(pieces) = parse_string(
+            "db-${a.b}-${settings.c}",
+            loc(),
+            &Placement::References(vec![first, second]),
+        )
+        .unwrap() else {
+            panic!("expected text");
+        };
+        let placed: Vec<Loc> = pieces
+            .iter()
+            .filter_map(|piece| match piece {
+                Piece::Ref(reference) => Some(reference.loc),
+                Piece::Lit(_) => None,
+            })
+            .collect();
+        assert_eq!(placed, [first, second]);
     }
 
     #[test]

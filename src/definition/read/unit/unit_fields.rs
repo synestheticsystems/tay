@@ -239,7 +239,10 @@ mod tests {
         assert!(errors.is_empty(), "{errors:?}");
         assert!(matches!(&gives[0].value, GiveValue::Endpoint(e) if e.path.is_some()));
         // A path built from a reference is checked once it is resolved.
-        let (_, errors) = read("{ api: { port: 80, path: \"${settings.p}\" } }", super::gives);
+        let (_, errors) = read(
+            "{ api: { port: 80, path: \"${settings.p}\" } }",
+            super::gives,
+        );
         assert!(errors.is_empty(), "{errors:?}");
         assert_eq!(
             read("{ api: { port: 80, path: v1 } }", super::gives).1,

@@ -114,22 +114,20 @@ fn references(node: &Node, d: &mut Diagnostics) -> Vec<Reference> {
             .flat_map(|entry| references(&entry.value, d))
             .collect(),
         Kind::Seq(items) => items.iter().flat_map(|item| references(item, d)).collect(),
-        Kind::Scalar(Scalar::Str(s)) => {
-            match expr::parse_string(&s.text, node.loc, s.content_column) {
-                Ok(kind) => Expr {
-                    loc: node.loc,
-                    kind,
-                }
-                .references()
-                .into_iter()
-                .cloned()
-                .collect(),
-                Err(error) => {
-                    d.push(error);
-                    Vec::new()
-                }
+        Kind::Scalar(Scalar::Str(s)) => match expr::parse_string(&s.text, node.loc, &s.placement) {
+            Ok(kind) => Expr {
+                loc: node.loc,
+                kind,
             }
-        }
+            .references()
+            .into_iter()
+            .cloned()
+            .collect(),
+            Err(error) => {
+                d.push(error);
+                Vec::new()
+            }
+        },
         Kind::Scalar(_) => Vec::new(),
     }
 }

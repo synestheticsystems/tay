@@ -49,10 +49,24 @@ pub enum Scalar {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Str {
     pub text: String,
-    /// The column of the string's first character when every character of the
-    /// value sits in the file one after another on one line (no escapes, no
-    /// folding), so an offset into the value is an offset in the file.
-    pub content_column: Option<u32>,
+    /// Where the value's characters were written, which places each
+    /// reference in it.
+    pub placement: Placement,
+}
+
+/// Where the characters of a string's value were written, so that each
+/// reference in it can be placed where it was written.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Placement {
+    /// Every character of the value sits in the file one after another on
+    /// one line from this column (no escapes, no folding), so an offset into
+    /// the value is an offset in the file.
+    Column(u32),
+    /// Each reference in the value, in order, where it was written: the
+    /// value was made by putting a template's parameters in place.
+    References(Vec<Loc>),
+    /// Not known: every reference is placed at the string's start.
+    AtStart,
 }
 
 impl Node {

@@ -7,7 +7,7 @@ use saphyr_parser::{Event, Parser, ScalarStyle, Span};
 use crate::diagnostic::source::{Loc, SourceId};
 use crate::diagnostic::{Diagnostic, Diagnostics};
 
-use super::{Entry, Kind, Node, Scalar, Str, schema};
+use super::{Entry, Kind, Node, Placement, Scalar, Str, schema};
 
 /// Reads one YAML document. A file that is not valid YAML gives one error and
 /// no tree. Duplicate keys, tags and extra documents are errors too, but the
@@ -197,7 +197,7 @@ impl Builder<'_, '_> {
             ScalarStyle::Literal | ScalarStyle::Folded => {
                 return Scalar::Str(Str {
                     text: value.to_string(),
-                    content_column: None,
+                    placement: Placement::AtStart,
                 });
             }
         };
@@ -216,11 +216,13 @@ impl Builder<'_, '_> {
                 .and_then(|at| self.text.get(*at..))
                 .is_some_and(|rest| rest.starts_with(quote))
         });
-        let content_column = (written == Some(value) && closed && !value.contains('\n'))
-            .then(|| column_of(span.start.col() + usize::from(quote.is_some())));
+        let placement = match written == Some(value) && closed && !value.contains('\n') {
+            true => Placement::Column(column_of(span.start.col() + usize::from(quote.is_some()))),
+            false => Placement::AtStart,
+        };
         Scalar::Str(Str {
             text: value.to_string(),
-            content_column,
+            placement,
         })
     }
 
@@ -327,20 +329,23 @@ mod tests {
     }
 
     #[test]
-    fn content_column_is_known_only_when_the_value_is_written_out_as_is() {
+    fn a_strings_column_is_known_only_when_the_value_is_written_out_as_is() {
         let (node, _) = read(
             "a: x ${y}\nb: \"x ${y}\"\nc: \"x\\t${y}\"\nd: |\n  x ${y}\ne: { f: \"x ${y}\" }\ng: 'it''s ${y}'\n",
         );
         let node = node.unwrap();
         let entries = node.as_map().unwrap();
-        let column = |i: usize| entries[i].value.as_str().map(|s| s.content_column);
-        assert_eq!(column(0), Some(Some(4)));
-        assert_eq!(column(1), Some(Some(5)));
-        assert_eq!(column(2), Some(None));
-        assert_eq!(column(3), Some(None));
+        let column = |i: usize| entries[i].value.as_str().map(|s| s.placement.clone());
+        assert_eq!(column(0), Some(Placement::Column(4)));
+        assert_eq!(column(1), Some(Placement::Column(5)));
+        assert_eq!(column(2), Some(Placement::AtStart));
+        assert_eq!(column(3), Some(Placement::AtStart));
         let flow = entries[4].value.as_map().unwrap();
-        assert_eq!(flow[0].value.as_str().unwrap().content_column, Some(10));
-        assert_eq!(column(5), Some(None));
+        assert_eq!(
+            flow[0].value.as_str().unwrap().placement,
+            Placement::Column(10)
+        );
+        assert_eq!(column(5), Some(Placement::AtStart));
     }
 
     #[test]

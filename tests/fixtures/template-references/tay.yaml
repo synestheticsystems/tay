@@ -1,0 +1,6 @@
+format: 1
+stack: template-references
+up: []
+units:
+  db1: { from: db, params: { name: "${settings.missing}" } }
+  db2: { from: db, params: { name: "app-${nosuch.value}" } }

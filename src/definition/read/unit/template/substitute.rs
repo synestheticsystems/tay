@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use crate::diagnostic::Diagnostics;
 use crate::syntax::expr::{self, ExprKind, Piece, Reference, Target};
-use crate::syntax::yaml::{Entry, Kind, Node, Scalar, Str};
+use crate::syntax::yaml::{Entry, Kind, Node, Placement, Scalar, Str};
 
 /// The template's unit with each `${params.x}` replaced. A string that is the
 /// reference alone becomes the parameter's value, whatever YAML it is; a
@@ -53,7 +53,7 @@ fn substitute_text(
         Target::Param(name) => values.get(name),
         _ => None,
     };
-    let pieces = match expr::parse_string(&s.text, node.loc, s.content_column) {
+    let pieces = match expr::parse_string(&s.text, node.loc, &s.placement) {
         Ok(ExprKind::Ref(reference)) => {
             return Some(param(&reference).cloned().unwrap_or_else(|| node.clone()));
         }
@@ -78,7 +78,7 @@ fn substitute_text(
         };
         match &value.kind {
             Kind::Scalar(Scalar::Str(v)) => {
-                match expr::parse_pieces(&v.text, value.loc, v.content_column) {
+                match expr::parse_pieces(&v.text, value.loc, &v.placement) {
                     Ok(inner) => filled.extend(inner),
                     Err(error) => {
                         d.push(error);
@@ -108,11 +108,20 @@ fn substitute_text(
         );
         return None;
     };
+    // Each reference keeps the place it was written: in the template, or in
+    // the parameter's value in the unit.
+    let written = filled
+        .iter()
+        .filter_map(|piece| match piece {
+            Piece::Ref(reference) => Some(reference.loc),
+            Piece::Lit(_) => None,
+        })
+        .collect();
     Some(Node {
         loc: node.loc,
         kind: Kind::Scalar(Scalar::Str(Str {
             text,
-            content_column: None,
+            placement: Placement::References(written),
         })),
     })
 }
