@@ -61,8 +61,10 @@ impl Daemon {
                 "the environment's intent cannot be written: {error}"
             ));
         }
-        let left = self.stop_everything(&change, because).await;
-        change.say(Event::Down { left });
+        match self.stop_everything(&change, because).await {
+            Ok(left) => change.say(Event::Down { left }),
+            Err(problem) => change.say(Event::Problem { problem }),
+        }
         self.finish(&change);
         self.exit(because.exit());
     }
@@ -85,7 +87,11 @@ impl Daemon {
 
     /// Stops every unit, telling `change`'s followers each change; what
     /// could not be stopped, or was left.
-    async fn stop_everything(&self, change: &Arc<Change>, because: Down) -> Vec<engine::Left> {
+    async fn stop_everything(
+        &self,
+        change: &Arc<Change>,
+        because: Down,
+    ) -> Result<Vec<engine::Left>, String> {
         let units = self.supervisor.snapshot();
         change.say(Event::Units {
             units: units

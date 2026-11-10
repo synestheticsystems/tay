@@ -8,7 +8,6 @@
 //! after any change that started them, and they end with the daemon, which
 //! leaves what they look after running.
 
-mod counts;
 mod restarts;
 mod tending;
 
@@ -21,12 +20,11 @@ use tokio::sync::{mpsc, oneshot, watch};
 use super::fill::UnitValues;
 use super::state::{State, UnitState};
 use super::units::Units;
-use crate::disk::Environment;
 use crate::disk::unit_log::UnitLog;
+use crate::disk::{Counts, Environment};
 use crate::module::{self, Running, Runs, UnitKind, UnitPlace, Values};
 use crate::plan::PlannedUnit;
 
-pub use counts::Counts;
 pub use tending::Begin;
 
 /// How many of the last lines a unit wrote are shown when it fails.

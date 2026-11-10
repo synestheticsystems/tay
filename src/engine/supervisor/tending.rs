@@ -12,9 +12,9 @@ use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
 
-use super::counts::Count;
 use super::{Supervisor, stop_blocking};
 use crate::clock;
+use crate::disk::Count;
 use crate::disk::unit_log::UnitLog;
 use crate::engine::fill;
 use crate::engine::readiness::Probe;
@@ -184,9 +184,12 @@ impl Tending {
             in_a_row: self.in_a_row,
             ready,
         };
-        if let Err(error) = self.supervisor.counts.keep(&self.planned.name, count) {
-            self.unkept = Some(format!("its count of attempts cannot be kept: {error}"));
-        }
+        self.unkept = self
+            .supervisor
+            .counts
+            .keep(&self.planned.name, count)
+            .err()
+            .map(|error| format!("its count of attempts cannot be kept: {error}"));
     }
 
     /// Runs attempt `attempt`, begun now or found `under_way`, and watches

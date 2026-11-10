@@ -30,8 +30,9 @@ enum Pass {
 
 /// Stops each unit `supervisor` knows, recording each as stopped, with
 /// `detail` saying why, and checks that nothing of any is left; what could
-/// not be stopped, or was left, is recorded `failed` and given back.
-pub async fn take_down(supervisor: &Arc<Supervisor>, detail: &str) -> Vec<Left> {
+/// not be stopped, or was left, is recorded `failed` and given back. Why
+/// what runs cannot be told, when it cannot.
+pub async fn take_down(supervisor: &Arc<Supervisor>, detail: &str) -> Result<Vec<Left>, String> {
     let units = supervisor.snapshot();
     let mut left = Vec::new();
     for known in units.iter().rev() {
@@ -61,16 +62,9 @@ pub async fn take_down(supervisor: &Arc<Supervisor>, detail: &str) -> Vec<Left> 
     // then looked for again.
     let known = |unit: &str| units.iter().any(|known| known.planned.name == unit);
     for pass in [Pass::Stop, Pass::Check] {
-        let found = match supervisor.found_running() {
-            Ok(found) => found,
-            Err(why) => {
-                left.push(Left {
-                    unit: "the environment".to_string(),
-                    reason: format!("what runs of its units cannot be told: {why}"),
-                });
-                break;
-            }
-        };
+        let found = supervisor
+            .found_running()
+            .map_err(|why| format!("what runs of the environment's units cannot be told: {why}"))?;
         for (unit, runs) in found {
             if known(&unit) || left.iter().any(|left| left.unit == unit) {
                 continue;
@@ -104,5 +98,5 @@ pub async fn take_down(supervisor: &Arc<Supervisor>, detail: &str) -> Vec<Left> 
             reason,
         });
     }
-    left
+    Ok(left)
 }

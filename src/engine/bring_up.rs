@@ -19,7 +19,7 @@ use super::fill;
 use super::settled::{Settled, Standing};
 use super::state::{State, UnitState};
 use super::supervisor::{Begin, Supervisor};
-use crate::module::{Exists, Made, Operations};
+use crate::module::{Exists, Made, Operations, UnitKind};
 use crate::plan::PlannedUnit;
 
 /// What bringing a plan up comes to for the units it was asked for,
@@ -219,26 +219,34 @@ impl Bringing<'_> {
         made
     }
 
-    /// Whether a unit that uses `unit`'s values runs now, directly or
-    /// through units that use them in turn, as a process does that reads a
-    /// port from a file that is written with it.
+    /// Whether a unit that runs and uses `unit`'s values runs now, directly
+    /// or through units that are made from them, as a process does that
+    /// reads a port from a file written with it. A unit that runs is where
+    /// the chain stops: what needs it holds nothing of `unit`'s.
     fn in_use(&self, unit: &str) -> bool {
-        let mut users = vec![unit.to_string()];
-        let mut grown = true;
-        while grown {
-            grown = false;
+        let made = |name: &str| {
+            self.units.iter().any(|planned| {
+                planned.name == name
+                    && planned
+                        .mechanism
+                        .as_ref()
+                        .is_some_and(|mechanism| matches!(mechanism.kind, UnitKind::Made))
+            })
+        };
+        let mut through = vec![unit.to_string()];
+        let mut users = Vec::new();
+        while let Some(used) = through.pop() {
             for user in self.units.iter() {
-                if !users.contains(&user.name)
-                    && user.needs.iter().any(|need| users.contains(&need.unit))
-                {
-                    users.push(user.name.clone());
-                    grown = true;
+                if !user.needs.iter().any(|need| need.unit == used) || users.contains(&user.name) {
+                    continue;
+                }
+                users.push(user.name.clone());
+                if made(&user.name) {
+                    through.push(user.name.clone());
                 }
             }
         }
-        users[1..]
-            .iter()
-            .any(|user| self.supervisor.is_tended(user))
+        users.iter().any(|user| self.supervisor.is_tended(user))
     }
 
     /// Settles each unit that runs that has become ready or failed, or can

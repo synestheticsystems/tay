@@ -2,6 +2,7 @@
 //! `.tay/`, what identifies it, and whether it is meant to be up.
 
 mod asked;
+mod counts;
 mod identity;
 mod intent;
 mod layout;
@@ -11,6 +12,7 @@ use std::path::PathBuf;
 use super::Machine;
 
 pub use asked::Asked;
+pub use counts::{Count, Counts};
 pub use identity::{Id, Identity};
 pub use intent::Intent;
 pub use layout::Layout;

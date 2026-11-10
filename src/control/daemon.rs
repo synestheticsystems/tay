@@ -30,8 +30,8 @@ use crate::control::protocol::{self, Event, UpRequest};
 use crate::definition::read::THIS_TAY;
 use crate::diagnostic::Diagnostics;
 use crate::diagnostic::source::Sources;
-use crate::disk::{Asked, DiskError, Environment, Identity, Intent, Layout, Lock, Machine};
-use crate::engine::{self, Counts, Supervisor, Told, UnitState};
+use crate::disk::{Asked, Counts, DiskError, Environment, Identity, Intent, Layout, Lock, Machine};
+use crate::engine::{self, Supervisor, Told, UnitState};
 use crate::plan::{self, Plan, PlannedUnit};
 use crate::print;
 
@@ -356,7 +356,9 @@ fn log(line: &str) {
     };
     let long = rustix::fs::fstat(rustix::stdio::stderr())
         .is_ok_and(|stat| u64::try_from(stat.st_size).is_ok_and(|size| size > LOG_SIZE));
-    if long {
+    // A log whose folder has gone, with the environment's, is not made
+    // again.
+    if long && path.parent().is_some_and(Path::exists) {
         // A log that cannot be begun anew is written on as it is: there is
         // nowhere else to say so.
         if let Ok(file) = open_log(path) {

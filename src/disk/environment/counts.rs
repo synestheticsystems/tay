@@ -12,7 +12,8 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
-use crate::disk::{DiskError, Layout, write_whole};
+use super::Layout;
+use crate::disk::{DiskError, write_whole};
 
 /// One unit's count.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
