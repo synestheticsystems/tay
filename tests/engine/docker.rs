@@ -4,8 +4,9 @@
 //! by skipping. Only a few such tests run at once; every container their
 //! environments create is held to a small memory limit as soon as it is
 //! created; and once a test ends, also when it fails, every container,
-//! volume and network that carries the label of one of its environments is
-//! removed. Nothing without such a label is ever touched here.
+//! volume, network and image that carries the label of one of its
+//! environments is removed. Nothing without such a label is ever touched
+//! here.
 
 use std::io::{BufRead, BufReader};
 use std::path::Path;
@@ -142,7 +143,7 @@ impl Docker {
 }
 
 impl Drop for Docker {
-    /// Removes every container, volume and network of the test's
+    /// Removes every container, volume, network and image of the test's
     /// environments, and frees the test's place.
     fn drop(&mut self) {
         let _ = self.events.kill();
@@ -158,8 +159,8 @@ impl Drop for Docker {
     }
 }
 
-/// Removes every container, volume and network that carries the label of
-/// the environment `id`, and nothing else.
+/// Removes every container, volume, network and image that carries the
+/// label of the environment `id`, and nothing else.
 pub fn remove_all_of(id: &str) {
     let label = format!("label=tay.environment={id}");
     for (list, remove) in [
@@ -172,9 +173,16 @@ pub fn remove_all_of(id: &str) {
             vec!["network", "ls", "-q", "--filter", &label],
             vec!["network", "rm"],
         ),
+        (
+            vec!["image", "ls", "-q", "--filter", &label],
+            vec!["image", "rm", "-f"],
+        ),
     ] {
         let listed = docker(&list);
-        let names: Vec<&str> = listed.split_whitespace().collect();
+        let mut names: Vec<&str> = listed.split_whitespace().collect();
+        // An image with several tags is listed once for each.
+        names.sort_unstable();
+        names.dedup();
         if names.is_empty() {
             continue;
         }

@@ -1,9 +1,11 @@
 //! Bringing a container up: its image pulled if it is not here or built,
-//! saying so in its detail; its volumes made and given to their owner; and
+//! saying so in its detail, one built carrying the environment's label and
+//! going with `tay wipe --all`; its volumes made and given to their owner; and
 //! the container created from every setting the format lists, a published
 //! port given to Docker only when the plan opens it.
 
 use super::container;
+use crate::docker::docker;
 use crate::harness::{Machine, log};
 
 #[test]
@@ -60,6 +62,26 @@ fn a_built_image_is_built_saying_so_and_is_ready_when_its_own_health_check_passe
         container(&machine, &root, "healthy").unwrap()["Config"]["Image"],
         tag.as_str()
     );
+    // The image carries the environment's label, and goes with what the
+    // environment keeps.
+    let labels = docker(&[
+        "image",
+        "inspect",
+        "--format",
+        "{{json .Config.Labels}}",
+        &tag,
+    ]);
+    let labels: serde_json::Value = serde_json::from_str(&labels).unwrap();
+    assert_eq!(labels["tay.environment"], machine.id(&root).as_str());
+    assert_eq!(labels["tay.unit"], "healthy");
+    let wipe = machine.at(&root, "wipe", &["--all", "--yes"]);
+    assert_eq!(wipe.code, 0, "{}{}", wipe.stdout, wipe.stderr);
+    assert!(
+        wipe.stdout.contains(&format!("the image `{tag}:latest`")),
+        "{}",
+        wipe.stdout
+    );
+    assert_eq!(docker(&["image", "ls", "-q", &tag]), "");
 }
 
 #[test]

@@ -7,7 +7,8 @@
 //! unit whose removal runs something of its own, as a command's `undo`,
 //! needs what it needs to be up, and the wipe is refused when it is not. With
 //! `--all`, the environment is taken down and everything it keeps removed:
-//! every volume, and `.tay/` but for `choices.yaml`; then the daemon exits.
+//! every volume and every image built for it, and `.tay/` but for
+//! `choices.yaml`; then the daemon exits.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -225,8 +226,9 @@ impl Daemon {
     }
 
     /// Removes everything the environment keeps, once nothing of it runs:
-    /// its volumes, `.tay/` but for `choices.yaml`, and its place on the
-    /// machine's list with the ports it kept. Gives what was removed.
+    /// its volumes and the images built for it, `.tay/` but for
+    /// `choices.yaml`, and its place on the machine's list with the ports
+    /// it kept. Gives what was removed.
     async fn remove_everything(&self) -> Result<Vec<String>, String> {
         let environment = &self.environment;
         let mut removed = module::remove_kept_by_environment(environment)

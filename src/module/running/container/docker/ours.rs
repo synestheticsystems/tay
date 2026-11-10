@@ -1,22 +1,22 @@
-//! What belongs to an environment in Docker. Every container, volume and
-//! network tay creates carries the label `tay.environment`, the
-//! environment's id, and every container and volume `tay.unit`, the unit's
-//! name. Nothing without the environment's label is ever stopped, removed
-//! or changed: this file is the one place that decides what carries it. A
-//! container is started, stopped, removed or run in only through an
-//! [`OurContainer`], which only [`OurContainer::of`] makes from what Docker
-//! says of it, or [`OurContainer::created`] from what tay has just created
-//! with the label; a volume or a network is used only once [`is_ours`]
-//! says it is.
+//! What belongs to an environment in Docker. Every container, volume,
+//! network and image tay creates carries the label `tay.environment`, the
+//! environment's id, and every container, volume and image `tay.unit`, the
+//! unit's name. Nothing without the environment's label is ever stopped,
+//! removed or changed: this file is the one place that decides what
+//! carries it. A container is started, stopped, removed or run in only
+//! through an [`OurContainer`], which only [`OurContainer::of`] makes from
+//! what Docker says of it, or [`OurContainer::created`] from what tay has
+//! just created with the label; a volume, a network or an image is used
+//! only once [`is_ours`] says it is.
 
 use std::collections::HashMap;
 
-/// The label every container, volume and network tay creates carries: the
-/// id of the environment it belongs to.
+/// The label every container, volume, network and image tay creates
+/// carries: the id of the environment it belongs to.
 pub const ENVIRONMENT: &str = "tay.environment";
 
-/// The label every container and volume tay creates carries: the unit it
-/// belongs to.
+/// The label every container, volume and image tay creates carries: the
+/// unit it belongs to.
 pub const UNIT: &str = "tay.unit";
 
 /// The label of a unit's container that says which of its attempts the

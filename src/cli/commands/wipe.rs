@@ -144,9 +144,9 @@ type Kept = Vec<(Option<String>, Vec<String>)>;
 /// answers, or everything the environment keeps.
 fn kept(environment: &Environment, plan: &Plan, args: &Args) -> Result<Kept, Exit> {
     if args.all {
-        let volumes = block_on(COMMAND, module::kept_by_environment(environment))?
+        let outside = block_on(COMMAND, module::kept_by_environment(environment))?
             .map_err(|failure| problem(COMMAND, Exit::Unreachable, &failure.to_string()))?;
-        let everything = volumes
+        let everything = outside
             .into_iter()
             .chain([FOLDER_WIPED, LISTING_WIPED].map(str::to_string));
         return Ok(vec![(None, everything.collect())]);

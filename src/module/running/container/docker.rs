@@ -25,7 +25,7 @@ use bollard::errors::Error as ApiError;
 use crate::disk::DiskError;
 
 pub use container::runs;
-pub use image::Build;
+pub use image::{Build, OurImage};
 pub use io::{Exec, Exited, copy_output};
 pub use network::OurNetwork;
 pub use ours::{OurContainer, Owner};

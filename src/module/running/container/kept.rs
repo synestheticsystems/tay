@@ -1,8 +1,9 @@
 //! What a container keeps: the volumes its unit owns, which hold its data,
 //! and its record; and what an environment keeps in Docker, every volume of
-//! it. Each volume is removed only once Docker says it carries the
-//! environment's label.
+//! it and every image built for it. Each is removed only once Docker says
+//! it carries the environment's label.
 
+use super::docker::OurImage;
 use super::left::docker_of;
 use super::{ContainerSettings, volume_name};
 use crate::disk::Environment;
@@ -45,29 +46,44 @@ impl Keeps for ContainerSettings<Value> {
     }
 }
 
-/// Each volume of `environment`, as a person reads it.
+/// Each volume of `environment` and each image built for it, as a person
+/// reads it.
 pub async fn kept_by_environment(environment: &Environment) -> Result<Vec<String>, Failure> {
     let Some(docker) = docker_of(environment)? else {
         return Ok(Vec::new());
     };
-    let volumes = docker.volumes(environment.id.as_str()).await?;
-    Ok(volumes.iter().map(|name| volume_words(name)).collect())
+    let id = environment.id.as_str();
+    let volumes = docker.volumes(id).await?;
+    let images = docker.images(id).await?;
+    let volumes = volumes.iter().map(|name| volume_words(name));
+    Ok(volumes.chain(images.iter().map(image_words)).collect())
 }
 
-/// Removes every volume of `environment`; each that was removed, as a
-/// person reads it.
+/// Removes every volume of `environment` and every image built for it,
+/// once nothing of it runs; each that was removed, as a person reads it.
 pub async fn remove_kept_by_environment(environment: &Environment) -> Result<Vec<String>, Failure> {
     let Some(docker) = docker_of(environment)? else {
         return Ok(Vec::new());
     };
-    let names = docker.volumes(environment.id.as_str()).await?;
+    let id = environment.id.as_str();
+    let names = docker.volumes(id).await?;
     remove_volumes(environment, &names).await?;
-    Ok(names.iter().map(|name| volume_words(name)).collect())
+    let images = docker.images(id).await?;
+    for image in &images {
+        docker.remove_image(image).await?;
+    }
+    let volumes = names.iter().map(|name| volume_words(name));
+    Ok(volumes.chain(images.iter().map(image_words)).collect())
 }
 
 /// A volume of the environment, as a person reads it.
 fn volume_words(name: &str) -> String {
     format!("the volume `{name}`")
+}
+
+/// An image built for the environment, as a person reads it.
+fn image_words(image: &OurImage) -> String {
+    format!("the image `{}`", image.name)
 }
 
 /// Removes the volumes `names` of `environment`, each once it is found to

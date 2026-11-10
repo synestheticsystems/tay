@@ -1,5 +1,8 @@
 //! A container's image: pulled if it is not here, or built. Either says how
-//! far it has come while it runs.
+//! far it has come while it runs. An image tay builds carries the labels of
+//! the environment and the unit it is built for, as everything tay creates
+//! does, so that it is found by them, and removed with what the
+//! environment keeps.
 //!
 //! An image is built by Docker's own command line, `docker build`, pointed
 //! at the same socket, because Docker's API builds as the command line does
@@ -9,14 +12,18 @@
 //! build under tay. What a build is given holds no secret: the planner
 //! refuses one in a build's settings.
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::process::Stdio;
 
 use futures_util::StreamExt;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
-use bollard::query_parameters::CreateImageOptionsBuilder;
+use bollard::query_parameters::{
+    CreateImageOptionsBuilder, ListImagesOptionsBuilder, RemoveImageOptions,
+};
 
+use super::ours::{ENVIRONMENT, Owner, is_ours};
 use super::{Docker, DockerError, missing};
 
 /// How a pull or a build is told to say how far it has come, in words a
@@ -28,6 +35,8 @@ const STEP: usize = 72;
 
 /// What `docker build` is given.
 pub struct Build<'a> {
+    /// Whom the image is built for, whose labels it carries.
+    pub owner: Owner<'a>,
     /// The image's name and tag.
     pub tag: &'a str,
     pub context: &'a Path,
@@ -100,6 +109,9 @@ impl Docker {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
+        for (label, value) in build.owner.labels() {
+            command.arg("--label").arg(format!("{label}={value}"));
+        }
         if let Some(dockerfile) = build.dockerfile {
             command.arg("--file").arg(build.context.join(dockerfile));
         }
@@ -160,6 +172,58 @@ impl Docker {
         match status.success() {
             true => Ok(()),
             false => Err(failed(format!("`docker build` {status}: {}", last.trim()))),
+        }
+    }
+}
+
+/// An image built for an environment: one Docker says carries its label.
+pub struct OurImage {
+    id: String,
+    /// What a person knows it by: its tag, or its id once a later build
+    /// has taken the tag.
+    pub name: String,
+}
+
+impl Docker {
+    /// The images built for `environment`.
+    pub async fn images(&self, environment: &str) -> Result<Vec<OurImage>, DockerError> {
+        let filters = HashMap::from([("label", vec![format!("{ENVIRONMENT}={environment}")])]);
+        let options = ListImagesOptionsBuilder::default()
+            .filters(&filters)
+            .build();
+        let listed = self
+            .api
+            .list_images(Some(options))
+            .await
+            .map_err(self.failed("list the environment's images"))?;
+        Ok(listed
+            .into_iter()
+            .filter(|image| is_ours(Some(&image.labels), environment))
+            .map(|image| OurImage {
+                name: (image.repo_tags.iter())
+                    .find(|tag| *tag != "<none>:<none>")
+                    .unwrap_or(&image.id)
+                    .clone(),
+                id: image.id,
+            })
+            .collect())
+    }
+
+    /// Removes `image`; one that is gone already is. Docker refuses one
+    /// that someone has given another tag as well, which tay leaves to
+    /// them.
+    pub async fn remove_image(&self, image: &OurImage) -> Result<(), DockerError> {
+        match self
+            .api
+            .remove_image(&image.id, None::<RemoveImageOptions>, None)
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(error) if missing(&error) => Ok(()),
+            Err(error) => {
+                let doing = format!("remove the image `{}`", image.name);
+                Err(self.failed(doing)(error))
+            }
         }
     }
 }

@@ -100,14 +100,14 @@ pub struct SharedLeft {
 }
 
 /// What the environment keeps where its units run, beyond its folder, as a
-/// person reads each: its volumes.
+/// person reads each: its volumes, and the images built for it.
 pub async fn kept_by_environment(environment: &Environment) -> Result<Vec<String>, Failure> {
     container::kept_by_environment(environment).await
 }
 
 /// Removes what the environment keeps where its units run, once every
-/// unit of it is stopped: its volumes. Gives what was removed, as a person
-/// reads each.
+/// unit of it is stopped: its volumes, and the images built for it. Gives
+/// what was removed, as a person reads each.
 pub async fn remove_kept_by_environment(environment: &Environment) -> Result<Vec<String>, Failure> {
     container::remove_kept_by_environment(environment).await
 }

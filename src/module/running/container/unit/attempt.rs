@@ -168,6 +168,10 @@ impl ContainerUnit {
                     .map(|dockerfile| operations::text(dockerfile, "build"))
                     .transpose()?;
                 let build = Build {
+                    owner: Owner {
+                        environment: place.environment.id.as_str(),
+                        unit: Some(&place.unit),
+                    },
                     tag: &name,
                     context: Path::new(operations::text(context, "build")?),
                     dockerfile,
