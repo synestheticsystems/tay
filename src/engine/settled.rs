@@ -142,6 +142,7 @@ mod tests {
             asked: crate::disk::Asked::default(),
             home: None,
             shared_folders: None,
+            action: None,
         };
         let (mut sources, mut d) = (Sources::default(), Diagnostics::default());
         match plan::plan(root.path(), &options, &mut sources, &mut d) {

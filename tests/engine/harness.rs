@@ -122,7 +122,13 @@ impl Machine {
     /// `tay up` at `root`, started, with its standard output read a line at
     /// a time.
     pub fn spawn_up(&self, root: &Path, args: &[&str]) -> Following {
-        let mut all = vec!["up", "--root", root.to_str().unwrap()];
+        self.spawn(root, "up", args)
+    }
+
+    /// `tay COMMAND --root ROOT ARGS`, started, with its standard output
+    /// read a line at a time.
+    pub fn spawn(&self, root: &Path, command: &str, args: &[&str]) -> Following {
+        let mut all = vec![command, "--root", root.to_str().unwrap()];
         all.extend(args);
         let mut command = self.command(root, &all);
         command.stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -365,7 +371,7 @@ fn wait_for(child: &mut Child, limit: Duration) {
     let _ = child.wait();
 }
 
-/// A `tay up` under way, read as it prints.
+/// A command under way, read as it prints.
 pub struct Following {
     child: Child,
     stdout: BufReader<ChildStdout>,
@@ -381,7 +387,7 @@ impl Following {
             let read = self.stdout.read_line(&mut line).unwrap();
             assert!(
                 read > 0,
-                "`tay up` ended before it printed `{text}`:\n{}",
+                "the command ended before it printed `{text}`:\n{}",
                 self.read
             );
             self.read.push_str(&line);

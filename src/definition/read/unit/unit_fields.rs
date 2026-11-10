@@ -21,11 +21,11 @@ pub fn args(node: &Node, d: &mut Diagnostics) -> Vec<Arg> {
         .into_iter()
         .filter_map(|(name, decl)| {
             let decl = Fields::of(decl, "an argument's declaration", &["default"], d)?;
-            let ty = match decl.get("default") {
-                Some(default) => Some(fields::literal(default, "an argument's default", d)?.ty()),
+            let default = match decl.get("default") {
+                Some(default) => Some(fields::literal(default, "an argument's default", d)?),
                 None => None,
             };
-            Some(Arg { name, ty })
+            Some(Arg { name, default })
         })
         .collect()
 }

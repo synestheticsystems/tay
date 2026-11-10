@@ -145,3 +145,22 @@ fn a_commands_container_found_created_and_never_started_is_not_done() {
     );
     assert!(super::container(&machine, &root, "stamped").is_none());
 }
+
+#[test]
+fn an_action_run_in_a_container_prints_what_it_writes_gives_its_values_and_exits_as_it_did() {
+    let machine = Machine::with_docker();
+    let root = machine.stack("containers");
+    assert_eq!(machine.at(&root, "up", &["ticker"]).code, 0);
+    let run = machine.at(&root, "run", &["shout", "word=hello"]);
+    assert_eq!(run.code, 0, "{}{}", run.stdout, run.stderr);
+    assert_eq!(run.stdout, "hello from a box\nheard  hello\n");
+    let failed = machine.at(&root, "run", &["shout", "word=hi", "code=4"]);
+    assert_eq!(failed.code, 4, "{}{}", failed.stdout, failed.stderr);
+    assert_eq!(failed.stdout, "hi from a box\n");
+    // Its container is removed once it has ended.
+    let [containers, _, _] = labelled(&machine, &root);
+    assert!(
+        !containers.iter().any(|name| name.ends_with("-shout")),
+        "{containers:?}"
+    );
+}

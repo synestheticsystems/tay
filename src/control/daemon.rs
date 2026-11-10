@@ -13,6 +13,7 @@ mod change;
 mod down;
 mod restart;
 mod routes;
+mod run;
 mod serve;
 mod up;
 
@@ -245,6 +246,7 @@ fn options(asked: Asked, home: Option<PathBuf>) -> Options {
         asked,
         home,
         shared_folders: disk::shared_folders(),
+        action: None,
     }
 }
 

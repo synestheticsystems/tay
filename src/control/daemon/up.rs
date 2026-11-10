@@ -8,7 +8,7 @@ use crate::control::protocol::{Event, UpRequest};
 use crate::disk::{Asked, Intent};
 use crate::engine::{self, Decision};
 use crate::module::Occasion;
-use crate::plan::PlannedUnit;
+use crate::plan::{Options, Plan, PlannedUnit};
 
 impl Daemon {
     /// Brings up what `request` asks for, joined with what the environment
@@ -33,51 +33,24 @@ impl Daemon {
             self.fail(&change, &error.to_string());
             return;
         }
-        let root = self.environment.layout.root().to_path_buf();
         let options = options(asked, request.home);
-        let plan = match tokio::task::spawn_blocking(move || planned(&root, &options)).await {
-            Ok(Ok(plan)) => plan,
-            Ok(Err(unplanned)) => {
-                change.say(Event::Errors {
-                    lines: unplanned.lines,
-                    too_old: unplanned.too_old,
-                });
-                self.finish(&change);
-                return;
-            }
-            Err(error) => {
-                self.fail(
-                    &change,
-                    &format!("tay failed while planning the stack: {error}"),
-                );
-                return;
-            }
-        };
-        let shared = self.environment.machine.shared(&plan.stack);
-        if let Err(error) = std::fs::create_dir_all(&shared) {
-            let reason = format!(
-                "the shared folder `{}` cannot be made: {error}",
-                shared.display()
-            );
-            self.fail(&change, &reason);
+        if let Some(plan) = self.plan(&change, options).await {
+            self.bring_up_plan(&change, plan).await;
+        }
+    }
+
+    /// Brings `plan` up as `tay up` does: what runs and the plan no longer
+    /// has is stopped first, and then every unit of the plan is brought
+    /// up, telling `change`'s followers each change of state and the
+    /// decision; then the change is over.
+    pub(super) async fn bring_up_plan(&self, change: &Arc<Change>, plan: Plan) {
+        let asked = plan.up.clone();
+        let Some(units) = self.take_in_plan(change, plan).await else {
             return;
-        }
-        // `${host.listen}` is learnt where units run before any unit's
-        // settings are filled.
-        if plan.uses_host_listen {
-            self.supervisor
-                .learn_host_listen(Occasion::BringingUp)
-                .await;
-        }
-        let units: Vec<Arc<PlannedUnit>> = plan.units.into_iter().map(Arc::new).collect();
-        // What runs of a unit set apart that the plan has again, as one a
-        // daemon found running that its plan then lacked, is found again
-        // where it runs, and not started a second time.
-        let returned = self.supervisor.take_in(&units);
-        engine::find_again(&self.supervisor, &returned, true).await;
+        };
         if let Err(why) = engine::find_unplanned(&self.supervisor).await {
             self.fail(
-                &change,
+                change,
                 &format!("what is left of units the plan does not have cannot be told: {why}"),
             );
             return;
@@ -112,21 +85,85 @@ impl Daemon {
                 });
             }
         }
-        self.settle(&change, &units, &plan.up).await;
+        let settled = self
+            .settle(change, &units, &asked, &mut Event::Decided)
+            .await;
+        self.end(change, settled);
+    }
+
+    /// Plans the stack with `options`, as `tay plan` would; `None` when it
+    /// does not plan, which `change`'s followers are told, and the change
+    /// is over.
+    pub(super) async fn plan(&self, change: &Arc<Change>, options: Options) -> Option<Plan> {
+        let root = self.environment.layout.root().to_path_buf();
+        match tokio::task::spawn_blocking(move || planned(&root, &options)).await {
+            Ok(Ok(plan)) => Some(plan),
+            Ok(Err(unplanned)) => {
+                change.say(Event::Errors {
+                    lines: unplanned.lines,
+                    too_old: unplanned.too_old,
+                });
+                self.finish(change);
+                None
+            }
+            Err(error) => {
+                self.fail(
+                    change,
+                    &format!("tay failed while planning the stack: {error}"),
+                );
+                None
+            }
+        }
+    }
+
+    /// Takes in the units of `plan`, once what they need of the machine is
+    /// there: the stack's shared folder made, and `${host.listen}` learnt.
+    /// A unit set apart that the plan has again, as one a daemon found
+    /// running that its plan then lacked, is found again where it runs,
+    /// and not started a second time. Gives the plan's units; `None` when
+    /// the change has failed.
+    pub(super) async fn take_in_plan(
+        &self,
+        change: &Arc<Change>,
+        plan: Plan,
+    ) -> Option<Vec<Arc<PlannedUnit>>> {
+        let shared = self.environment.machine.shared(&plan.stack);
+        if let Err(error) = std::fs::create_dir_all(&shared) {
+            let reason = format!(
+                "the shared folder `{}` cannot be made: {error}",
+                shared.display()
+            );
+            self.fail(change, &reason);
+            return None;
+        }
+        // `${host.listen}` is learnt where units run before any unit's
+        // settings are filled.
+        if plan.uses_host_listen {
+            self.supervisor
+                .learn_host_listen(Occasion::BringingUp)
+                .await;
+        }
+        let units: Vec<Arc<PlannedUnit>> = plan.units.into_iter().map(Arc::new).collect();
+        let returned = self.supervisor.take_in(&units);
+        engine::find_again(&self.supervisor, &returned, true).await;
+        Some(units)
     }
 
     /// Brings up `units`, in their order, until each has settled, telling
-    /// `change`'s followers each change of state and, once it is decided,
-    /// whether everything in `asked` is ready; then the change is over.
+    /// `change`'s followers each change of state and, once it is decided
+    /// whether everything in `asked` is ready, the event `said` makes of
+    /// the decision, which is the last they are told. Why the change came
+    /// to no decision though nothing cancelled it, when it did not.
     pub(super) async fn settle(
         &self,
         change: &Arc<Change>,
         units: &[Arc<PlannedUnit>],
         asked: &[String],
-    ) {
+        said: &mut (dyn FnMut(Decision) -> Event + Send),
+    ) -> Result<(), String> {
         let mut decided = |decision: Decision| {
             log(&format!("{}: {}", change.describe(), words(&decision)));
-            change.say(Event::Decided(decision));
+            change.say(said(decision));
             change.close();
         };
         let mut noticed = |notice: String| change.say(Event::Notice { notice });
@@ -139,21 +176,27 @@ impl Daemon {
             change.cancelled(),
         )
         .await;
-        if decided.is_none() {
-            match change.cancelled_by() {
-                Some(by) => {
-                    log(&format!("{}: cancelled by {by}", change.describe()));
-                    change.say(Event::Cancelled { by: by.to_string() });
-                }
-                // Every unit settles or is cancelled, so this is a fault in
-                // tay, which is said rather than left to hang the change.
-                None => {
-                    self.fail(change, "tay ended the change before it was decided");
-                    return;
-                }
-            }
+        if decided.is_some() {
+            return Ok(());
         }
-        self.finish(change);
+        match change.cancelled_by() {
+            Some(by) => {
+                log(&format!("{}: cancelled by {by}", change.describe()));
+                change.say(Event::Cancelled { by: by.to_string() });
+                Ok(())
+            }
+            // Every unit settles or is cancelled, so this is a fault in tay,
+            // which is said rather than left to hang the change.
+            None => Err("tay ended the change before it was decided".to_string()),
+        }
+    }
+
+    /// The change is over, as [`Daemon::settle`] says it settled.
+    pub(super) fn end(&self, change: &Arc<Change>, settled: Result<(), String>) {
+        match settled {
+            Ok(()) => self.finish(change),
+            Err(reason) => self.fail(change, &reason),
+        }
     }
 
     /// A change that could not be made: its followers are told why.

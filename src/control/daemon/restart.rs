@@ -71,6 +71,9 @@ impl Daemon {
         let named: Vec<String> = (restarting.named.iter())
             .map(|planned| planned.name.clone())
             .collect();
-        self.settle(&change, &restarting.with_needs, &named).await;
+        let settled = self
+            .settle(&change, &restarting.with_needs, &named, &mut Event::Decided)
+            .await;
+        self.end(&change, settled);
     }
 }

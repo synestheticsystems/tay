@@ -70,6 +70,10 @@ struct CommandSettings<V> {
     stdin: Option<V>,
     /// The values the command writes out, each with whether it is secret.
     produces: Vec<(NameAt, bool)>,
+    /// Whether the values it writes out are kept, so that a daemon started
+    /// afresh gives them too: they are, unless it is an action, whose
+    /// values go to whoever runs it.
+    keeps_values: bool,
     /// The files the command builds, by name.
     outputs: Vec<(NameAt, V)>,
 }
@@ -112,6 +116,7 @@ impl<V> MapValues for CommandSettings<V> {
             variables: variables?,
             stdin: stdin?,
             produces: self.produces.clone(),
+            keeps_values: self.keeps_values,
             outputs: outputs?,
         })
     }
@@ -287,6 +292,7 @@ fn read(with: Option<&Node>, cx: &mut Cx<'_>) -> Option<(CommandSettings<Slot>, 
         variables,
         stdin,
         produces,
+        keeps_values: !cx.is_action,
         outputs,
     };
     Some((settings, runs))

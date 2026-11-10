@@ -58,6 +58,7 @@ pub fn options(
         asked: remembered.with(profile, sets, units),
         home: std::env::var_os("HOME").map(PathBuf::from),
         shared_folders: disk::shared_folders(),
+        action: None,
     })
 }
 

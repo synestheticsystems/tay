@@ -1,0 +1,42 @@
+format: 1
+stack: run
+up: [web]
+units:
+  web:
+    doc: Ticks for ever.
+    uses: process
+    with: { command: ["${environment.root}/services/ticker.sh"] }
+  worker:
+    doc: Says it is up in a file, then ticks for ever. Nothing in `up` needs it.
+    uses: process
+    with: { command: ["${environment.root}/services/worker.sh", "${environment.state}/worker-up"] }
+    ready: { log: working, within: 20s }
+  mint:
+    doc: Mints a session for one user, and a token for it, which is a secret.
+    action: true
+    args:
+      user: {}
+      hours: { default: 8 }
+    needs: [web]
+    uses: command
+    with:
+      run: ["${environment.root}/services/mint.sh", "${args.user}", "${args.hours}"]
+      produces: { session: {}, token: { secret: true } }
+  fail:
+    doc: Says it fails, and exits with the code it is given.
+    action: true
+    args:
+      code: { default: 3 }
+    uses: command
+    with: { run: ["${environment.root}/services/fail.sh", "${args.code}"] }
+  seed:
+    doc: Needs the worker, and says whether it found it up.
+    action: true
+    needs: [worker]
+    uses: command
+    with: { run: ["${environment.root}/services/seed.sh", "${environment.state}/worker-up"] }
+  slow:
+    doc: Says it waits, and waits for a file before it says it went.
+    action: true
+    uses: command
+    with: { run: ["${environment.root}/services/slow.sh", "${environment.state}/go"] }

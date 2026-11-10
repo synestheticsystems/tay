@@ -6,3 +6,8 @@ units:
   config:
     uses: file
     with: { content: "port: ${config-port.number}\n" }
+  note:
+    doc: An action that does nothing, for a run to be asked for.
+    action: true
+    uses: command
+    with: { run: ["true"] }

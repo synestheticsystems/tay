@@ -4,7 +4,7 @@
 use crate::definition::{SettingValue, reference_errors};
 use crate::diagnostic::Diagnostic;
 use crate::plan::resolve::resolved::Resolved;
-use crate::syntax::expr::{Literal, Reference};
+use crate::syntax::expr::Reference;
 use crate::value::{Kept, Placeholder, Value};
 
 use super::{Fail, Res, Resolver};
@@ -52,9 +52,7 @@ impl Resolver<'_> {
                 name: name.to_string(),
                 value: Kept(literal),
             }),
-            Literal::Text(text) => Value::text(text),
-            Literal::Number(n) => Value::Number(n),
-            Literal::Bool(b) => Value::Bool(b),
+            literal => Value::from(literal),
         };
         Ok(Resolved {
             begins_with_setting: true,

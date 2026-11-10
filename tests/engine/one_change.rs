@@ -299,3 +299,23 @@ fn restart_is_refused_while_another_change_runs() {
     drop(list);
     assert_eq!(up.finish().code, 0);
 }
+
+#[test]
+fn run_is_refused_while_another_change_runs() {
+    let machine = Machine::new();
+    let root = up_once(&machine);
+    let list = hold_the_list(&machine);
+    let up = starting_port(&root, &machine);
+    let refused = machine.at(&root, "run", &["note"]);
+    assert_eq!(refused.code, 4, "{}{}", refused.stdout, refused.stderr);
+    assert!(
+        refused
+            .stderr
+            .starts_with("tay run: another change is running: `tay up`, since 2"),
+        "{}",
+        refused.stderr
+    );
+    drop(list);
+    assert_eq!(up.finish().code, 0);
+    assert_eq!(machine.at(&root, "run", &["note"]).code, 0);
+}

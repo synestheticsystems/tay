@@ -1,5 +1,5 @@
 //! The command line: `tay plan`, `tay up`, `tay down`, `tay status`,
-//! `tay logs`, `tay ls`, `tay restart`, `tay set`, `tay unset`,
+//! `tay logs`, `tay ls`, `tay restart`, `tay run`, `tay set`, `tay unset`,
 //! `tay --version` and `tay --help`; `tay daemon`,
 //! which a command runs to start an environment's daemon; and `tay keep`,
 //! which the daemon runs to keep one program of a unit.
@@ -18,31 +18,41 @@ use crate::keeper;
 use crate::print::{err, out};
 
 use args::{Takes, Words};
-use commands::{down, logs, ls, plan, restart, set, status, unset, up};
+use commands::{down, logs, ls, plan, restart, run, set, status, unset, up};
 
 /// How a command ends, as its exit code says it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Exit {
     /// Done: the plan is sound, everything asked for is ready, or nothing
     /// is left running.
-    Done = 0,
+    Done,
     /// A unit failed, or something was left that could not be stopped.
-    Failed = 1,
+    Failed,
     /// The definitions have errors, or what was asked does not fit the
     /// stack.
-    Errors = 2,
+    Errors,
     /// This tay is too old for the definitions.
-    TooOld = 3,
+    TooOld,
     /// Refused as things stand: another change is running, or what was
     /// asked needs something that is not up.
-    Refused = 4,
+    Refused,
     /// The daemon could not be started or reached.
-    Unreachable = 5,
+    Unreachable,
+    /// The action `tay run` ran exited with this code, which is not 0.
+    Action(u8),
 }
 
 impl From<Exit> for ExitCode {
     fn from(exit: Exit) -> ExitCode {
-        ExitCode::from(exit as u8)
+        ExitCode::from(match exit {
+            Exit::Done => 0,
+            Exit::Failed => 1,
+            Exit::Errors => 2,
+            Exit::TooOld => 3,
+            Exit::Refused => 4,
+            Exit::Unreachable => 5,
+            Exit::Action(code) => code,
+        })
     }
 }
 
@@ -61,6 +71,7 @@ Usage:
   tay logs [UNIT...] [--root FOLDER] [--since TIME] [--follow]
   tay ls [--root FOLDER] [--json]
   tay restart UNIT... [--root FOLDER] [--json]
+  tay run ACTION [NAME=VALUE...] [--root FOLDER] [--json]
   tay set [PLACE=VALUE...] [--root FOLDER] [--json]
   tay unset PLACE... [--root FOLDER] [--json]
   tay --version
@@ -99,6 +110,14 @@ attempt, bringing up what it needs as tay up would, and leaving the units that
 need it as they run; a command is run again from its check. A unit that is
 made has nothing to restart, and neither has an environment that is down.
 
+tay run runs a unit that has `action: true`, given each argument it
+declares as NAME=VALUE, after bringing up what it needs as tay up would, on
+an environment that is up. An argument it does not declare, one of another
+type than its default, or a missing one that has no default, is an error
+before anything runs. It prints what the action writes as it writes it,
+then each value the action produced, by name, a secret one as <secret>, and
+it exits as the action did. Nothing the action gave is kept.
+
 tay set changes what the environment remembers being asked for, in the places
 --set takes, and touches no unit until the next tay up: tay up --set is the
 same thing followed by up. Each is checked as tay up --set checks it, and
@@ -116,9 +135,9 @@ Options:
                       run.units.UNIT, settings.NAME or label; a list is
                       written with commas
   --json              print for programs, in schema 1: the plan, each event of
-                      up, down and restart as a JSON object on a line, the
-                      units of status, the environments of ls, and what set
-                      and unset list
+                      up, down, restart and run as a JSON object on a line,
+                      the units of status, the environments of ls, and what
+                      set and unset list
   --since TIME        of logs: only what was written in the last TIME, a
                       whole number followed by s, m or h, such as 10m
   --follow            of logs: go on printing what the units write
@@ -164,6 +183,7 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> ExitCode {
         Some("daemon") => (&DAEMON, run_daemon),
         Some("logs") => (&logs::TAKES, logs::run),
         Some("restart") => (&restart::TAKES, restart::run),
+        Some("run") => (&run::TAKES, run::run),
         Some("set") => (&set::TAKES, set::run),
         Some("unset") => (&unset::TAKES, unset::run),
         Some("keep") => return keeper::keep(args),

@@ -1,7 +1,9 @@
 //! A change's events as `tay up` and `tay down` print them while they
 //! happen: each change of state on a line of its own, and at the end what
-//! the change came to. With `--json`, each is a JSON object on a line, in
-//! a versioned schema.
+//! the change came to. `tay run` prints what the action writes, and the
+//! values it produced, on standard output, and its own lines on standard
+//! error. With `--json`, each is a JSON object on a line, in a versioned
+//! schema.
 
 use serde_json::{Value, json};
 
@@ -16,10 +18,16 @@ use crate::print::{err, out};
 /// new number.
 pub const SCHEMA: u32 = 1;
 
+/// What a value declared secret is shown as: never its value.
+const SECRET: &str = "<secret>";
+
 /// Prints the events of the change `command` asked for.
 pub struct Printer {
     command: &'static str,
     json: bool,
+    /// Where tay's own lines go, as text: standard output, or standard
+    /// error for a command whose standard output is an action's.
+    own: fn(&str),
     /// How wide unit names are printed, so that states line up.
     width: usize,
     /// How the command ends, once the change has said.
@@ -31,8 +39,19 @@ impl Printer {
         Printer {
             command,
             json,
+            own: out,
             width: 0,
             exit: None,
+        }
+    }
+
+    /// The printer of a command whose standard output is what an action
+    /// writes, and the values it produced: tay's own lines go to standard
+    /// error.
+    pub fn beside_output(command: &'static str, json: bool) -> Printer {
+        Printer {
+            own: err,
+            ..Printer::new(command, json)
         }
     }
 
@@ -44,7 +63,22 @@ impl Printer {
 
     pub fn event(&mut self, event: Event) {
         self.exit = match &event {
-            Event::Units { .. } | Event::State { .. } | Event::Notice { .. } => self.exit,
+            Event::Units { .. }
+            | Event::State { .. }
+            | Event::Notice { .. }
+            | Event::Output { .. } => self.exit,
+            Event::Ran {
+                decision: Decision::Ready,
+                ..
+            } => Some(Exit::Done),
+            // An action that failed exits as its program did, unless how
+            // is not known, or says nothing of failing.
+            Event::Ran { exit_status, .. } => Some(
+                exit_status
+                    .and_then(|status| u8::try_from(status).ok())
+                    .filter(|code| *code != 0)
+                    .map_or(Exit::Failed, Exit::Action),
+            ),
             Event::Errors { too_old: true, .. } => Some(Exit::TooOld),
             Event::Errors { .. } => Some(Exit::Errors),
             Event::Decided(Decision::Ready) => Some(Exit::Done),
@@ -63,6 +97,7 @@ impl Printer {
 
     fn text(&mut self, event: Event) {
         let command = self.command;
+        let own = self.own;
         match event {
             Event::Units { units } => {
                 self.width = units.iter().map(String::len).max().unwrap_or(0);
@@ -72,12 +107,12 @@ impl Printer {
                 state,
                 detail,
                 ..
-            } => out(&format!(
+            } => own(&format!(
                 "  {unit:<width$}  {:<8}  {detail}\n",
                 state.word(),
                 width = self.width
             )),
-            Event::Notice { notice } => out(&format!("{command}: {notice}.\n")),
+            Event::Notice { notice } => own(&format!("{command}: {notice}.\n")),
             Event::Errors { lines, too_old } => {
                 for line in &lines {
                     err(&format!("{line}\n"));
@@ -88,42 +123,74 @@ impl Printer {
                     ));
                 }
             }
-            Event::Decided(Decision::Ready) => {
-                out(&format!("{command}: everything asked for is ready.\n"));
-            }
-            Event::Decided(Decision::Failed { failed }) => {
-                for failed in failed {
-                    out(&format!(
-                        "{command}: `{}` failed: {}\n",
-                        failed.unit, failed.reason
-                    ));
-                    if !failed.lines.is_empty() {
-                        out("  the last lines it wrote:\n");
-                        for line in &failed.lines {
-                            out(&format!("    {line}\n"));
-                        }
-                    }
-                    if !failed.waiting.is_empty() {
-                        out(&format!(
-                            "  waiting on it: {}\n",
-                            quoted_list(&failed.waiting)
-                        ));
-                    }
-                }
-            }
-            Event::Cancelled { by } => out(&format!("{command}: cancelled by {by}.\n")),
+            Event::Decided(decision) => self.decision(decision),
+            Event::Cancelled { by } => own(&format!("{command}: cancelled by {by}.\n")),
             Event::Down { left } if left.is_empty() => {
-                out(&format!("{command}: nothing is left running.\n"));
+                own(&format!("{command}: nothing is left running.\n"));
             }
             Event::Down { left } => {
                 for left in left {
-                    out(&format!(
+                    own(&format!(
                         "{command}: `{}` is left: {}\n",
                         left.unit, left.reason
                     ));
                 }
             }
             Event::Problem { problem } => err(&format!("{command}: {problem}\n")),
+            Event::Output { line } => {
+                out(&format!("{line}\n"));
+            }
+            Event::Ran {
+                decision, values, ..
+            } => {
+                match decision {
+                    Decision::Ready => own(&format!("{command}: the action is done.\n")),
+                    failed => self.decision(failed),
+                }
+                if !values.is_empty() {
+                    own(&format!("{command}: the action produced:\n"));
+                }
+                let width = values.iter().map(|value| value.name.len()).max();
+                for produced in values {
+                    let value = produced.value.as_deref().unwrap_or(SECRET);
+                    out(&format!(
+                        "{:<width$}  {value}\n",
+                        produced.name,
+                        width = width.unwrap_or(0)
+                    ));
+                }
+            }
+        }
+    }
+
+    /// Says what a change that brings units up came to.
+    fn decision(&self, decision: Decision) {
+        let command = self.command;
+        let own = self.own;
+        match decision {
+            Decision::Ready => {
+                own(&format!("{command}: everything asked for is ready.\n"));
+            }
+            Decision::Failed { failed } => {
+                for failed in failed {
+                    own(&format!(
+                        "{command}: `{}` failed: {}\n",
+                        failed.unit, failed.reason
+                    ));
+                    if !failed.lines.is_empty() {
+                        own("  the last lines it wrote:\n");
+                        for line in &failed.lines {
+                            own(&format!("    {line}\n"));
+                        }
+                    }
+                    if !failed.waiting.is_empty() {
+                        own(&format!(
+                            "  waiting on it: {}\n",
+                            quoted_list(&failed.waiting)
+                        ));
+                    }
+                }
+            }
         }
     }
 
@@ -155,6 +222,20 @@ impl Printer {
                 "left": left.iter().map(|left| json!({ "unit": left.unit, "reason": left.reason })).collect::<Vec<_>>(),
             }),
             Event::Problem { problem } => json!({ "event": "problem", "problem": problem }),
+            Event::Output { line } => json!({ "event": "output", "line": line }),
+            Event::Ran {
+                decision,
+                exit_status,
+                values,
+            } => {
+                let mut ran = self.decision_json(decision);
+                ran["exit_status"] = json!(exit_status);
+                ran["values"] = values
+                    .iter()
+                    .map(|produced| json!({ "name": produced.name, "value": produced.value }))
+                    .collect();
+                ran
+            }
         };
         if let Value::Object(fields) = &mut line {
             fields.insert("schema".to_string(), json!(SCHEMA));

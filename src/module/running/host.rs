@@ -199,12 +199,14 @@ pub fn ending(end: &StepEnd, after: &str) -> Outcome {
         StepEnd::Ended(ended) => Outcome::Ended {
             failed: !ended.how.succeeded(),
             detail: format!("{}{after}", ended_words(ended)),
+            exit_status: ended.how.exit_status(),
         },
         StepEnd::Lost => Outcome::Ended {
             failed: true,
             detail: format!(
                 "ended with no record of how{after}: its keeper was lost, and what was left of it was stopped"
             ),
+            exit_status: None,
         },
         StepEnd::Gone => Outcome::Failed(GONE.to_string()),
     }

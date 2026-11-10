@@ -3,6 +3,7 @@
 //! could start in. It works from what modules say about units and never
 //! asks which module a unit uses.
 
+mod action;
 mod assemble;
 mod choices;
 mod model;
@@ -21,6 +22,7 @@ use crate::diagnostic::{Diagnostic, Diagnostics};
 use crate::disk::Asked;
 use crate::syntax::expr::Expr;
 
+pub use action::ActionRun;
 pub use model::{
     Because, Given, OpenedBy, Plan, PlannedMechanism, PlannedUnit, PublishedPort, Readiness, Seen,
     Unreachable,
@@ -38,6 +40,9 @@ pub struct Options {
     pub home: Option<PathBuf>,
     /// The folder that holds each stack's shared folder, when it is known.
     pub shared_folders: Option<PathBuf>,
+    /// The action `tay run` runs and its arguments, which comes into the
+    /// plan beside what `up` brings; `None` for every other command.
+    pub action: Option<ActionRun>,
 }
 
 pub enum Outcome {
@@ -83,6 +88,10 @@ pub fn plan(root: &Path, options: &Options, sources: &mut Sources, d: &mut Diagn
         && (options.asked.profile.is_some()
             || stack.default_profile.is_some()
             || stack.profiles.len() > 1);
+    let action = match &options.action {
+        Some(run) if every_file_parsed => action::asked(&stack, run, sources, d),
+        _ => None,
+    };
     if every_file_parsed {
         read::cross_references::check(&stack, &places.in_order(), d);
         if !profile_missing {
@@ -110,13 +119,14 @@ pub fn plan(root: &Path, options: &Options, sources: &mut Sources, d: &mut Diagn
     ) else {
         return Outcome::Errors;
     };
+    let (action, arguments) = action.unzip();
     let mut planner = Planner {
-        resolver: Resolver::new(&stack, &layered, environment, sources),
+        resolver: Resolver::new(&stack, &layered, environment, arguments, sources),
         root: root.to_path_buf(),
         production: production.is_some(),
         template_files: HashMap::new(),
     };
-    let reached = planner.reach(&layered.up);
+    let reached = planner.reach(&[layered.up.as_slice(), action.as_slice()].concat());
     if let (Some(profile), Some(marked_at)) = (profile, production) {
         planner.refuse_for_production(&profile.name, marked_at, &reached);
     }
@@ -176,6 +186,7 @@ mod tests {
             },
             home: Some(fixtures.join("homes/none")),
             shared_folders: Some(fixtures.join("homes/none/.local/share/tay")),
+            action: None,
         };
         let mut sources = Sources::default();
         let mut d = Diagnostics::default();

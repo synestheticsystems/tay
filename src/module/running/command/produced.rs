@@ -2,7 +2,8 @@
 //! one JSON object, to the file named by `TAY_VALUES`. Once the command is
 //! done they are kept, so that a daemon started afresh gives them too: in
 //! the unit's own folder, and a value declared secret with the secrets,
-//! readable by this account only. Nothing tay says of them quotes them.
+//! readable by this account only. An action's are not kept: they go to
+//! whoever runs it. Nothing tay says of them quotes them.
 
 use std::collections::BTreeMap;
 use std::fs::{self, DirBuilder, Permissions};
@@ -71,8 +72,13 @@ pub fn written(place: &UnitPlace) -> bool {
 }
 
 /// The values the step that ran wrote, checked against the names `declared`
-/// with whether each is secret, and kept.
-pub fn take(place: &UnitPlace, declared: &[(NameAt, bool)]) -> Result<Values, Failure> {
+/// with whether each is secret, and kept when the command `keeps` its
+/// values.
+pub fn take(
+    place: &UnitPlace,
+    declared: &[(NameAt, bool)],
+    keeps: bool,
+) -> Result<Values, Failure> {
     let path = file(place);
     let written = match fs::read_to_string(&path) {
         Ok(text) => match serde_json::from_str::<Json>(&text) {
@@ -102,7 +108,9 @@ pub fn take(place: &UnitPlace, declared: &[(NameAt, bool)]) -> Result<Values, Fa
             false => plain.insert(name.name.clone(), value.clone()),
         };
     }
-    keep(place, &plain, &secret)?;
+    if keeps {
+        keep(place, &plain, &secret)?;
+    }
     clear(place)?;
     values(declared, &plain, &secret)
 }

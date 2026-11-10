@@ -57,6 +57,17 @@ impl Ending {
     pub fn succeeded(&self) -> bool {
         matches!(self, Ending::Code { code: 0 })
     }
+
+    /// The program's exit status, as a shell gives it: its code, or 128
+    /// and the number of the signal that ended it; `None` when it was not
+    /// started.
+    pub fn exit_status(&self) -> Option<i64> {
+        match self {
+            Ending::Code { code } => Some(i64::from(*code)),
+            Ending::Signal { signal } => Some(128 + i64::from(*signal)),
+            Ending::NotStarted { .. } => None,
+        }
+    }
 }
 
 impl fmt::Display for Ending {

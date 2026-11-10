@@ -149,6 +149,13 @@ impl Supervisor {
         }
     }
 
+    /// Records how the attempt of `unit` that came out last ended, before
+    /// the state it takes is recorded, so that whoever waits on that state
+    /// finds it.
+    pub fn exited(&self, unit: &str, exit_status: Option<i64>) {
+        self.units().exited(unit, exit_status);
+    }
+
     /// Wakes when any unit's state changes.
     pub fn changes(&self) -> watch::Receiver<u64> {
         self.changes.subscribe()

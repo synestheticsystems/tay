@@ -18,6 +18,12 @@ impl Tending {
     /// Records how attempt `attempt` came out, and whether its restart
     /// policy starts it again.
     pub(super) fn restart_after(&mut self, attempt: u32, outcome: Outcome, ready: bool) -> bool {
+        let exit_status = match &outcome {
+            Outcome::Done { .. } => Some(0),
+            Outcome::Ended { exit_status, .. } => *exit_status,
+            Outcome::Failed(_) => None,
+        };
+        self.supervisor.exited(self.unit(), exit_status);
         let (failed, detail) = match outcome {
             Outcome::Done { values, detail } => {
                 let detail = match &self.earlier {
@@ -36,7 +42,7 @@ impl Tending {
                 self.record(state, reason, None);
                 return false;
             }
-            Outcome::Ended { failed, detail } => (failed, detail),
+            Outcome::Ended { failed, detail, .. } => (failed, detail),
         };
         // Reaching ready starts the count again.
         self.in_a_row = match ready {

@@ -138,10 +138,10 @@ pub fn read_fields(name: NameAt, fields: &Fields<'_>, d: &mut Diagnostics) -> Un
         }
         (Some(_), None) => {
             let own = WayFields::read(fields, d);
-            mechanism(&name.name, fields, own, &WayFields::default(), d)
+            mechanism(&name.name, is_action, fields, own, &WayFields::default(), d)
                 .map(|mechanism| Body::Module(Box::new(mechanism)))
         }
-        (None, Some((_, run))) => ways(&name, fields, run, d).map(Body::Ways),
+        (None, Some((_, run))) => ways(&name, is_action, fields, run, d).map(Body::Ways),
         (None, None) => Some(group(fields, d)),
     };
     match body {
@@ -184,7 +184,13 @@ fn group(fields: &Fields<'_>, d: &mut Diagnostics) -> Body {
     }
 }
 
-fn ways(name: &NameAt, fields: &Fields<'_>, run: &Node, d: &mut Diagnostics) -> Option<Vec<Way>> {
+fn ways(
+    name: &NameAt,
+    is_action: bool,
+    fields: &Fields<'_>,
+    run: &Node,
+    d: &mut Diagnostics,
+) -> Option<Vec<Way>> {
     let shared = WayFields::read(fields, d);
     if let Some(with) = shared.with
         && with.as_map().is_none()
@@ -207,7 +213,7 @@ fn ways(name: &NameAt, fields: &Fields<'_>, run: &Node, d: &mut Diagnostics) -> 
         .map(|(way_name, node)| {
             let fields = Fields::of(node, "a way", WAY_FIELDS, d)?;
             let own = WayFields::read(&fields, d);
-            let mechanism = mechanism(&name.name, &fields, own, &shared, d)?;
+            let mechanism = mechanism(&name.name, is_action, &fields, own, &shared, d)?;
             Some(Way {
                 name: way_name,
                 mechanism,
@@ -224,6 +230,7 @@ fn ways(name: &NameAt, fields: &Fields<'_>, run: &Node, d: &mut Diagnostics) -> 
 /// empty. `fields` holds the `uses`.
 fn mechanism(
     unit: &str,
+    is_action: bool,
     fields: &Fields<'_>,
     own: WayFields<'_>,
     shared: &WayFields<'_>,
@@ -250,6 +257,7 @@ fn mechanism(
     let with = joined_with(module, shared.with, own.with);
     let mut cx = Cx {
         unit,
+        is_action,
         uses: uses_key.loc,
         d,
     };

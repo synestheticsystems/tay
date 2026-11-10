@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::disk::{Asked, DiskError, Layout};
 use crate::engine::{Decision, Left, State};
+use crate::plan::ActionRun;
 
 /// `GET`: who the daemon is, its [`About`]. Every version of tay answers it
 /// alike, so that a command can tell a daemon of another version.
@@ -29,6 +30,9 @@ pub const REMEMBER: &str = "/v1/remember";
 /// `POST` a [`Restart`]: stops units and starts them again, answering with
 /// [`Event`]s.
 pub const RESTART: &str = "/v1/restart";
+/// `POST` a [`RunRequest`]: runs an action, answering with [`Event`]s:
+/// each change of state, each line the action writes, and what it came to.
+pub const RUN: &str = "/v1/run";
 
 /// Who a daemon is.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -105,6 +109,16 @@ impl Remember {
     }
 }
 
+/// What `tay run` asks for: the action and its arguments, which come into
+/// the plan beside what the environment remembers being asked for, and the
+/// home folder of whoever asks, where their own choices are.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunRequest {
+    #[serde(flatten)]
+    pub run: ActionRun,
+    pub home: Option<PathBuf>,
+}
+
 /// What `tay restart` asks for: the units to stop and start again.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Restart {
@@ -140,18 +154,40 @@ pub enum Event {
     Down { left: Vec<Left> },
     /// The change could not be made, and why.
     Problem { problem: String },
+    /// A line the action that is run wrote, as it wrote it.
+    Output { line: String },
+    /// The end of `tay run`: what bringing the action up came to, how its
+    /// own program exited when it came to an end, as a shell gives the exit
+    /// status, and the values it produced.
+    Ran {
+        decision: Decision,
+        exit_status: Option<i64>,
+        values: Vec<Produced>,
+    },
+}
+
+/// A value an action produced, by name: `None` for one declared secret,
+/// which is never given.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Produced {
+    pub name: String,
+    pub value: Option<String>,
 }
 
 impl Event {
     /// Whether this is the last thing a change says.
     pub fn ends_change(&self) -> bool {
         match self {
-            Event::Units { .. } | Event::State { .. } | Event::Notice { .. } => false,
+            Event::Units { .. }
+            | Event::State { .. }
+            | Event::Notice { .. }
+            | Event::Output { .. } => false,
             Event::Errors { .. }
             | Event::Decided(_)
             | Event::Cancelled { .. }
             | Event::Down { .. }
-            | Event::Problem { .. } => true,
+            | Event::Problem { .. }
+            | Event::Ran { .. } => true,
         }
     }
 }

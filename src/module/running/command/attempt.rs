@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::keeper::{Ending, Look, Program};
+use crate::keeper::{Look, Program};
 use crate::module::operations::{
     self, Comparing, Driving, Failure, Finding, Found, Outcome, ReadinessCommand, Running, Step,
     Steps, UnderWay, UnitPlace,
@@ -57,8 +57,9 @@ enum Where<'a> {
 /// How a step of a command came out, wherever it ran.
 enum StepOutcome {
     /// Its program ended, as these words say, read after "its check" or
-    /// "ran and": with the code it exited with, unless a signal ended it.
-    Exited { code: Option<i64>, words: String },
+    /// "ran and", with this exit status, as a shell gives it: the code it
+    /// exited with, or 128 and the signal that ended it.
+    Exited { status: i64, words: String },
     /// Its program could not be started, as these words say.
     NotStarted(String),
     /// Its keeper ended without saying how; what was left of its group has
@@ -72,16 +73,12 @@ enum StepOutcome {
 impl StepOutcome {
     fn on_host(end: host::StepEnd) -> StepOutcome {
         match end {
-            host::StepEnd::Ended(ended) => match &ended.how {
-                Ending::Code { code } => StepOutcome::Exited {
-                    code: Some(i64::from(*code)),
+            host::StepEnd::Ended(ended) => match ended.how.exit_status() {
+                Some(status) => StepOutcome::Exited {
+                    status,
                     words: host::ended_words(&ended),
                 },
-                Ending::Signal { .. } => StepOutcome::Exited {
-                    code: None,
-                    words: host::ended_words(&ended),
-                },
-                how @ Ending::NotStarted { .. } => StepOutcome::NotStarted(how.to_string()),
+                None => StepOutcome::NotStarted(ended.how.to_string()),
             },
             host::StepEnd::Lost => StepOutcome::Lost,
             host::StepEnd::Gone => StepOutcome::Gone,
@@ -91,7 +88,7 @@ impl StepOutcome {
     fn in_container(end: ContainerStepEnd) -> StepOutcome {
         match end {
             ContainerStepEnd::Exited { code, words } => StepOutcome::Exited {
-                code: Some(code),
+                status: code,
                 words,
             },
             ContainerStepEnd::NotStarted(why) => {
@@ -361,8 +358,8 @@ impl CommandSettings<Filled> {
     /// What follows a check that ended so.
     fn checked(&self, end: &StepOutcome) -> AfterCheck {
         match end {
-            StepOutcome::Exited { code: Some(0), .. } => AfterCheck::Done,
-            StepOutcome::Exited { code: Some(1), .. } => AfterCheck::NotDone,
+            StepOutcome::Exited { status: 0, .. } => AfterCheck::Done,
+            StepOutcome::Exited { status: 1, .. } => AfterCheck::NotDone,
             StepOutcome::NotStarted(words) => {
                 AfterCheck::Outcome(Outcome::Failed(format!("its check {words}")))
             }
@@ -388,12 +385,13 @@ impl CommandSettings<Filled> {
         kept: Kept,
     ) -> Result<Outcome, Failure> {
         Ok(match end {
-            StepOutcome::Exited { code: Some(0), .. } => {
+            StepOutcome::Exited { status: 0, .. } => {
                 return self.done(place, "done: it ran and exited with 0", kept);
             }
-            StepOutcome::Exited { words, .. } => Outcome::Ended {
+            StepOutcome::Exited { status, words } => Outcome::Ended {
                 failed: true,
                 detail: format!("ran and {words}{after}"),
+                exit_status: Some(*status),
             },
             StepOutcome::NotStarted(words) => Outcome::Failed(format!("its program {words}")),
             StepOutcome::Lost => Outcome::Ended {
@@ -401,14 +399,15 @@ impl CommandSettings<Filled> {
                 detail: format!(
                     "ran and ended with no record of how{after}: its keeper was lost, and what was left of it was stopped"
                 ),
+                exit_status: None,
             },
             StepOutcome::Gone => Outcome::Failed(host::GONE.to_string()),
         })
     }
 
     /// The command is done: every file under `outputs` must exist, and the
-    /// values it gives are what it wrote, or else, when `kept` says so,
-    /// what was kept when it was done before.
+    /// values it gives are what it wrote, or else, when `kept` says so and
+    /// it keeps its values, what was kept when it was done before.
     fn done(&self, place: &UnitPlace, detail: &str, kept: Kept) -> Result<Outcome, Failure> {
         for (name, path) in &self.outputs {
             let path = operations::text(path, "outputs")?;
@@ -420,10 +419,10 @@ impl CommandSettings<Filled> {
             }
         }
         let values = match (produced::written(place), kept) {
-            (false, Kept::Given) if !self.produces.is_empty() => {
+            (false, Kept::Given) if self.keeps_values && !self.produces.is_empty() => {
                 produced::kept(place, &self.produces)
             }
-            _ => produced::take(place, &self.produces),
+            _ => produced::take(place, &self.produces, self.keeps_values),
         };
         Ok(match values {
             Ok(values) => Outcome::Done {

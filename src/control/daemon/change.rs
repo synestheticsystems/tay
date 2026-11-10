@@ -10,7 +10,7 @@ use hyper::body::{Bytes, Frame};
 use tokio::sync::watch;
 
 use crate::clock;
-use crate::control::protocol::{Event, Refused, Restart, UpRequest};
+use crate::control::protocol::{Event, Refused, Restart, RunRequest, UpRequest};
 
 /// What a change does. It has no `Debug`, since a `--set` it carries may
 /// hold a secret setting's value.
@@ -19,6 +19,7 @@ pub enum Kind {
     Up(UpRequest),
     Down,
     Restart(Restart),
+    Run(RunRequest),
 }
 
 /// Why a change is not begun, though no other change is under way.
@@ -74,6 +75,11 @@ impl Change {
             Kind::Down => "tay down".to_string(),
             Kind::Restart(restart) => std::iter::once("tay restart")
                 .chain(restart.units.iter().map(String::as_str))
+                .collect::<Vec<_>>()
+                .join(" "),
+            Kind::Run(request) => std::iter::once("tay run")
+                .chain(std::iter::once(request.run.action.as_str()))
+                .chain(request.run.args.iter().map(String::as_str))
                 .collect::<Vec<_>>()
                 .join(" "),
         }

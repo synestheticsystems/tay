@@ -203,3 +203,13 @@ units:
     with:
       command: [sh, -c, "echo seed=$SEED stamp=$STAMP; while :; do sleep 1; done"]
       env: { SEED: "${seeded.seed}", STAMP: "${stamped.stamp}" }
+
+  shout:
+    doc: An action that says a word from a container of its own, gives it, and exits with the code it is given.
+    action: true
+    args: { word: {}, code: { default: 0 } }
+    uses: command
+    with:
+      image: busybox:1.36
+      run: [sh, -c, "echo \"$0 from a box\"; printf '{\"heard\":\"%s\"}' \"$0\" > \"$TAY_VALUES\"; exit $1", "${args.word}", "${args.code}"]
+      produces: [heard]

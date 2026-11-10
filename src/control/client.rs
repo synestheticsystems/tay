@@ -17,7 +17,7 @@ use rustix::io::Errno;
 use serde::de::DeserializeOwned;
 
 use crate::control::protocol::{
-    self, Event, Problem, Refused, Remember, Restart, Status, UpRequest,
+    self, Event, Problem, Refused, Remember, Restart, RunRequest, Status, UpRequest,
 };
 use crate::definition::read::{THIS_TAY, parse_version};
 use crate::disk::{DiskError, Environment, Lock, socket_fits};
@@ -230,6 +230,17 @@ impl Client {
     ) -> Result<(), ClientError> {
         let body = serde_json::to_vec(restart).expect("a request serializes");
         self.change(protocol::RESTART, body, event).await
+    }
+
+    /// Runs the action `request` asks for, giving each event to `event` as
+    /// the daemon says it.
+    pub async fn run(
+        &self,
+        request: &RunRequest,
+        event: &mut dyn FnMut(Event),
+    ) -> Result<(), ClientError> {
+        let body = serde_json::to_vec(request).expect("a request serializes");
+        self.change(protocol::RUN, body, event).await
     }
 
     /// Takes the environment down, giving each event to `event`, and waits

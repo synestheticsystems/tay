@@ -22,7 +22,7 @@ use super::down::Down;
 use super::{Daemon, log};
 use crate::clock;
 use crate::control::protocol::{
-    self, Problem, Refused, Remember, Restart, Status, UnitStatus, UpRequest,
+    self, Problem, Refused, Remember, Restart, RunRequest, Status, UnitStatus, UpRequest,
 };
 use crate::engine;
 
@@ -61,6 +61,13 @@ pub async fn route(
             }),
             Err(problem) => json(StatusCode::BAD_REQUEST, &problem),
         },
+        (Method::POST, protocol::RUN) => match asked::<RunRequest>(request, "tay run").await {
+            Ok(run) => begin(&daemon, Kind::Run(run.clone()), |change| {
+                daemon.runs_actions()?;
+                Ok(Arc::clone(&daemon).run_action(change, run))
+            }),
+            Err(problem) => json(StatusCode::BAD_REQUEST, &problem),
+        },
         (Method::POST, protocol::REMEMBER) => {
             match asked::<Remember>(request, "tay set or tay unset").await {
                 Ok(remember) => remembered(&daemon, &remember),
@@ -80,7 +87,8 @@ pub async fn route(
             | protocol::DOWN
             | protocol::EXIT
             | protocol::REMEMBER
-            | protocol::RESTART,
+            | protocol::RESTART
+            | protocol::RUN,
         ) => json(
             StatusCode::METHOD_NOT_ALLOWED,
             &Problem {

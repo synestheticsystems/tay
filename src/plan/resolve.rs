@@ -18,13 +18,14 @@ pub use environment::EnvironmentFacts;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
-use crate::definition::{Body, Mechanism, Stack, reference_errors};
+use crate::definition::{Arg, Body, Mechanism, Stack, reference_errors};
 use crate::diagnostic::source::{Loc, SourceId, Sources};
 use crate::diagnostic::{Diagnostic, Diagnostics};
 use crate::module::{Runs, UnitKind};
 use crate::syntax::expr::{Expr, ExprKind, Part, Piece, Reference, Target, View};
 use crate::syntax::names::NameAt;
 
+use super::action::Arguments;
 use super::choices::{self, Layered};
 use crate::value::{Bit, Placeholder, Value};
 use resolved::Resolved;
@@ -146,6 +147,9 @@ pub struct Resolver<'s> {
     /// Whether a value was `${host.listen}`, which is known only once the
     /// environment is brought up.
     pub host_listen: bool,
+    /// The arguments of the action `tay run` runs, which fill its
+    /// `${args.NAME}`; an action's argument is otherwise a placeholder.
+    arguments: Option<Arguments>,
 }
 
 impl<'s> Resolver<'s> {
@@ -153,6 +157,7 @@ impl<'s> Resolver<'s> {
         stack: &'s Stack,
         layered: &'s Layered,
         environment: EnvironmentFacts,
+        arguments: Option<Arguments>,
         sources: &'s mut Sources,
     ) -> Resolver<'s> {
         Resolver {
@@ -161,6 +166,7 @@ impl<'s> Resolver<'s> {
             environment,
             sources,
             host_listen: false,
+            arguments,
             d: Diagnostics::default(),
             units: stack
                 .units
@@ -289,11 +295,17 @@ impl<'s> Resolver<'s> {
             Target::Arg(name) => {
                 // An action's arguments were checked against its declaration
                 // while reading, in the unit the reference is written in.
+                let given = (self.arguments.as_ref())
+                    .filter(|arguments| Some(arguments.unit) == scope.unit)
+                    .and_then(|arguments| arguments.values.get(name));
+                if let Some(given) = given {
+                    return Ok(Resolved::known(Value::from(given.clone())));
+                }
                 let ty = scope
                     .unit
                     .and_then(|unit| self.stack.units[unit].action.as_ref())
                     .and_then(|action| action.args.iter().find(|arg| arg.name.name == *name))
-                    .and_then(|arg| arg.ty);
+                    .and_then(Arg::ty);
                 Ok(Resolved::known(Value::Placeholder(Placeholder::Arg {
                     name: name.clone(),
                     ty,

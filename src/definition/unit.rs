@@ -4,7 +4,7 @@
 
 use crate::diagnostic::source::Loc;
 use crate::module::{Description, Module, ModuleValue, Output, Slot, Want};
-use crate::syntax::expr::{Expr, Type};
+use crate::syntax::expr::{Expr, Literal, Type};
 use crate::syntax::names::NameAt;
 
 #[derive(Debug)]
@@ -68,9 +68,17 @@ pub struct Action {
 #[derive(Debug)]
 pub struct Arg {
     pub name: NameAt,
+    /// What it is when the action is run without it; `None` when it must
+    /// be given.
+    pub default: Option<Literal>,
+}
+
+impl Arg {
     /// The type of its default; `None` when it has none, and so takes the
     /// type of whatever it is asked with.
-    pub ty: Option<Type>,
+    pub fn ty(&self) -> Option<Type> {
+        self.default.as_ref().map(Literal::ty)
+    }
 }
 
 /// One way under `run`: its name, and the mechanism it is, with what the

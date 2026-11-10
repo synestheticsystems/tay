@@ -83,8 +83,13 @@ pub enum Outcome {
     /// and gives these values.
     Done { values: Values, detail: String },
     /// It ended, as `detail` says: a failure unless its program exited with
-    /// 0. Its restart policy decides what follows.
-    Ended { failed: bool, detail: String },
+    /// 0. Its restart policy decides what follows. `exit_status` is how its
+    /// own program ended, as a shell gives it, when it ended by itself.
+    Ended {
+        failed: bool,
+        detail: String,
+        exit_status: Option<i64>,
+    },
     /// It cannot become ready without a change, whatever its restart policy
     /// says.
     Failed(String),

@@ -35,6 +35,12 @@ impl Ended {
         self.code == 0 && !self.out_of_memory
     }
 
+    /// Its exit status, as a shell gives it: Docker gives 128 and the
+    /// number of the signal that ended it, as a shell does.
+    pub fn exit_status(&self) -> i64 {
+        self.code
+    }
+
     /// How it ended, as its log notes it.
     pub fn how(&self) -> String {
         let mut how = format!("exited with {}", self.code);

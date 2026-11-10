@@ -387,6 +387,7 @@ impl Tending {
                         Ok(()) => Outcome::Ended {
                             failed: true,
                             detail: format!("did not become ready within {written}, and was stopped: {last_why}"),
+                            exit_status: None,
                         },
                         Err(why) => Outcome::Failed(format!(
                             "attempt {attempt} did not become ready within {written}, and cannot be stopped: {why}"

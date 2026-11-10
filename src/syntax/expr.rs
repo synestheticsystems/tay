@@ -45,6 +45,20 @@ impl Literal {
             Literal::Bool(_) => Type::Bool,
         }
     }
+
+    /// `text`, given on a command line, read as a value of type `ty`;
+    /// `None` when it is not one.
+    pub fn of_argument(text: &str, ty: Type) -> Option<Literal> {
+        match ty {
+            Type::Text => Some(Literal::Text(text.to_string())),
+            Type::Number => text.parse().ok().map(Literal::Number),
+            Type::Bool => match text {
+                "true" => Some(Literal::Bool(true)),
+                "false" => Some(Literal::Bool(false)),
+                _ => None,
+            },
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]

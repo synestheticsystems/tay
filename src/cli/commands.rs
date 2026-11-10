@@ -5,6 +5,7 @@ pub mod logs;
 pub mod ls;
 pub mod plan;
 pub mod restart;
+pub mod run;
 pub mod set;
 pub mod status;
 pub mod unset;

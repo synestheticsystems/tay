@@ -230,6 +230,7 @@ pub(super) async fn watched(
         Ok(()) => Outcome::Ended {
             failed: true,
             detail: format!("could no longer be watched, and was stopped: {failure}"),
+            exit_status: None,
         },
         Err(why) => Outcome::Failed(format!(
             "attempt {attempt} could no longer be watched ({failure}), and its container could not be stopped: {why}"
@@ -275,6 +276,7 @@ async fn watch(
     Ok(Outcome::Ended {
         failed: !ended.succeeded(),
         detail: ended.words(),
+        exit_status: Some(ended.exit_status()),
     })
 }
 
@@ -308,12 +310,14 @@ pub(super) async fn found(place: &UnitPlace) -> Result<Found, Failure> {
         true => Outcome::Ended {
             failed: true,
             detail: "was created, and its daemon ended before it was started".to_string(),
+            exit_status: None,
         },
         false => {
             let ended = Ended::of(&inspected);
             Outcome::Ended {
                 failed: !ended.succeeded(),
                 detail: format!("{}, while no daemon ran", ended.words()),
+                exit_status: Some(ended.exit_status()),
             }
         }
     };
@@ -325,6 +329,7 @@ pub(super) fn gone() -> Outcome {
     Outcome::Ended {
         failed: true,
         detail: "its container was removed by something other than tay".to_string(),
+        exit_status: None,
     }
 }
 

@@ -51,15 +51,7 @@ impl SettingValue {
             SettingValue::Written(written) => {
                 (written.value.ty() == ty).then(|| written.value.clone())
             }
-            SettingValue::Argument { text, .. } => match ty {
-                Type::Text => Some(Literal::Text(text.clone())),
-                Type::Number => text.parse().ok().map(Literal::Number),
-                Type::Bool => match text.as_str() {
-                    "true" => Some(Literal::Bool(true)),
-                    "false" => Some(Literal::Bool(false)),
-                    _ => None,
-                },
-            },
+            SettingValue::Argument { text, .. } => Literal::of_argument(text, ty),
         }
     }
 }

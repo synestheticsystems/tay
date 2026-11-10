@@ -9,7 +9,7 @@
 //! so that lines sort by time as their text does.
 
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufRead, BufReader, Read, Write};
+use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
@@ -141,6 +141,27 @@ impl UnitLog {
         };
         following.read(since, &mut lines)?;
         Ok((lines, following))
+    }
+
+    /// The log followed from where the file being written ends now: what
+    /// is written to it from now on.
+    pub fn follow_from_now(&self) -> Result<Following, DiskError> {
+        let path = self.current();
+        let file = match File::open(&path) {
+            Ok(mut file) => {
+                let metadata = file.metadata().map_err(DiskError::io(&path, "read"))?;
+                file.seek(SeekFrom::End(0))
+                    .map_err(DiskError::io(&path, "read"))?;
+                Some((file, (metadata.dev(), metadata.ino())))
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+            Err(error) => return Err(DiskError::io(path, "read")(error)),
+        };
+        Ok(Following {
+            log: self.clone(),
+            file,
+            partial: Vec::new(),
+        })
     }
 
     /// The last `count` lines of the log.
@@ -393,6 +414,26 @@ mod tests {
         following.read("", &mut none).unwrap();
         assert!(none.is_empty());
         assert_eq!(log.last(2).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn following_from_now_reads_only_what_is_written_after() {
+        let folder = tempfile::tempdir().unwrap();
+        let log = UnitLog::at(folder.path().join("seed"));
+        let mut new = log.follow_from_now().unwrap();
+        let mut adding = log.open().unwrap();
+        adding.write(Writer::Unit, "first").unwrap();
+        let mut following = log.follow_from_now().unwrap();
+        adding.write(Writer::Unit, "second").unwrap();
+        let read = |following: &mut Following| {
+            let mut lines = Vec::new();
+            following.read("", &mut lines).unwrap();
+            lines.into_iter().map(|line| line.text).collect::<Vec<_>>()
+        };
+        assert_eq!(read(&mut following), ["second"]);
+        // Followed before the log had a file, it reads the file from its
+        // start once there is one.
+        assert_eq!(read(&mut new), ["first", "second"]);
     }
 
     #[test]

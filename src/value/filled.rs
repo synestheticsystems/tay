@@ -34,10 +34,8 @@ pub enum Unfilled {
     /// The unit that gives the value has not given it.
     #[error("`{unit}.{name}` has no value yet")]
     Value { unit: String, name: String },
-    /// An action's argument, which only asking for the action gives.
-    #[error(
-        "`${{args.{name}}}` is given when the action is asked for with its arguments, which tay cannot do yet"
-    )]
+    /// An action's argument, which only running the action gives.
+    #[error("`${{args.{name}}}` is given only when the action is run, by `tay run`")]
     Argument { name: String },
     /// A fact of the environment that is not known.
     #[error("{reference} cannot be worked out: {why}")]
@@ -288,7 +286,7 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             error.to_string(),
-            "`${args.user}` is given when the action is asked for with its arguments, which tay cannot do yet"
+            "`${args.user}` is given only when the action is run, by `tay run`"
         );
     }
 }

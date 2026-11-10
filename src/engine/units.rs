@@ -28,6 +28,10 @@ pub struct Known {
     pub since: SystemTime,
     /// What it gives, once it is made.
     pub values: Option<Values>,
+    /// How its own program ended, as a shell gives the exit status, once an
+    /// attempt of a unit that runs has come out: 0 for one that is done,
+    /// `None` for one that did not end by itself.
+    pub exit_status: Option<i64>,
 }
 
 /// A unit that runs, or ran, and that the plan does not have: one the plan
@@ -70,6 +74,7 @@ impl Units {
                     state: UnitState::new(State::Stopped, "not asked for"),
                     since: SystemTime::now(),
                     values: None,
+                    exit_status: None,
                 },
             };
             self.known.push(known);
@@ -145,6 +150,17 @@ impl Units {
         unplanned.state = state;
         unplanned.since = SystemTime::now();
         true
+    }
+
+    /// Records how the attempt of `unit` that came out last ended.
+    pub fn exited(&mut self, unit: &str, exit_status: Option<i64>) {
+        if let Some(known) = self
+            .known
+            .iter_mut()
+            .find(|known| known.planned.name == unit)
+        {
+            known.exit_status = exit_status;
+        }
     }
 
     pub fn get(&self, unit: &str) -> Option<&Known> {

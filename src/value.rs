@@ -170,6 +170,16 @@ impl Exact {
     }
 }
 
+impl From<Literal> for Value {
+    fn from(literal: Literal) -> Value {
+        match literal {
+            Literal::Text(text) => Value::text(text),
+            Literal::Number(n) => Value::Number(n),
+            Literal::Bool(b) => Value::Bool(b),
+        }
+    }
+}
+
 impl Value {
     pub fn text(text: impl Into<String>) -> Value {
         Value::Text(vec![Bit::Text(text.into())])

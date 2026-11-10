@@ -55,6 +55,9 @@ impl fmt::Debug for dyn Module {
 /// What a module is told about the unit whose settings it reads.
 pub struct Cx<'a> {
     pub unit: &'a str,
+    /// Whether the unit is an action, whose values go to whoever runs it
+    /// and are not kept.
+    pub is_action: bool,
     /// Where the unit says `uses`, for errors about the settings as a whole.
     pub uses: Loc,
     pub d: &'a mut Diagnostics,
@@ -95,6 +98,7 @@ pub(crate) mod testing {
         let node = yaml::parse(with, id, &mut d).expect("test YAML parses");
         let mut cx = Cx {
             unit: "the-unit",
+            is_action: false,
             uses: Loc::new(id, 1, 1),
             d: &mut d,
         };
