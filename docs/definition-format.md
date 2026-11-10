@@ -20,7 +20,7 @@ Words used here: a **stack** is everything one `tay.yaml` describes. An **enviro
 | `stack/profiles/<name>.yaml` | A named set of choices: what comes up, which way units run, values of settings |
 | `.tay/` | This environment's own choices and state. Never committed. `tay plan` reads it and never writes it |
 
-A path that begins `./` is relative to the folder of the file it is written in. Any other relative path is relative to the stack's root. This holds wherever a setting is a path: a `workdir`, a mount's `from`, a `template`, a `stdin`, a build's `context`, an entry in `outputs` or `watch`. The value a unit gives for such a path is the whole path. Text that merely contains a path, such as an argument in a `command`, is left as written.
+A path that begins `./` is relative to the folder of the file it is written in. Any other relative path is relative to the stack's root. This holds wherever a setting is a path on the host: the `workdir` of a process or of a command run on the host, a mount's `from`, a `template`, a `stdin`, a build's `context`, an entry in `outputs` or `watch`. The value a unit gives for such a path is the whole path. Text that merely contains a path, such as an argument in a `command`, is left as written.
 
 ### `tay.yaml`
 
@@ -111,7 +111,7 @@ run:
 - The unit's own `needs`, `after` and `gives` apply to every way and are joined with the way's.
 - The unit's own `ready`, `restart` and `watch` are what a way has when it writes none of its own.
 - The unit's own `with` is joined with the way's, setting by setting, the way's winning. A setting that maps names to values (`env`, `secret_env`, `labels`, `volumes`, `publish`) is joined entry by entry. Each way is then checked against its module, so a setting written for the whole unit must be one that every way's module has.
-- After joining, every way of a unit must give the same value names, and the names a way lists under `produces` count among them. If one gives `api` and another does not, that is an error: a consumer must not break when the unit is switched.
+- After joining, every way of a unit must give the same value names, and the names a way lists under `produces` and `outputs` count among them. If one gives `api` and another does not, that is an error: a consumer must not break when the unit is switched.
 - Which way is used is a choice of the environment (see Choices). A unit must have a usable way only if the plan reaches it: it comes up, something that comes up uses one of its values, or a reference asks for its view with `@`.
 
 ### Templates
@@ -142,6 +142,7 @@ app-db: { from: postgres-database, params: { name: app } }
 - A unit made `from` a template may have only `doc`, `from`, `params`, `needs` and `after`; its `needs` and `after` are joined with the template's.
 - A parameter's value may be any YAML value and may contain references. They mean what they would mean written in the unit that is made. Parameters are put in place before anything else is read from the unit, so a mapping passed as a parameter joins as one written out would.
 - A missing required parameter, or a parameter the template does not declare, is an error.
+- A template's settings are checked through the units made from it, so a template nothing uses is checked only for its shape.
 
 ### Actions
 
@@ -198,7 +199,7 @@ Three of them **run** something: `process`, `container` and `command`. The other
 
 Every container joins the environment's one network. That network belongs to the environment, not to any unit, and has no definition; `${environment.network}` is its name. Every container carries the labels `tay.environment`, the environment's id, and `tay.unit`, the unit's name.
 
-A mount's `from` inside the environment's state folder or shared folder need not exist when `tay plan` runs; if it is still missing when the unit starts, tay creates it as a folder. Anywhere else it must exist when `tay plan` runs, unless it is built from a value produced by running. Mounting another unit's volume orders nothing: if the units must start in an order, `needs` says so.
+A mount's `from` under `.tay/` (the state and log folders) or in the shared folder need not exist when `tay plan` runs; if it is still missing when the unit starts, tay creates it as a folder. Anywhere else it must exist when `tay plan` runs, unless it is built from a value produced by running. Mounting another unit's volume orders nothing: if the units must start in an order, `needs` says so.
 
 ### `command`: something run once
 
@@ -208,7 +209,7 @@ A mount's `from` inside the environment's state folder or shared folder need not
 | `check` | Same form. Exit 0: already done, do not run. Exit 1: not done, run. Any other exit: cannot tell, and the unit fails. With no `check`, the command runs every time the environment is brought up |
 | `undo` | Same form. What wiping this unit runs |
 | `when_removed` | `keep` (the default) or `undo`. With `undo`, tay runs `undo` when the unit leaves the plan of an environment that had run it, with what the unit last ran with and while the units it needed are still up. Requires `undo` |
-| `in` | Run inside this container unit's container. At most one of `in` and `image`. It is a need for that unit and is not written again in `needs` |
+| `in` | Run inside this container unit's container. At most one of `in` and `image`. It is a need for that unit, and writing the unit in `needs` as well is an error |
 | `image` | Run as a one-off container from this image, on the environment's network. `run` is then the whole command, in place of the image's entrypoint. With it: `mounts` as for `container` |
 | `user` | With `in` or `image`: the user to run as |
 | `env`, `secret_env`, `workdir` | As for `process` |
@@ -294,7 +295,7 @@ Every value is one or the other.
 - **Known before anything starts:** a port's number, a setting, a generated secret, a file's path, anything about the environment, an endpoint, and any `gives` built only from these. The planner works all of them out first. A circle among them (A's value built from B's, B's from A's) is an error.
 - **Produced by running:** the names a `command` unit lists under `produces`, and its `outputs`. A `gives` built from a produced value is itself produced. A command hands its produced values to tay by writing them as one JSON object to the file named in the environment variable `TAY_VALUES`; both `check` and `run` may do so, so a unit that was already done still gives its values. That file is in the place the command runs, and tay fetches it from there.
 
-What using a value does to the plan depends on whose value it is. A value built from other values uses those too.
+What using a value does to the plan depends on whose value it is. A value built from other values uses those too. What a unit gives is used by whoever uses it, not by the unit that gives it.
 
 | Using | Does |
 |---|---|
@@ -306,7 +307,7 @@ Waiting for a unit that runs is written with `needs`, or follows from a command'
 
 ### Endpoints: an address depends on who is asking
 
-A value written as a mapping is an endpoint, and must have `port`. It may have `scheme`, `path` and `host`.
+A value written as a mapping is an endpoint, and must have `port`. It may have `scheme`, `path` and `host`. A unit that is made runs nowhere, so an endpoint it gives must write its `host`.
 
 ```yaml
 gives:
@@ -421,7 +422,7 @@ production: true
 require: [base_domain, licence_key]
 ```
 
-A setting in `require` must be given a value that is not empty by a choice: the profile, the environment's file or `--set`. The stack's default does not count, and it does not matter whether a unit in the plan uses the setting.
+A setting in `require` must be given a value that is not empty by a choice: the profile, this person's own file where it is read, the environment's file or `--set`. The stack's default does not count, and it does not matter whether a unit in the plan uses the setting.
 
 ### Production profiles
 
@@ -446,7 +447,7 @@ A value is secret if it comes from a `secret` unit (a key pair's `public` except
 
 It reads everything above, applies the choices, and prints the plan: each unit that would come up, in the order it could start, with the module it uses (and which way), where it runs, what it needs and why (a need it wrote, a command's `in`, or a value it uses), what it waits for with `after`, how it is known to be ready, the host ports it opens and what opens each, and the values it gives. Of `.tay/` it reads `choices.yaml` and nothing else, and it never writes.
 
-- `tay plan` allocates nothing and runs nothing, so what only allocating or running can tell prints as a placeholder: a port as `<port: unit>`, a produced value as `<produced: unit.name>`, a built file as `<output: unit.name>`, an action's argument as `<arg: name>`, and `<environment.id>`, `<environment.network>` and `<host.listen>`. A secret prints as `<secret>`. All but the produced ones still count as known before start.
+- `tay plan` allocates nothing and runs nothing, so what only allocating or running can tell prints as a placeholder: a port as `<port: unit>`, a produced value as `<produced: unit.name>`, a key pair's public half as `<generated: unit.public>`, an action's argument as `<arg: name>`, and `<environment.id>`, `<environment.network>` and `<host.listen>`. A secret prints as `<secret>`. A built file prints as its whole path. All but the produced values and the built files still count as known before start.
 - Errors that can be judged only on a sound reading (an unset setting, a circle, an address with no view, a production refusal) are reported once the reading itself has no errors.
 - `--json` prints the same plan in a versioned schema, for programs.
 - Exit codes: 0 the plan is sound; 2 the definitions have errors; 3 this tay is too old for them.
