@@ -11,6 +11,7 @@ use crate::diagnostic::Diagnostics;
 use crate::diagnostic::source::Loc;
 use crate::syntax::yaml::Node;
 
+pub use running::container::HOST_IN_CONTAINERS;
 pub use shape::{
     Concern, ModuleValue, Output, Place, Published, RestartDefault, Runs, UnitKind, UnitShape,
     VolumeMount,

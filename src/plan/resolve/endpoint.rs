@@ -9,7 +9,7 @@
 //! and that port.
 
 use crate::definition::Endpoint;
-use crate::module::{Form, Published, Runs, UnitKind};
+use crate::module::{Form, HOST_IN_CONTAINERS, Published, Runs, UnitKind};
 use crate::syntax::expr::{Part, Reference};
 
 use super::{Asker, Fail, Res, Resolver, Scope, ViewProblem};
@@ -19,9 +19,6 @@ use crate::value::{Bit, Exact, Value};
 /// The host's own address, which a unit on the host reaches another at and
 /// a published port is opened on unless its entry names another.
 pub const LOOPBACK: &str = "127.0.0.1";
-
-/// The name Docker gives the host inside its containers.
-const HOST_SEEN_FROM_CONTAINERS: &str = "host.docker.internal";
 
 /// The schemes whose usual port a URL leaves out, and those ports. No other
 /// scheme has one.
@@ -176,7 +173,7 @@ impl<'s> Resolver<'s> {
                 });
                 (LOOPBACK.to_string(), host_port)
             }
-            (Asker::Container, Runs::OnHost) => (HOST_SEEN_FROM_CONTAINERS.to_string(), port),
+            (Asker::Container, Runs::OnHost) => (HOST_IN_CONTAINERS.to_string(), port),
             (Asker::Container, Runs::OwnContainer { .. } | Runs::OneOffContainer) => {
                 (owner_name.clone(), port)
             }

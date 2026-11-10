@@ -14,6 +14,10 @@ use crate::module::{Cx, Module};
 
 pub struct Container;
 
+/// The name the host has inside the environment's containers, which Docker
+/// gives it.
+pub const HOST_IN_CONTAINERS: &str = "host.docker.internal";
+
 const FIELDS: &[&str] = &[
     "image",
     "build",
