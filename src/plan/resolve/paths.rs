@@ -40,10 +40,13 @@ impl Resolver<'_> {
         value
     }
 
-    /// Whether `path` lies in the environment's state folder or in the
-    /// shared folder, which tay makes when they are missing.
+    /// Whether `path` lies in the environment's state or log folder, or in
+    /// the shared folder, which tay makes when they are missing.
     pub fn in_own_folders(&self, path: &Path) -> bool {
-        normalized(path).starts_with(&self.environment.state) || self.in_shared_folder(path)
+        let path = normalized(path);
+        path.starts_with(&self.environment.state)
+            || path.starts_with(&self.environment.logs)
+            || self.in_shared_folder(&path)
     }
 
     /// Whether `path` lies in the folder all of one person's environments of

@@ -16,6 +16,7 @@ units:
       mounts:
         - { from: config, to: /config }
         - { from: "${environment.state}/box", to: /state }
+        - { from: "${environment.logs}/box", to: /logs }
         - { from: "${environment.shared}/cache", to: /cache }
         - { from: "${build.outputs.server}", to: /server }
   lost:

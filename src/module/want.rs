@@ -40,8 +40,8 @@ pub enum PathUse {
     /// Nothing: it is for whatever runs the unit.
     Named,
     /// A mount's source, which must exist when tay plans unless it lies in
-    /// the state or shared folder, where tay makes it, or is built from a
-    /// value produced by running.
+    /// the state, log or shared folder, where tay makes it, or is built from
+    /// a value produced by running.
     Mounted,
     /// A file whose text is read before start and has its references
     /// filled in. The value used is the text, which ends up where the

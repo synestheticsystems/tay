@@ -51,15 +51,15 @@ fn a_path_beginning_dot_slash_is_relative_to_its_file_and_any_other_to_the_root(
 }
 
 #[test]
-fn a_mount_source_must_exist_unless_in_the_state_or_shared_folder_or_produced() {
-    // `box` mounts from the stack, the state folder, the shared folder and a
-    // built file: none is an error.
+fn a_mount_source_must_exist_unless_in_the_state_log_or_shared_folder_or_produced() {
+    // `box` mounts from the stack, the state folder, the log folder, the
+    // shared folder and a built file: none is an error.
     assert_eq!(plan("paths", &[]).code, 0);
     let run = plan("paths", &["--set", "up_add=lost"]);
     assert_eq!(
         run.errors(),
         [format!(
-            "tay.yaml:25:24: the mount's source `{}/missing` does not exist; outside the state and shared folders it must exist when tay plans",
+            "tay.yaml:26:24: the mount's source `{}/missing` does not exist; outside the state, log and shared folders it must exist when tay plans",
             root()
         )]
     );
@@ -80,7 +80,7 @@ fn a_watched_path_must_exist() {
     assert_eq!(
         run.errors(),
         [format!(
-            "tay.yaml:34:13: `{}/nothing-here`, which this unit watches, does not exist",
+            "tay.yaml:35:13: `{}/nothing-here`, which this unit watches, does not exist",
             root()
         )]
     );
@@ -104,7 +104,7 @@ fn a_dot_slash_path_in_a_settings_value_is_relative_to_where_the_value_is_writte
     assert_eq!(
         run.errors(),
         [format!(
-            "stack/units/settled/unit.yaml:4:20: the mount's source `{}/elsewhere` does not exist; outside the state and shared folders it must exist when tay plans",
+            "stack/units/settled/unit.yaml:4:20: the mount's source `{}/elsewhere` does not exist; outside the state, log and shared folders it must exist when tay plans",
             root()
         )]
     );

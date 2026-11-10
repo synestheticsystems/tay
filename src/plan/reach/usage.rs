@@ -167,7 +167,8 @@ impl Planner<'_> {
     }
 
     /// A mount's source must exist when tay plans, unless tay makes it (in
-    /// the state or shared folder) or running makes it (a produced value).
+    /// the state, log or shared folder) or running makes it (a produced
+    /// value).
     /// A path not known before start cannot be looked at.
     fn check_mount_source(&mut self, value: &Resolved, at: Loc) {
         if !value.producers.is_empty() {
@@ -182,7 +183,7 @@ impl Planner<'_> {
         self.resolver.d.error(
             at,
             format!(
-                "the mount's source `{path}` does not exist; outside the state and shared folders it must exist when tay plans"
+                "the mount's source `{path}` does not exist; outside the state, log and shared folders it must exist when tay plans"
             ),
         );
     }
