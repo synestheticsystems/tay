@@ -41,6 +41,14 @@ units:
     with:
       image: example/continues
       mounts: [{ from: "./data/${prep.sub}", to: /data }]
+  unpack:
+    action: true
+    args: { dir: {} }
+    uses: command
+    with:
+      image: example/unpack
+      run: [unpack]
+      mounts: [{ from: "./data/${args.dir}", to: /in }]
   holder:
     uses: port
     gives: { certs: "${settings.certs}/." }

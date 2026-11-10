@@ -66,3 +66,17 @@ fn a_way_chosen_with_set_is_refused_too() {
         ]
     );
 }
+
+#[test]
+fn a_mount_that_continues_with_an_actions_argument_is_refused() {
+    // `unpack` runs in a container made for the run, which a production
+    // profile allows, but its argument may lead anywhere.
+    let run = plan("production", &["--profile", "deploy", "--set", "up=unpack"]);
+    assert_eq!(
+        run.errors(),
+        [
+            "tay.yaml:51:24: the production profile `deploy` refuses unit `unpack`: it mounts a source that continues with an action's argument, so where it leads is not known until the action is asked for",
+            "  stack/profiles/deploy.yaml:1:13: the profile is marked production here",
+        ]
+    );
+}

@@ -1,0 +1,11 @@
+format: 1
+stack: action-forms
+up: [retry]
+units:
+  retry:
+    action: true
+    args: { attempts: {}, wait: {} }
+    uses: process
+    with: { command: [retry] }
+    restart: { on: failure, attempts: "${args.attempts}" }
+    ready: { log: ready, within: "${args.wait}" }

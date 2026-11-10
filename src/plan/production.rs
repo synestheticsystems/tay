@@ -66,7 +66,8 @@ impl Planner<'_> {
     }
 
     /// Why a mount's source is refused, if it is: it is refused when it
-    /// continues with a value produced by running, or when it is neither
+    /// continues with a value produced by running or an action's argument,
+    /// or when it is neither
     /// under the stack's root (which holds the state folder) nor in the
     /// shared folder and does not begin with a setting's value, which is
     /// where a production environment says what of its machine to mount.
@@ -78,16 +79,19 @@ impl Planner<'_> {
         // The source is also one of the unit's slots, so a failure to resolve
         // it has been reported where the unit's values were used.
         let value = self.resolver.resolve(from, scope).ok()?;
-        let produced = value
-            .value
-            .holes()
-            .into_iter()
-            .any(|hole| matches!(hole, Hole::Produced { .. }));
-        if produced {
-            return Some(
-                "it mounts a source that continues with a value produced by running, so where it leads is not known before anything starts"
-                    .to_string(),
-            );
+        // What fills these holes can be any text, `..` included.
+        for hole in value.value.holes() {
+            match hole {
+                Hole::Produced { .. } => return Some(
+                    "it mounts a source that continues with a value produced by running, so where it leads is not known before anything starts"
+                        .to_string(),
+                ),
+                Hole::Arg { .. } => return Some(
+                    "it mounts a source that continues with an action's argument, so where it leads is not known until the action is asked for"
+                        .to_string(),
+                ),
+                _ => {}
+            }
         }
         if value.begins_with_setting {
             return None;

@@ -46,3 +46,17 @@ fn after_brings_nothing_in_and_an_action_comes_up_only_when_named() {
         ]
     );
 }
+
+#[test]
+fn an_argument_with_no_default_cannot_be_what_a_plan_needs_known_exactly() {
+    // The plan holds a restart's attempts and a readiness check's time as
+    // numbers and units, which an argument asked for later cannot give.
+    let run = plan("action-forms", &[]);
+    assert_eq!(
+        run.errors(),
+        [
+            "tay.yaml:10:39: `${args.attempts}` must be written out in full (a whole number above 0); this holds a value not known until start",
+            "tay.yaml:11:34: `${args.wait}` must be written out in full (a whole number followed by s, m or h, such as `2m`); this holds a value not known until start",
+        ]
+    );
+}

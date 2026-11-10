@@ -5,7 +5,7 @@ use std::fmt;
 use crate::diagnostic::{Diagnostics, quoted_list};
 use crate::syntax::expr::{self, Expr, ExprKind, Type};
 use crate::syntax::yaml::Node;
-use crate::value::Value;
+use crate::value::{Hole, Value};
 
 use super::settings::Destination;
 
@@ -58,6 +58,9 @@ pub enum Form {
     Bool,
     /// Produced by running: its type is not known before start.
     Unknown,
+    /// An action's argument with no default: it is known when the action is
+    /// asked for, and its type is whatever it is asked with.
+    Asked,
 }
 
 impl Form {
@@ -80,6 +83,7 @@ impl Form {
             Value::Text(_) => Form::Text(value.exact_text()),
             Value::Number(n) => Form::Number(Some(*n)),
             Value::Bool(_) => Form::Bool,
+            Value::Hole(Hole::Arg { ty: None, .. }) => Form::Asked,
             Value::Hole(hole) => match hole.ty() {
                 Some(Type::Text) => Form::Text(None),
                 Some(Type::Number) => Form::Number(None),
@@ -95,6 +99,7 @@ impl Form {
             Form::Number(_) => "a whole number",
             Form::Bool => "true or false",
             Form::Unknown => "produced by running",
+            Form::Asked => "an action's argument",
         }
     }
 }
@@ -127,7 +132,13 @@ impl Want {
                 "must be known before start ({}); this is produced by running",
                 want.expects()
             )),
-            (_, Form::Unknown) | (Want::Scalar, _) => None,
+            (want, Form::Asked) if want.checks_exact_form() || matches!(want, Want::Path(PathUse::Read(_))) => {
+                Some(format!(
+                    "must be written out in full ({}); this holds a value not known until start",
+                    want.expects()
+                ))
+            }
+            (_, Form::Unknown | Form::Asked) | (Want::Scalar, _) => None,
             (Want::Path(PathUse::Named | PathUse::Mounted), Form::Text(_)) => None,
             (Want::Text, Form::Text(_)) | (Want::Bool, Form::Bool) => None,
             (Want::Number, Form::Number(_)) => None,
@@ -311,5 +322,23 @@ mod tests {
                 ))
             );
         }
+    }
+
+    #[test]
+    fn an_argument_with_no_default_passes_type_checks_but_not_one_of_its_exact_form() {
+        assert_eq!(Want::Number.problem(&Form::Asked), None);
+        assert_eq!(Want::Text.problem(&Form::Asked), None);
+        assert_eq!(
+            Want::Duration.problem(&Form::Asked),
+            Some(
+                "must be written out in full (a whole number followed by s, m or h, such as `2m`); this holds a value not known until start"
+                    .to_string()
+            )
+        );
+        assert!(
+            Want::Path(PathUse::Read(Destination::FileContent))
+                .problem(&Form::Asked)
+                .is_some()
+        );
     }
 }
