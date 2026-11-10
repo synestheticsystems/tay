@@ -41,7 +41,7 @@ fn a_unit_that_no_choice_names_an_alternative_for_is_an_error_listing_them() {
 }
 
 #[test]
-fn every_alternative_gives_the_same_value_names() {
+fn every_alternative_gives_the_same_value_names_and_a_missing_one_is_reported_once() {
     let run = plan("alternatives-names", &[]);
     assert_eq!(run.code, 2);
     assert_eq!(

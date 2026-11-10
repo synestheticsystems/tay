@@ -149,19 +149,16 @@ fn alternatives(
     if listed.is_empty() && run.as_map().is_some() {
         d.error(run.loc, "`run` lists no alternatives");
     }
-    let mut variants = Vec::new();
-    for (alternative, node) in listed {
-        let own = Fields::of(node, "an alternative", ALTERNATIVE_FIELDS, d)?;
-        let own_shared = Shared::read(&own, d);
-        variants.push(variant(
-            &name.name,
-            Some(alternative),
-            &own,
-            own_shared,
-            shared,
-            d,
-        )?);
-    }
+    // Every alternative is read, so that the errors of each are reported.
+    let variants: Vec<Option<Variant>> = listed
+        .into_iter()
+        .map(|(alternative, node)| {
+            let own = Fields::of(node, "an alternative", ALTERNATIVE_FIELDS, d)?;
+            let own_shared = Shared::read(&own, d);
+            variant(&name.name, Some(alternative), &own, own_shared, shared, d)
+        })
+        .collect();
+    let variants: Vec<Variant> = variants.into_iter().collect::<Option<_>>()?;
     same_value_names(name, &variants, d);
     Some(variants)
 }
@@ -271,30 +268,37 @@ fn same_value_names(unit: &NameAt, variants: &[Variant], d: &mut Diagnostics) {
             .chain(outputs)
             .collect()
     };
-    for (i, variant) in variants.iter().enumerate() {
-        for (j, other) in variants.iter().enumerate() {
-            if i == j {
+    // Each name, with the first alternative that gives it and where.
+    let mut every: Vec<(NameAt, &NameAt)> = Vec::new();
+    for variant in variants {
+        let Some(alternative) = &variant.alternative else {
+            continue;
+        };
+        for name in given(variant) {
+            if !every.iter().any(|(n, _)| n.name == name.name) {
+                every.push((name, alternative));
+            }
+        }
+    }
+    for variant in variants {
+        let Some(this) = &variant.alternative else {
+            continue;
+        };
+        let names = given(variant);
+        for (name, that) in &every {
+            if names.iter().any(|n| n.name == name.name) {
                 continue;
             }
-            let names = given(variant);
-            for name in given(other) {
-                if names.iter().any(|n| n.name == name.name) {
-                    continue;
-                }
-                let (Some(this), Some(that)) = (&variant.alternative, &other.alternative) else {
-                    continue;
-                };
-                d.push(
-                    Diagnostic::new(
-                        this.loc,
-                        format!(
-                            "alternative `{}` of `{}` does not give `{}`, which alternative `{}` gives; every alternative gives the same values",
-                            this.name, unit.name, name.name, that.name
-                        ),
-                    )
-                    .with(name.loc, format!("`{}` gives it here", that.name)),
-                );
-            }
+            d.push(
+                Diagnostic::new(
+                    this.loc,
+                    format!(
+                        "alternative `{}` of `{}` does not give `{}`, which alternative `{}` gives; every alternative gives the same values",
+                        this.name, unit.name, name.name, that.name
+                    ),
+                )
+                .with(name.loc, format!("`{}` gives it here", that.name)),
+            );
         }
     }
 }

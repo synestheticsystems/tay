@@ -12,3 +12,8 @@ units:
       image:
         uses: container
         with: { image: example/server }
+      remote:
+        uses: container
+        with: { image: example/remote }
+        gives:
+          http: { port: 9090 }
