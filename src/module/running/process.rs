@@ -5,7 +5,7 @@ use crate::syntax::names;
 use crate::syntax::yaml::Node;
 use crate::value::Value;
 
-use super::command_line::{argv, argv_list};
+use super::command_line::{COMMAND_LINE, argv, argv_list};
 use super::variables::{Variables, variables};
 use crate::module::description::{Description, ReadyWithoutCheck, RestartOn, Runs, UnitKind};
 use crate::module::settings::{Destination, Settings, Slot, WrittenSettings, each, maybe};
@@ -108,7 +108,7 @@ fn read(with: Option<&Node>, cx: &mut Cx<'_>) -> Option<ProcessSettings<Slot>> {
     let settings = Fields::of(with, "the settings of a `process` unit", FIELDS, d)?;
     let command = settings
         .require("command", d)
-        .and_then(|command| argv(command, "`command`", d));
+        .and_then(|command| argv(command, "`command`", COMMAND_LINE, d));
     let workdir = settings.get("workdir").and_then(|workdir| {
         Slot::read(
             workdir,

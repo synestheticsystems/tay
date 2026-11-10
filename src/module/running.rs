@@ -3,7 +3,7 @@
 //! deciding which of these it has.
 
 pub mod command;
-mod command_line;
+pub mod command_line;
 pub mod container;
 mod mounts;
 pub mod process;

@@ -4,7 +4,7 @@
 
 use crate::definition::{Arg, Check, Endpoint, Give, GiveValue, Ready, Restart};
 use crate::diagnostic::Diagnostics;
-use crate::module::{Destination, PathUse, RestartOn, Slot, Want};
+use crate::module::{self, Destination, PathUse, RestartOn, Slot, Want};
 use crate::syntax::expr::{self, Expr, Piece};
 use crate::syntax::fields::{self, Fields};
 use crate::syntax::names;
@@ -120,14 +120,7 @@ pub fn ready(node: &Node, d: &mut Diagnostics) -> Option<Ready> {
         "http" => Check::Http(text(d)?),
         "tcp" => Check::Tcp(text(d)?),
         "log" => Check::Log(text(d)?),
-        _ => {
-            let words = fields::list(value, "a readiness `command`", d)?;
-            let words: Vec<Option<Slot>> = words
-                .iter()
-                .map(|word| Slot::read(word, Want::Scalar, READINESS, d))
-                .collect();
-            Check::Command(words.into_iter().collect::<Option<_>>()?)
-        }
+        _ => Check::Command(module::argv(value, "a readiness `command`", READINESS, d)?),
     };
     Some(Ready {
         check,
@@ -192,6 +185,10 @@ mod tests {
         let (ready, errors) = read("{ command: [pg_isready, -q], within: 2m }", super::ready);
         assert!(errors.is_empty(), "{errors:?}");
         assert!(matches!(ready.unwrap().check, Check::Command(words) if words.len() == 2));
+        assert_eq!(
+            read("{ command: [], within: 2m }", super::ready).1,
+            ["1:12: a readiness `command` must name a program"]
+        );
         assert_eq!(
             read("{ http: a, tcp: b, within: 1m }", super::ready).1,
             ["1:12: `ready` has one check: `http`, `tcp`, `command` or `log`"]

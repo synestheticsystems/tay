@@ -6,7 +6,7 @@ use crate::syntax::fields::{self, Fields};
 use crate::syntax::names;
 use crate::syntax::yaml::{Kind, Node, Scalar};
 
-use super::super::command_line::{argv, words};
+use super::super::command_line::{COMMAND_LINE, argv, words};
 use super::super::mounts::mounts;
 use super::super::variables::variables;
 use super::{ContainerSettings, Image, Volume};
@@ -85,11 +85,11 @@ pub fn read(with: Option<&Node>, cx: &mut Cx<'_>) -> Option<Read> {
     };
     let command = settings
         .get("command")
-        .and_then(|node| argv(node, "`command`", d));
+        .and_then(|node| argv(node, "`command`", COMMAND_LINE, d));
     // An empty entrypoint clears the image's own.
     let entrypoint = settings
         .get("entrypoint")
-        .and_then(|node| words(node, "`entrypoint`", d));
+        .and_then(|node| words(node, "`entrypoint`", COMMAND_LINE, d));
     let variables = variables(&settings, d);
     let volumes = settings
         .get("volumes")

@@ -19,6 +19,7 @@ pub use description::{
     Concern, Description, ModuleValue, Output, Published, ReadyWithoutCheck, RestartOn, Runs,
     UnitKind, VolumeMount,
 };
+pub use running::command_line::argv;
 pub use running::container::HOST_IN_CONTAINERS;
 pub use settings::{Destination, Settings, Slot};
 pub use want::{Duration, Form, PathUse, Want};
