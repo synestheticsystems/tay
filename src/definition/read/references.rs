@@ -5,7 +5,7 @@
 use crate::definition::{Check, Choices, GiveValue, SettingValue, Stack, Unit, Way};
 use crate::diagnostic::{Diagnostic, Diagnostics};
 use crate::module::{GivenValue, Runs, UnitKind};
-use crate::syntax::expr::{Expr, Reference, Target, UnitRef};
+use crate::syntax::expr::{Expr, Part, Reference, Target, UnitRef, View};
 use crate::syntax::names::NameAt;
 
 pub fn check(stack: &Stack, places: &[&Choices], d: &mut Diagnostics) {
@@ -115,8 +115,12 @@ fn reference_target(
     };
     match &reference.target {
         Target::Value {
-            unit, name, part, ..
+            unit,
+            name,
+            part,
+            view,
         } => {
+            view_unit(stack, view.as_ref(), reference, d);
             let Some(owner) = owner(unit, d) else { return };
             if owner.ways.is_empty() {
                 return;
@@ -155,9 +159,19 @@ fn reference_target(
                     reference.loc,
                     format!("`{written}`: `{name}` is not an endpoint, so it has no `.url`, `.host` or `.port`"),
                 );
+            } else if *part == Some(Part::Url)
+                && gives
+                    .iter()
+                    .all(|g| matches!(&g.value, GiveValue::Endpoint(e) if e.scheme.is_none()))
+            {
+                d.error(
+                    reference.loc,
+                    format!("`{written}`: the endpoint has no `scheme`, so it has no URL"),
+                );
             }
         }
-        Target::Output { unit, name } => {
+        Target::Output { unit, name, view } => {
+            view_unit(stack, view.as_ref(), reference, d);
             let Some(owner) = owner(unit, d) else { return };
             if !owner.ways.is_empty()
                 && !owner
@@ -187,6 +201,35 @@ fn reference_target(
             format!("`{written}` is a template's parameter, and this is not in a template"),
         ),
         Target::Environment(_) | Target::HostListen => {}
+    }
+}
+
+/// The unit a view names after `@` exists and runs in some way; under the
+/// way it is chosen to run, the planner checks it again.
+fn view_unit(stack: &Stack, view: Option<&View>, reference: &Reference, d: &mut Diagnostics) {
+    let Some(View::Unit(name)) = view else {
+        return;
+    };
+    let written = reference.written();
+    let Some(unit) = stack.unit(name) else {
+        d.error(
+            reference.loc,
+            format!("`{written}`: there is no unit `{name}`"),
+        );
+        return;
+    };
+    let runs = |way: &Way| {
+        way.module
+            .as_ref()
+            .is_some_and(|module| matches!(module.shape.kind, UnitKind::Runs(_)))
+    };
+    if !unit.ways.is_empty() && !unit.ways.iter().any(runs) {
+        d.error(
+            reference.loc,
+            format!(
+                "`{written}` asks for the view of unit `{name}`, which runs nowhere; the unit named after `@` must be one that runs"
+            ),
+        );
     }
 }
 

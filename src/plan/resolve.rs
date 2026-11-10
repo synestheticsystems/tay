@@ -214,17 +214,51 @@ impl<'s> Resolver<'s> {
                 view,
             } => {
                 let owner = self.owner(unit, reference, scope)?;
-                let asker = match view {
-                    Some(View::Host) => Asker::Host,
-                    Some(View::Net) => Asker::Container,
-                    None => scope.asker,
-                };
+                let asker = self.view(view.as_ref(), scope, reference)?;
                 self.give(owner, name, *part, asker, reference)
             }
-            Target::Output { unit, name } => {
+            Target::Output { unit, name, view } => {
                 let owner = self.owner(unit, reference, scope)?;
+                // An output is a path on the host, with no endpoint in it to
+                // settle; the unit a view names must still be one that runs.
+                self.view(view.as_ref(), scope, reference)?;
                 self.output(owner, name, reference)
             }
+        }
+    }
+
+    /// Who a reference's view says the endpoints in its value are seen by:
+    /// the host, a container, a unit that runs as it runs, or with no view,
+    /// whoever uses the value.
+    fn view(
+        &mut self,
+        view: Option<&View>,
+        scope: Scope,
+        reference: &Reference,
+    ) -> Result<Asker, Fail> {
+        let name = match view {
+            None => return Ok(scope.asker),
+            Some(View::Host) => return Ok(Asker::Host),
+            Some(View::Net) => return Ok(Asker::Container),
+            Some(View::Unit(name)) => name,
+        };
+        let Some(unit) = self.unit_index(name) else {
+            return self.fail(
+                reference.loc,
+                format!("`{}`: there is no unit `{name}`", reference.written()),
+            );
+        };
+        // A way that cannot be chosen has been reported.
+        self.way(unit).ok_or(Fail::Reported)?;
+        match self.kind(unit) {
+            Some(kind @ UnitKind::Runs(_)) => Ok(Asker::of(kind)),
+            _ => self.fail(
+                reference.loc,
+                format!(
+                    "`{}` asks for the view of unit `{name}`, which runs nowhere; the unit named after `@` must be one that runs",
+                    reference.written()
+                ),
+            ),
         }
     }
 

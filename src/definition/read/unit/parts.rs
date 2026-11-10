@@ -26,7 +26,7 @@ fn endpoint(node: &Node, d: &mut Diagnostics) -> Option<Endpoint> {
     let fields = Fields::of(
         node,
         "an endpoint (a value written as a mapping)",
-        &["port", "scheme", "path"],
+        &["port", "scheme", "path", "host"],
         d,
     )?;
     let port = fields
@@ -34,6 +34,7 @@ fn endpoint(node: &Node, d: &mut Diagnostics) -> Option<Endpoint> {
         .and_then(|n| expr::from_node(n, d));
     let scheme = fields.get("scheme").and_then(|n| expr::from_node(n, d));
     let path = fields.get("path").and_then(|n| expr::from_node(n, d));
+    let host = fields.get("host").and_then(|n| expr::from_node(n, d));
     if let Some(path) = &path
         && let Some(text) = path.literal_text()
         && !text.starts_with('/')
@@ -45,6 +46,7 @@ fn endpoint(node: &Node, d: &mut Diagnostics) -> Option<Endpoint> {
         port: port?,
         scheme,
         path,
+        host,
     })
 }
 

@@ -30,6 +30,7 @@ impl Planner<'_> {
             let target = Target::Output {
                 unit: UnitRef::Named(unit_name.clone()),
                 name: output.name.clone(),
+                view: None,
             };
             lines.push(self.given_line(
                 format!("outputs.{}", output.name),

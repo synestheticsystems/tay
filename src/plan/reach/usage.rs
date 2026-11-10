@@ -180,7 +180,7 @@ fn view_error(user: User<'_>, at: Loc, problem: ViewProblem) -> Diagnostic {
         } => Diagnostic::new(
             at,
             format!(
-                "{who}, so `{reference}` must say which view of the address it wants: add `@host` or `@net`"
+                "{who}, so `{reference}` must say which view of the address it wants: add `@host`, `@net`, or `@` and the name of the unit that uses it"
             ),
         )
         .with(endpoint, "the endpoint is defined here"),

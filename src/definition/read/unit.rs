@@ -5,7 +5,7 @@ use std::borrow::Cow;
 
 use crate::definition::{Give, GiveValue, ModuleUse, Ready, Restart, Unit, Way};
 use crate::diagnostic::{Diagnostic, Diagnostics};
-use crate::module::{self, Cx, Module};
+use crate::module::{self, Cx, Module, UnitKind};
 use crate::syntax::expr::Expr;
 use crate::syntax::fields::{self, Fields};
 use crate::syntax::names::{self, NameAt};
@@ -214,6 +214,20 @@ fn way(
         d,
     };
     let shape = module.check(with.as_deref(), &mut cx)?;
+    if matches!(shape.kind, UnitKind::Made) {
+        for give in shared.gives.iter().chain(&own.gives) {
+            if let GiveValue::Endpoint(endpoint) = &give.value
+                && endpoint.host.is_none()
+            {
+                d.error(
+                    endpoint.loc,
+                    format!(
+                        "unit `{unit}` is made and runs nothing that listens, so an endpoint it gives must write its `host`"
+                    ),
+                );
+            }
+        }
+    }
     let mut gives = shared.gives.clone();
     let module_gives = shape.gives.iter().map(|given| Give {
         name: given.name.clone(),

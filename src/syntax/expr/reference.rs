@@ -32,6 +32,7 @@ pub enum Target {
     Output {
         unit: UnitRef,
         name: String,
+        view: Option<View>,
     },
     Setting(String),
     Environment(EnvField),
@@ -54,11 +55,15 @@ pub enum Part {
     Port,
 }
 
-/// `@host` or `@net`: the view of an endpoint asked for whoever uses it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+/// The view of the endpoints in a value, asked for whoever uses it.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum View {
+    /// `@host`: as the host sees them.
     Host,
+    /// `@net`: as a container of this environment sees them.
     Net,
+    /// `@unit`: as that unit sees them, under the way it runs.
+    Unit(String),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -109,12 +114,13 @@ pub fn parse_target(inner: &str) -> Result<Target, String> {
     }
     let (path, view) = match inner.split_once('@') {
         None => (inner, None),
-        Some((path, view)) => match view {
-            "host" => (path, Some(View::Host)),
-            "net" => (path, Some(View::Net)),
-            _ => {
+        Some((path, "host")) => (path, Some(View::Host)),
+        Some((path, "net")) => (path, Some(View::Net)),
+        Some((path, unit)) => match names::name_problem(unit) {
+            None => (path, Some(View::Unit(unit.to_string()))),
+            Some(problem) => {
                 return Err(format!(
-                    "`{written}` asks for the view `@{view}`; the views are `@host` and `@net`"
+                    "`{written}` asks for the view `@{unit}`; a view is `@host`, `@net` or `@` and a unit's name, and {problem}"
                 ));
             }
         },
@@ -123,7 +129,7 @@ pub fn parse_target(inner: &str) -> Result<Target, String> {
     let no_view = |target: Target| match view {
         None => Ok(target),
         Some(_) => Err(format!(
-            "`{written}`: only a unit's value can be asked for with `@host` or `@net`"
+            "`{written}`: only a unit's value can be asked for with a view (`@`)"
         )),
     };
     match parts.as_slice() {
@@ -171,9 +177,10 @@ pub fn parse_target(inner: &str) -> Result<Target, String> {
                 [] => Err(format!(
                     "`{written}` names a unit but not one of its values, as in `${{unit.value}}`"
                 )),
-                ["outputs", name] => no_view(Target::Output {
+                ["outputs", name] => Ok(Target::Output {
                     unit,
                     name: (*name).to_string(),
+                    view,
                 }),
                 ["outputs", ..] => Err(format!(
                     "`{written}` must name one output: `${{unit.outputs.name}}`"
@@ -244,7 +251,17 @@ mod tests {
             parse_target("build.outputs.server"),
             Ok(Target::Output {
                 unit: named("build"),
-                name: "server".into()
+                name: "server".into(),
+                view: None
+            })
+        );
+        assert_eq!(
+            parse_target("wiki.web.url@proxy"),
+            Ok(Target::Value {
+                unit: named("wiki"),
+                name: "web".into(),
+                part: Some(Part::Url),
+                view: Some(View::Unit("proxy".into()))
             })
         );
         assert_eq!(
@@ -269,7 +286,7 @@ mod tests {
             "web",
             "Web.x",
             "api.http.scheme",
-            "api.http@there",
+            "api.http@There",
             "settings.x@host",
             "environment.home",
             "host.name",

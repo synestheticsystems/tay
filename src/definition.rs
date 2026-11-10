@@ -125,14 +125,16 @@ pub enum GiveValue {
     Module(GivenValue),
 }
 
-/// A value written as a mapping with `port`: an address whose host part
-/// depends on where the unit that uses it runs.
+/// A value written as a mapping, with `port`: an address whose host part
+/// depends on where the unit that uses it runs, unless it writes its `host`.
 #[derive(Clone, Debug)]
 pub struct Endpoint {
     pub loc: Loc,
     pub port: Expr,
     pub scheme: Option<Expr>,
     pub path: Option<Expr>,
+    /// The host everyone uses, when it is written: the endpoint then has no views.
+    pub host: Option<Expr>,
 }
 
 #[derive(Clone, Debug)]

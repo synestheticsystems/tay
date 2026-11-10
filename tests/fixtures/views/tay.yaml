@@ -1,0 +1,38 @@
+format: 1
+stack: views
+up: [setup, notes, portal]
+run: { default: [image] }
+units:
+  wiki-port: { uses: port }
+  wiki:
+    uses: container
+    with: { image: example/wiki, publish: { 3000: "${wiki-port.number}" } }
+    gives:
+      web: { port: 3000, scheme: http }
+  proxy:
+    run:
+      image: { uses: container, with: { image: example/proxy } }
+      source: { uses: process, with: { command: [proxy] } }
+  lonely:
+    run:
+      alpha: { uses: container, with: { image: example/alpha } }
+      beta: { uses: container, with: { image: example/beta } }
+  setup:
+    uses: command
+    with: { run: [record] }
+    ready: { command: [check, "${wiki.web.url@proxy}"], within: 1m }
+  asker:
+    uses: command
+    with: { run: [ask] }
+    ready: { command: [check, "${wiki.web.url@lonely}"], within: 1m }
+  notes:
+    uses: file
+    with: { content: "wiki at ${wiki.web.url@host}, portal at ${portal.public.url}" }
+  portal:
+    uses: container
+    with: { image: example/portal }
+    gives:
+      public: { host: "portal${environment.label_suffix}.example.test", port: 443, scheme: https }
+      alternate: { host: alternate.example.test, port: 8443, scheme: https }
+      plain: { host: plain.example.test, port: 80, scheme: http, path: /start }
+      socket: { host: socket.example.test, port: 80, scheme: ws }

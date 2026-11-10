@@ -1,0 +1,19 @@
+format: 1
+stack: view-errors
+up: []
+units:
+  wiki-port: { uses: port }
+  wiki:
+    uses: container
+    with: { image: example/wiki }
+    gives:
+      web: { port: 3000, scheme: http }
+      raw: { port: 4000 }
+  user:
+    uses: command
+    with:
+      run: [use, "${wiki.web.url@wiki-port}", "${wiki.web.url@nobody}", "${wiki.raw.url}"]
+  held:
+    uses: port
+    gives:
+      api: { port: 8080 }

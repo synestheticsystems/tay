@@ -4,18 +4,25 @@
 //! |---------------------|----------------------------------|-------------------------------------|
 //! | asked from the host | `127.0.0.1` and its port         | `127.0.0.1` and the published port  |
 //! | asked from a container | the host's name for containers, and its port | the unit's name and the port inside |
+//!
+//! An endpoint that writes its `host` has no views: everyone gets that host
+//! and that port.
 
 use crate::definition::Endpoint;
 use crate::module::{Form, Runs, UnitKind};
 use crate::syntax::expr::{Part, Reference};
 
 use super::{Asker, Fail, Res, Resolver, Scope, ViewProblem};
-use crate::plan::resolve::value::{Bit, Resolved, Shape};
+use crate::plan::resolve::value::{Bit, Exact, Resolved, Shape};
 
 const LOOPBACK: &str = "127.0.0.1";
 
 /// The name Docker gives the host inside its containers.
 const HOST_SEEN_FROM_CONTAINERS: &str = "host.docker.internal";
+
+/// The schemes whose usual port a URL leaves out, and those ports. No other
+/// scheme has one.
+const USUAL_PORTS: [(&str, i64); 2] = [("http", 80), ("https", 443)];
 
 impl Resolver<'_> {
     pub(super) fn endpoint(
@@ -26,8 +33,6 @@ impl Resolver<'_> {
         asker: Asker,
         reference: &Reference,
     ) -> Res {
-        let stack = self.stack;
-        let owner_name = &stack.units[owner].name.name;
         let kind = self.kind(owner).ok_or(Fail::Reported)?;
         // The endpoint's own fields are in its unit's terms: the port it listens on.
         let own = Scope {
@@ -49,65 +54,30 @@ impl Resolver<'_> {
             Some(path) => Some(self.resolve(path, own)?),
             None => None,
         };
-        let not_published = |port: &Resolved| {
-            Err(Fail::View(ViewProblem::NotPublished {
-                owner: owner_name.clone(),
-                port: port.shown(),
-                endpoint: endpoint.loc,
-            }))
-        };
-        let UnitKind::Runs(runs) = kind else {
-            return self.fail(
-                endpoint.loc,
-                format!(
-                    "unit `{owner_name}` is made and runs nothing that listens, so an endpoint it gives has no address"
-                ),
-            );
-        };
-        let (host, seen_port) = match (asker, runs) {
-            (Asker::Nowhere, _) => {
-                return Err(Fail::View(ViewProblem::NeedsView {
-                    reference: reference.written(),
-                    endpoint: endpoint.loc,
-                }));
-            }
-            (Asker::Host, Runs::OnHost) => (LOOPBACK.to_string(), port.clone()),
-            (Asker::Host, Runs::OneOffContainer) => return not_published(&port),
-            (Asker::Host, Runs::OwnContainer { .. } | Runs::InsideUnit(_)) => {
-                let container = match runs {
-                    Runs::InsideUnit(inner) => {
-                        self.unit_index(&inner.name).ok_or(Fail::Reported)?
-                    }
-                    _ => owner,
-                };
-                match self.published(container, &port)? {
-                    Some(host_port) => (LOOPBACK.to_string(), host_port),
-                    None => return not_published(&port),
-                }
-            }
-            (Asker::Container, Runs::OnHost) => {
-                (HOST_SEEN_FROM_CONTAINERS.to_string(), port.clone())
-            }
-            (Asker::Container, Runs::OwnContainer { .. } | Runs::OneOffContainer) => {
-                (owner_name.clone(), port.clone())
-            }
-            (Asker::Container, Runs::InsideUnit(inner)) => (inner.name.clone(), port.clone()),
+        let (host, seen_port) = match &endpoint.host {
+            Some(host) => (self.resolve(host, own)?, port),
+            None => self.seen(owner, endpoint, kind, asker, reference, port)?,
         };
         let mut value = Resolved::known(Shape::Text(Vec::new()));
-        for part in [Some(&seen_port), scheme.as_ref(), path.as_ref()]
-            .into_iter()
-            .flatten()
+        for part in [
+            Some(&host),
+            Some(&seen_port),
+            scheme.as_ref(),
+            path.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
         {
             value.absorb(part);
         }
-        let address = |bits: &mut Vec<Bit>| {
-            bits.push(Bit::Text(format!("{host}:")));
-            bits.extend(seen_port.bits());
-        };
         let mut bits = Vec::new();
         match part {
-            None => address(&mut bits),
-            Some(Part::Host) => bits.push(Bit::Text(host.clone())),
+            None => {
+                bits.extend(host.bits());
+                bits.push(Bit::Text(":".to_string()));
+                bits.extend(seen_port.bits());
+            }
+            Some(Part::Host) => bits.extend(host.bits()),
             Some(Part::Port) => {
                 return Ok(Resolved {
                     shape: seen_port.shape.clone(),
@@ -126,7 +96,11 @@ impl Resolver<'_> {
                 };
                 bits.extend(scheme.bits());
                 bits.push(Bit::Text("://".to_string()));
-                address(&mut bits);
+                bits.extend(host.bits());
+                if !is_usual_port(scheme, &seen_port) {
+                    bits.push(Bit::Text(":".to_string()));
+                    bits.extend(seen_port.bits());
+                }
                 if let Some(path) = &path {
                     bits.extend(path.bits());
                 }
@@ -134,6 +108,59 @@ impl Resolver<'_> {
         }
         value.shape = Shape::Text(bits);
         Ok(value)
+    }
+
+    /// The host and port of an endpoint that writes no `host`, as `asker`
+    /// sees them.
+    fn seen(
+        &mut self,
+        owner: usize,
+        endpoint: &Endpoint,
+        kind: &UnitKind,
+        asker: Asker,
+        reference: &Reference,
+        port: Resolved,
+    ) -> Result<(Resolved, Resolved), Fail> {
+        let owner_name = &self.stack.units[owner].name.name;
+        // The reader refuses an endpoint with no `host` on a unit that is made.
+        let UnitKind::Runs(runs) = kind else {
+            return Err(Fail::Reported);
+        };
+        let not_published = |port: &Resolved| {
+            Err(Fail::View(ViewProblem::NotPublished {
+                owner: owner_name.clone(),
+                port: port.shown(),
+                endpoint: endpoint.loc,
+            }))
+        };
+        let (host, port) = match (asker, runs) {
+            (Asker::Nowhere, _) => {
+                return Err(Fail::View(ViewProblem::NeedsView {
+                    reference: reference.written(),
+                    endpoint: endpoint.loc,
+                }));
+            }
+            (Asker::Host, Runs::OnHost) => (LOOPBACK.to_string(), port),
+            (Asker::Host, Runs::OneOffContainer) => return not_published(&port),
+            (Asker::Host, Runs::OwnContainer { .. } | Runs::InsideUnit(_)) => {
+                let container = match runs {
+                    Runs::InsideUnit(inner) => {
+                        self.unit_index(&inner.name).ok_or(Fail::Reported)?
+                    }
+                    _ => owner,
+                };
+                match self.published(container, &port)? {
+                    Some(host_port) => (LOOPBACK.to_string(), host_port),
+                    None => return not_published(&port),
+                }
+            }
+            (Asker::Container, Runs::OnHost) => (HOST_SEEN_FROM_CONTAINERS.to_string(), port),
+            (Asker::Container, Runs::OwnContainer { .. } | Runs::OneOffContainer) => {
+                (owner_name.clone(), port)
+            }
+            (Asker::Container, Runs::InsideUnit(inner)) => (inner.name.clone(), port),
+        };
+        Ok((Resolved::text(host), port))
     }
 
     /// The host port published for `port` of the container `unit` runs in, if any.
@@ -153,4 +180,14 @@ impl Resolver<'_> {
         };
         Ok(Some(self.resolve(&entry.host_port, scope)?))
     }
+}
+
+/// Whether `port` is the usual one of `scheme`, which a URL leaves out.
+/// Both must be known before start to tell.
+fn is_usual_port(scheme: &Resolved, port: &Resolved) -> bool {
+    let (Some(Exact::Text(scheme)), Some(Exact::Number(port))) = (scheme.exact(), port.exact())
+    else {
+        return false;
+    };
+    USUAL_PORTS.contains(&(scheme.as_str(), port))
 }
