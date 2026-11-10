@@ -44,7 +44,8 @@ fn a_unit_that_cannot_run_fails_saying_why_and_what_needs_it_waits_blocked() {
     assert_eq!(up.code, 1, "{}{}", up.stdout, up.stderr);
     // `search` fails at once, and `jobs`, which needs it through `index`,
     // can no longer become ready: `tay up` returns then, naming the
-    // failure, its reason, and every unit waiting on it.
+    // failure, its reason, and every unit waiting on it. `site`, which
+    // fails as soon, may have failed by then, and is named too.
     let cannot =
         "its program could not be started: `search-server`: No such file or directory (os error 2)";
     assert_eq!(up.last_change("search"), format!("failed {cannot}"));
@@ -56,7 +57,7 @@ fn a_unit_that_cannot_run_fails_saying_why_and_what_needs_it_waits_blocked() {
         up.stdout
     );
     assert!(
-        up.stdout.ends_with(
+        up.stdout.contains(
             " # attempt 1, command: could not be started: `search-server`: No such file or directory (os error 2)\n  waiting on it: `index`, `jobs`\n"
         ),
         "{}",
