@@ -2,7 +2,9 @@
 
 use std::fmt;
 
-use crate::syntax::expr::{Expr, ExprKind, Type};
+use crate::diagnostic::Diagnostics;
+use crate::syntax::expr::{self, Expr, ExprKind, Type};
+use crate::syntax::yaml::Node;
 use crate::value::Value;
 
 use super::settings::Destination;
@@ -98,6 +100,18 @@ impl Form {
 }
 
 impl Want {
+    /// Reads a value written where this is wanted. Its written form is
+    /// checked now; what a reference in it brings is checked once it is
+    /// resolved.
+    pub fn read(self, node: &Node, d: &mut Diagnostics) -> Option<Expr> {
+        let expr = expr::from_node(node, d)?;
+        if let Some(problem) = Form::of_written(&expr).and_then(|form| self.problem(&form)) {
+            d.error(node.loc, format!("this {problem}"));
+            return None;
+        }
+        Some(expr)
+    }
+
     /// What is wrong with a value of this form here, if anything. A value
     /// produced by running passes every check that its type would decide,
     /// since its type is not known before start, and none that its exact

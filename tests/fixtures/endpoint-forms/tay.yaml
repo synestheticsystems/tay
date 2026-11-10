@@ -1,0 +1,15 @@
+format: 1
+stack: endpoint-forms
+settings:
+  big: { default: 70000 }
+  number: { default: 5 }
+  relative: { default: v1 }
+up: [web]
+units:
+  web:
+    uses: process
+    with: { command: [web] }
+    gives:
+      a: { port: "${settings.big}", scheme: http }
+      b: { port: 8080, scheme: "${settings.number}", path: "${settings.relative}" }
+      c: { port: 8080, scheme: http, host: "${settings.number}", path: "/v1/${settings.relative}" }

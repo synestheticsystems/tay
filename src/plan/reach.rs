@@ -128,11 +128,11 @@ impl<'s> Planner<'s> {
                 let mut uses = Uses::default();
                 let slot = &entry.host_port;
                 let host_port = self
-                    .use_value(user, &slot.expr, slot.want, slot.destination, &mut uses)
+                    .use_value(user, slot, &mut uses)
                     .map(|resolved| resolved.value);
                 let address = match &entry.address {
                     Some(slot) => self
-                        .use_value(user, &slot.expr, slot.want, slot.destination, &mut uses)
+                        .use_value(user, slot, &mut uses)
                         .map(|resolved| resolved.value),
                     None => Some(Value::text(LOOPBACK)),
                 };

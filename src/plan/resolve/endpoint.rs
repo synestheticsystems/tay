@@ -9,8 +9,8 @@
 //! and that port.
 
 use crate::definition::Endpoint;
-use crate::module::{Form, HOST_IN_CONTAINERS, Published, Runs, UnitKind};
-use crate::syntax::expr::{Part, Reference};
+use crate::module::{Form, HOST_IN_CONTAINERS, Published, Runs, UnitKind, Want};
+use crate::syntax::expr::{Expr, Part, Reference};
 
 use super::{Asker, Fail, Res, Resolver, Scope, ViewProblem};
 use crate::plan::resolve::value::{PublishedUse, Resolved};
@@ -39,26 +39,26 @@ impl<'s> Resolver<'s> {
             unit: Some(owner),
             asker: Asker::of(kind),
         };
-        let port = self.resolve(&endpoint.port, own)?;
-        if !matches!(Form::of(&port.value), Form::Number(_) | Form::Unknown) {
-            return self.fail(
-                endpoint.port.loc,
-                format!(
-                    "an endpoint's `port` is a number; this is {}",
-                    port.value.shown()
-                ),
-            );
-        }
-        let scheme = match &endpoint.scheme {
-            Some(scheme) => Some(self.resolve(scheme, own)?),
-            None => None,
-        };
-        let path = match &endpoint.path {
-            Some(path) => Some(self.resolve(path, own)?),
-            None => None,
-        };
-        let (host, seen_port) = match &endpoint.host {
-            Some(host) => (self.resolve(host, own)?, port),
+        // Every part is resolved, so that an error in each is found.
+        let port = self.part(&endpoint.port, Endpoint::PORT, own);
+        let scheme = endpoint
+            .scheme
+            .as_ref()
+            .map(|scheme| self.part(scheme, Endpoint::SCHEME, own))
+            .transpose();
+        let path = endpoint
+            .path
+            .as_ref()
+            .map(|path| self.path(path, own))
+            .transpose();
+        let host = endpoint
+            .host
+            .as_ref()
+            .map(|host| self.part(host, Endpoint::HOST, own))
+            .transpose();
+        let (port, scheme, path, host) = (port?, scheme?, path?, host?);
+        let (host, seen_port) = match host {
+            Some(host) => (host, port),
             None => self.seen(owner, endpoint, kind, asker, reference, port)?,
         };
         let mut value = Resolved::known(Value::Text(Vec::new()));
@@ -110,6 +110,28 @@ impl<'s> Resolver<'s> {
             }
         }
         value.value = Value::from_bits(bits);
+        Ok(value)
+    }
+
+    /// A part of an endpoint, resolved in its own unit's terms and checked
+    /// against what it must be.
+    fn part(&mut self, expr: &Expr, want: Want, own: Scope) -> Res {
+        let value = self.resolve(expr, own)?;
+        match want.problem(&Form::of(&value.value)) {
+            Some(problem) => self.fail(expr.loc, format!("{} {problem}", expr.subject())),
+            None => Ok(value),
+        }
+    }
+
+    /// An endpoint's `path`, which also starts with `/`.
+    fn path(&mut self, expr: &Expr, own: Scope) -> Res {
+        let value = self.part(expr, Endpoint::PATH, own)?;
+        if let Value::Text(bits) = &value.value
+            && let Some(Bit::Text(leading)) = bits.first()
+            && let Some(problem) = Endpoint::path_problem(leading)
+        {
+            return self.fail(expr.loc, problem.to_string());
+        }
         Ok(value)
     }
 

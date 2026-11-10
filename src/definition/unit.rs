@@ -3,7 +3,7 @@
 //! known to be ready and restarted.
 
 use crate::diagnostic::source::Loc;
-use crate::module::{Description, Module, ModuleValue, Output};
+use crate::module::{Description, Module, ModuleValue, Output, Slot, Want};
 use crate::syntax::expr::{Expr, Type};
 use crate::syntax::names::NameAt;
 
@@ -93,7 +93,8 @@ pub struct Mechanism {
     pub gives: Vec<Give>,
     pub ready: Option<Ready>,
     pub restart: Option<Restart>,
-    pub watch: Vec<Expr>,
+    /// Files and folders whose change runs the unit again.
+    pub watch: Vec<Slot>,
 }
 
 impl Mechanism {
@@ -149,10 +150,24 @@ pub struct Endpoint {
     pub host: Option<Expr>,
 }
 
+impl Endpoint {
+    /// What each part must be, as written and once resolved. A `path` must
+    /// also start with `/`.
+    pub const PORT: Want = Want::PortNumber;
+    pub const SCHEME: Want = Want::Text;
+    pub const PATH: Want = Want::Text;
+    pub const HOST: Want = Want::Text;
+
+    /// What is wrong with a `path` whose text begins with `leading`.
+    pub fn path_problem(leading: &str) -> Option<&'static str> {
+        (!leading.starts_with('/')).then_some("an endpoint's `path` starts with `/`")
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Ready {
-    pub check: Check<Expr>,
-    pub within: Expr,
+    pub check: Check<Slot>,
+    pub within: Slot,
 }
 
 /// One readiness check, each value as written or once resolved.
@@ -170,6 +185,6 @@ pub enum Check<V> {
 
 #[derive(Clone, Debug)]
 pub struct Restart {
-    pub on: Option<Expr>,
-    pub attempts: Option<Expr>,
+    pub on: Option<Slot>,
+    pub attempts: Option<Slot>,
 }

@@ -6,7 +6,7 @@ use std::path::Path;
 
 use crate::diagnostic::Diagnostic;
 use crate::diagnostic::source::Loc;
-use crate::module::{Destination, Form, PathUse, Want};
+use crate::module::{Destination, Form, PathUse, Slot, Want};
 use crate::syntax::expr::{self, Expr};
 
 use super::visit::NeedEdge;
@@ -62,14 +62,12 @@ impl Planner<'_> {
     /// opened; both go into `uses`. For a file read before start the value
     /// used is the file's text, resolved. `None` when it cannot be used; the
     /// reason is reported.
-    pub fn use_value(
-        &mut self,
-        user: User<'_>,
-        expr: &Expr,
-        want: Want,
-        destination: Destination,
-        uses: &mut Uses,
-    ) -> Option<Resolved> {
+    pub fn use_value(&mut self, user: User<'_>, slot: &Slot, uses: &mut Uses) -> Option<Resolved> {
+        let Slot {
+            expr,
+            want,
+            destination,
+        } = slot;
         let scope = Scope {
             unit: Some(user.unit),
             asker: user.asker,
@@ -124,14 +122,12 @@ impl Planner<'_> {
             });
         }
         if let Some(problem) = want.problem(&Form::of(&value.value)) {
-            let what = match &expr.kind {
-                expr::ExprKind::Ref(reference) => format!("`{}`", reference.written()),
-                _ => "this".to_string(),
-            };
-            self.resolver.d.error(expr.loc, format!("{what} {problem}"));
+            self.resolver
+                .d
+                .error(expr.loc, format!("{} {problem}", expr.subject()));
             return None;
         }
-        self.check_destination(&value, destination, expr.loc);
+        self.check_destination(&value, *destination, expr.loc);
         match want {
             Want::Path(PathUse::Read(content)) => {
                 if !value.producers.is_empty() {
@@ -142,7 +138,7 @@ impl Planner<'_> {
                     return None;
                 }
                 let path = value.value.exact_text()?;
-                return self.use_template_file(user, &path, expr.loc, content, uses);
+                return self.use_template_file(user, &path, expr.loc, *content, uses);
             }
             Want::Path(PathUse::Mounted) => self.check_mount_source(&value, expr.loc),
             _ => {}
@@ -227,11 +223,15 @@ impl Planner<'_> {
                 return None;
             }
         };
-        let content_expr = Expr {
-            loc: Loc::new(source, 1, 1),
-            kind: expr::ExprKind::Text(pieces),
+        let content = Slot {
+            expr: Expr {
+                loc: Loc::new(source, 1, 1),
+                kind: expr::ExprKind::Text(pieces),
+            },
+            want: Want::Scalar,
+            destination: content,
         };
-        self.use_value(user, &content_expr, Want::Scalar, content, uses)
+        self.use_value(user, &content, uses)
     }
 }
 

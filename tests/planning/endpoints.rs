@@ -206,3 +206,18 @@ fn a_view_of_the_host_opens_a_published_port_for_a_unit_in_a_container() {
         json!({ "unit": "viewer", "how": "view" })
     );
 }
+
+#[test]
+fn each_part_of_an_endpoint_is_checked_once_resolved() {
+    let run = plan("endpoint-forms", &[]);
+    assert_eq!(run.code, 2);
+    assert_eq!(
+        run.errors(),
+        [
+            "tay.yaml:13:18: `${settings.big}` must be a port number from 1 to 65535; this is 70000",
+            "tay.yaml:14:32: `${settings.number}` must be text; this is a whole number",
+            "tay.yaml:14:60: an endpoint's `path` starts with `/`",
+            "tay.yaml:15:44: `${settings.number}` must be text; this is a whole number",
+        ]
+    );
+}

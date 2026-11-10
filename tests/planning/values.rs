@@ -137,8 +137,8 @@ fn a_unit_that_cannot_be_planned_hides_no_other_units_errors() {
         [
             "tay.yaml:11:19: the readiness check of unit `db` is made from the host, and uses here an address of unit `db` as the host sees it, but `db` publishes no host port for its port 5432",
             "  tay.yaml:12:19: the endpoint of `db` is defined here",
-            "tay.yaml:16:25: an endpoint's `port` is a number; this is one",
-            "tay.yaml:20:25: an endpoint's `port` is a number; this is two",
+            "tay.yaml:16:25: `${settings.first_port}` must be a port number; this is text",
+            "tay.yaml:20:25: `${settings.second_port}` must be a port number; this is text",
         ]
     );
 }

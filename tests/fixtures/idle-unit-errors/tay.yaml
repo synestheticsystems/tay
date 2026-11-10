@@ -1,0 +1,14 @@
+format: 1
+stack: idle-unit-errors
+up: [a]
+units:
+  a: { uses: process, with: { command: [a] } }
+  idle:
+    uses: process
+    with: { command: [idle] }
+    ready: { http: "${self.api.url}", within: soon }
+    restart: { on: sometimes, attempts: many }
+    gives:
+      api: { port: abc, scheme: 5, path: v1 }
+      other: { port: 70000, host: [a, list] }
+  counted: { uses: process, with: { command: [c] }, restart: { attempts: -3 } }

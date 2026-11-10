@@ -87,6 +87,15 @@ impl Expr {
         }
     }
 
+    /// How a message about the value begins: the reference, when the value
+    /// is one, or `this`.
+    pub fn subject(&self) -> String {
+        match &self.kind {
+            ExprKind::Ref(reference) => format!("`{}`", reference.written()),
+            _ => "this".to_string(),
+        }
+    }
+
     /// The text of a value with no references in it.
     pub fn literal_text(&self) -> Option<String> {
         match &self.kind {

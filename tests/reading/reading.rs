@@ -77,3 +77,24 @@ fn a_value_given_twice_a_run_with_no_ways_and_a_variable_set_twice_are_errors() 
         ]
     );
 }
+
+#[test]
+fn a_units_own_fields_are_checked_as_written_whether_or_not_it_comes_up() {
+    // Only `a` comes up; `idle` and `counted` are still read in full.
+    let run = plan("idle-unit-errors", &[]);
+    assert_eq!(run.code, 2);
+    assert_eq!(
+        run.errors(),
+        [
+            "tay.yaml:9:47: this must be a whole number followed by s, m or h, such as `2m`; this is `soon`",
+            "tay.yaml:10:20: this must be one of `failure`, `always`, `never`; this is `sometimes`",
+            "tay.yaml:10:41: this must be a whole number; this is text",
+            "tay.yaml:12:20: this must be a port number; this is text",
+            "tay.yaml:12:33: this must be text; this is a whole number",
+            "tay.yaml:12:42: an endpoint's `path` starts with `/`",
+            "tay.yaml:13:22: this must be a port number from 1 to 65535; this is 70000",
+            "tay.yaml:13:35: a value is text, a whole number or true or false; this is a list",
+            "tay.yaml:14:74: this must be a whole number above 0; this is -3",
+        ]
+    );
+}

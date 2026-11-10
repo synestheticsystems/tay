@@ -45,7 +45,7 @@ impl Planner<'_> {
                 }
             }
             if let Some(first) = mechanism.watch.first() {
-                refusals.push((first.loc, "it watches files or folders".to_string()));
+                refusals.push((first.expr.loc, "it watches files or folders".to_string()));
             }
             for (loc, why) in refusals {
                 let mut error = Diagnostic::new(

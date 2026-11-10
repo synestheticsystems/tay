@@ -5,8 +5,7 @@ use std::borrow::Cow;
 
 use crate::definition::{Action, Body, Give, GiveValue, Mechanism, Ready, Restart, Unit, Way};
 use crate::diagnostic::{Diagnostic, Diagnostics};
-use crate::module::{self, Cx, Module, UnitKind};
-use crate::syntax::expr::Expr;
+use crate::module::{self, Cx, Module, Slot, UnitKind};
 use crate::syntax::fields::{self, Fields};
 use crate::syntax::names::{self, NameAt};
 use crate::syntax::yaml::Node;
@@ -55,7 +54,7 @@ struct WayFields<'n> {
     gives: Vec<Give>,
     ready: Option<Ready>,
     restart: Option<Restart>,
-    watch: Option<Vec<Expr>>,
+    watch: Option<Vec<Slot>>,
 }
 
 impl<'n> WayFields<'n> {
@@ -80,7 +79,9 @@ impl<'n> WayFields<'n> {
             restart: fields
                 .get("restart")
                 .and_then(|node| unit_fields::restart(node, d)),
-            watch: fields.get("watch").map(|node| unit_fields::watch(node, d)),
+            watch: fields
+                .get("watch")
+                .map(|node| unit_fields::watch(node, d).unwrap_or_default()),
         }
     }
 }

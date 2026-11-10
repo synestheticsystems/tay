@@ -3,7 +3,7 @@
 
 use crate::diagnostic::Diagnostics;
 use crate::diagnostic::source::Loc;
-use crate::syntax::expr::{self, Expr, Literal};
+use crate::syntax::expr::Literal;
 use crate::syntax::names::{self, NameAt};
 use crate::syntax::yaml::{Kind, Node, Scalar};
 
@@ -197,13 +197,6 @@ pub fn list<'n>(node: &'n Node, what: &str, d: &mut Diagnostics) -> Option<&'n [
             None
         }
     }
-}
-
-/// A list of values.
-pub fn value_list(node: &Node, what: &str, d: &mut Diagnostics) -> Option<Vec<Expr>> {
-    let items = list(node, what, d)?;
-    let values: Vec<Option<Expr>> = items.iter().map(|item| expr::from_node(item, d)).collect();
-    values.into_iter().collect()
 }
 
 /// A mapping from names (checked by `rule`) to nodes, in the order written.

@@ -5,11 +5,11 @@
 use std::fmt;
 
 use crate::diagnostic::Diagnostics;
-use crate::syntax::expr::{self, Expr};
+use crate::syntax::expr::Expr;
 use crate::syntax::yaml::Node;
 use crate::value::Value;
 
-use super::want::{Form, Want};
+use super::want::Want;
 
 /// A module's own settings for one unit as written: every value a [`Slot`]
 /// that the planner resolves.
@@ -47,13 +47,8 @@ impl Slot {
         destination: Destination,
         d: &mut Diagnostics,
     ) -> Option<Slot> {
-        let expr = expr::from_node(node, d)?;
-        if let Some(problem) = Form::of_written(&expr).and_then(|form| want.problem(&form)) {
-            d.error(node.loc, format!("this {problem}"));
-            return None;
-        }
         Some(Slot {
-            expr,
+            expr: want.read(node, d)?,
             want,
             destination,
         })

@@ -4,8 +4,7 @@
 
 use crate::definition::{Check, Mechanism};
 use crate::diagnostic::source::Loc;
-use crate::module::{Destination, Duration, PathUse, RestartOn, Runs, UnitKind, Want};
-use crate::syntax::expr::Expr;
+use crate::module::{Duration, RestartOn, Runs, Slot, UnitKind};
 use crate::syntax::names::NameAt;
 use crate::value::Value;
 
@@ -13,10 +12,6 @@ use super::usage::{Opening, User, Uses};
 use crate::plan::Planner;
 use crate::plan::model::{Because, PlannedMechanism, PlannedUnit, Readiness, Restart};
 use crate::plan::resolve::{Asker, Chosen};
-
-const READINESS: Destination = Destination::Readable("a readiness check");
-const WATCHED: Destination = Destination::Readable("a watched file or folder");
-const RESTART: Destination = Destination::Readable("a restart policy");
 
 /// The attempts a unit that restarts gets when its `restart` does not say.
 const RESTART_ATTEMPTS: u64 = 5;
@@ -111,7 +106,7 @@ impl<'s> Planner<'s> {
     ) -> Option<PlannedMechanism> {
         let description = &mechanism.description;
         let settings = description.settings.resolve(&mut |slot| {
-            self.use_value(user, &slot.expr, slot.want, slot.destination, uses)
+            self.use_value(user, slot, uses)
                 .map(|resolved| resolved.value)
         });
         self.check_inside(&description.kind);
@@ -171,23 +166,21 @@ impl<'s> Planner<'s> {
             readiness: true,
             ..user
         };
-        let mut use_value = |user, expr: &Expr, want| {
-            self.use_value(user, expr, want, READINESS, uses)
+        let mut use_value = |user, slot: &Slot| {
+            self.use_value(user, slot, uses)
                 .map(|resolved| resolved.value)
         };
         let check = match &ready.check {
-            Check::Http(url) => use_value(from_host, url, Want::Text).map(Check::Http),
-            Check::Tcp(address) => use_value(from_host, address, Want::Text).map(Check::Tcp),
-            Check::Log(line) => use_value(user, line, Want::Text).map(Check::Log),
+            Check::Http(url) => use_value(from_host, url).map(Check::Http),
+            Check::Tcp(address) => use_value(from_host, address).map(Check::Tcp),
+            Check::Log(line) => use_value(user, line).map(Check::Log),
             Check::Command(command) => {
-                let words: Vec<Option<Value>> = command
-                    .iter()
-                    .map(|word| use_value(user, word, Want::Scalar))
-                    .collect();
+                let words: Vec<Option<Value>> =
+                    command.iter().map(|word| use_value(user, word)).collect();
                 words.into_iter().collect::<Option<_>>().map(Check::Command)
             }
         };
-        let within = use_value(user, &ready.within, Want::Duration).map(|within| {
+        let within = use_value(user, &ready.within).map(|within| {
             let text = within.exact_text();
             Duration::parse(text.as_deref().unwrap_or_default())
                 .expect("a value `Want::Duration` passes is a duration")
@@ -206,18 +199,16 @@ impl<'s> Planner<'s> {
     ) -> Option<Restart> {
         let written = mechanism.restart.as_ref();
         let on = match written.and_then(|r| r.on.as_ref()) {
-            Some(expr) => self
-                .use_value(user, expr, Want::OneOf(RestartOn::WORDS), RESTART, uses)
-                .map(|on| {
-                    let word = on.value.exact_text();
-                    RestartOn::of_word(word.as_deref().unwrap_or_default())
-                        .expect("a value `Want::OneOf` passes is one of its words")
-                }),
+            Some(slot) => self.use_value(user, slot, uses).map(|on| {
+                let word = on.value.exact_text();
+                RestartOn::of_word(word.as_deref().unwrap_or_default())
+                    .expect("a value `Want::OneOf` passes is one of its words")
+            }),
             None => Some(mechanism.description.restart_by_default),
         };
         let attempts = match written.and_then(|r| r.attempts.as_ref()) {
-            Some(expr) => self
-                .use_value(user, expr, Want::Count, RESTART, uses)
+            Some(slot) => self
+                .use_value(user, slot, uses)
                 .map(|attempts| match attempts.value {
                     Value::Number(n) => {
                         Some(u64::try_from(n).expect("a value `Want::Count` passes is above 0"))
@@ -231,16 +222,15 @@ impl<'s> Planner<'s> {
         Some(Restart { on, attempts })
     }
 
-    fn watched(&mut self, user: User<'_>, watched: &Expr, uses: &mut Uses) -> Option<Value> {
-        let want = Want::Path(PathUse::Named);
-        let value = self.use_value(user, watched, want, WATCHED, uses)?.value;
+    fn watched(&mut self, user: User<'_>, watched: &Slot, uses: &mut Uses) -> Option<Value> {
+        let value = self.use_value(user, watched, uses)?.value;
         // A production profile refuses any watch, so where it points does not matter there.
         if !self.production
             && let Some(path) = value.exact_text()
             && !std::path::Path::new(&path).exists()
         {
             self.resolver.d.error(
-                watched.loc,
+                watched.expr.loc,
                 format!("`{path}`, which this unit watches, does not exist"),
             );
             return None;

@@ -20,7 +20,7 @@ pub use description::{
     UnitKind, VolumeMount,
 };
 pub use running::container::HOST_IN_CONTAINERS;
-pub use settings::{Destination, Settings};
+pub use settings::{Destination, Settings, Slot};
 pub use want::{Duration, Form, PathUse, Want};
 
 /// One mechanism a unit can use.

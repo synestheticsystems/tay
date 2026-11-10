@@ -80,15 +80,21 @@ fn exprs(mechanism: &Mechanism) -> Vec<&Expr> {
     }
     if let Some(ready) = &mechanism.ready {
         match &ready.check {
-            Check::Http(expr) | Check::Tcp(expr) | Check::Log(expr) => all.push(expr),
-            Check::Command(words) => all.extend(words),
+            Check::Http(slot) | Check::Tcp(slot) | Check::Log(slot) => all.push(&slot.expr),
+            Check::Command(words) => all.extend(words.iter().map(|word| &word.expr)),
         }
-        all.push(&ready.within);
+        all.push(&ready.within.expr);
     }
     if let Some(restart) = &mechanism.restart {
-        all.extend(restart.on.iter().chain(&restart.attempts));
+        all.extend(
+            restart
+                .on
+                .iter()
+                .chain(&restart.attempts)
+                .map(|slot| &slot.expr),
+        );
     }
-    all.extend(&mechanism.watch);
+    all.extend(mechanism.watch.iter().map(|slot| &slot.expr));
     all
 }
 
