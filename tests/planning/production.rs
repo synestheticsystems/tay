@@ -43,6 +43,10 @@ fn each_thing_the_format_lists_is_refused_naming_its_unit() {
             // container: neither is refused.
             "tay.yaml:24:24: the production profile `deploy` refuses unit `outside`: it mounts `/tmp`, which is neither under the stack's root nor in the shared folder, and does not begin with a setting's value",
             marked,
+            // A mount whose source continues with a value produced by
+            // running: what it leads to is not known before start.
+            "tay.yaml:43:24: the production profile `deploy` refuses unit `continues`: it mounts a source that continues with a value produced by running, so where it leads is not known before anything starts",
+            marked,
         ]
     );
 }

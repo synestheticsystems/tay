@@ -8,6 +8,7 @@ use crate::diagnostic::source::Loc;
 use crate::module::{Concern, Runs, UnitKind};
 use crate::syntax::expr::Expr;
 use crate::syntax::names::NameAt;
+use crate::value::Hole;
 
 use super::Planner;
 use super::reach::Reached;
@@ -64,10 +65,11 @@ impl Planner<'_> {
         }
     }
 
-    /// Why a mount's source is refused, if it is: it is refused when it is
-    /// neither under the stack's root (which holds the state folder) nor in
-    /// the shared folder, and does not begin with a setting's value, which
-    /// is where a production environment says what of its machine to mount.
+    /// Why a mount's source is refused, if it is: it is refused when it
+    /// continues with a value produced by running, or when it is neither
+    /// under the stack's root (which holds the state folder) nor in the
+    /// shared folder and does not begin with a setting's value, which is
+    /// where a production environment says what of its machine to mount.
     fn mount_outside(&mut self, unit: usize, from: &Expr, asker: Asker) -> Option<String> {
         let scope = Scope {
             unit: Some(unit),
@@ -76,11 +78,23 @@ impl Planner<'_> {
         // The source is also one of the unit's slots, so a failure to resolve
         // it has been reported where the unit's values were used.
         let value = self.resolver.resolve(from, scope).ok()?;
+        let produced = value
+            .value
+            .holes()
+            .into_iter()
+            .any(|hole| matches!(hole, Hole::Produced { .. }));
+        if produced {
+            return Some(
+                "it mounts a source that continues with a value produced by running, so where it leads is not known before anything starts"
+                    .to_string(),
+            );
+        }
         if value.begins_with_setting {
             return None;
         }
-        // Where a source leads is known from its start: what follows a part
-        // known before start stays under the folder that part names.
+        // Where the source leads is judged by the text it begins with, every
+        // part known before start put in and `..` worked out, up to the first
+        // part that is not.
         let value = self.resolver.host_path(value);
         let leading = value.value.leading_text();
         if leading.is_empty() {

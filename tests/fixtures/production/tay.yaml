@@ -33,6 +33,14 @@ units:
         - { from: "${environment.shared}/cache", to: /cache }
         - { from: "${holder.certs}", to: /more-certs }
         - { from: "${environment.state}/${environment.id}", to: /own }
+  prep:
+    uses: command
+    with: { image: example/prep, run: [prep], produces: [sub] }
+  continues:
+    uses: container
+    with:
+      image: example/continues
+      mounts: [{ from: "./data/${prep.sub}", to: /data }]
   holder:
     uses: port
     gives: { certs: "${settings.certs}/." }
@@ -47,4 +55,4 @@ units:
       image:
         uses: container
         with: { image: example/server }
-  all: { needs: [site, migrate, builder, watcher, outside, inside, setup, server] }
+  all: { needs: [site, migrate, builder, watcher, outside, inside, continues, setup, server] }
