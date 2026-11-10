@@ -5,7 +5,6 @@ settings:
   mode: { default: one, doc: "What the web is told, and gives on." }
   greeting: { default: hello, doc: "What the conf file says." }
   says: { default: first, doc: "What the program the build builds says." }
-  length: { default: 20, doc: "How long the token is." }
 units:
   web-port: { uses: port }
   web:
@@ -53,7 +52,7 @@ units:
     with:
       command: ["${build.outputs.program}"]
 
-  token: { uses: secret, with: { kind: password, length: "${settings.length}" } }
+  token: { uses: secret, with: { kind: password } }
   guarded:
     doc: Is given the token, through its environment alone.
     uses: process

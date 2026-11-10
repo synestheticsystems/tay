@@ -129,29 +129,46 @@ fn no_secret_appears_in_any_output_log_or_argument_list() {
 }
 
 #[test]
-fn a_secret_whose_settings_change_is_generated_again_and_one_tay_cannot_read_is_kept() {
+fn a_secret_whose_settings_change_is_kept_saying_so_and_wiping_it_makes_a_new_one() {
     let machine = Machine::new();
     let root = machine.stack("notes");
     assert_eq!(machine.at(&root, "up", &[]).code, 0);
+    let first = kept(&root, "notes-password");
     let definitions = fs::read_to_string(root.join("tay.yaml")).unwrap();
+    let shorter = definitions.replace("{ kind: password }", "{ kind: password, length: 12 }");
+    fs::write(root.join("tay.yaml"), &shorter).unwrap();
+    let up = machine.at(&root, "up", &[]);
+    assert_eq!(up.code, 0, "{}{}", up.stdout, up.stderr);
+    assert_eq!(
+        up.last_change("notes-password"),
+        "ready kept, though its settings now ask for another `length`: `tay wipe notes-password --yes` makes a new one"
+    );
+    assert_eq!(kept(&root, "notes-password"), first);
+    let wipe = machine.at(&root, "wipe", &["notes-password", "--yes"]);
+    assert_eq!(wipe.code, 0, "{}{}", wipe.stdout, wipe.stderr);
+    let made = kept(&root, "notes-password");
+    assert_eq!(made["length"], 12);
+    assert_eq!(made["value"].as_str().unwrap().len(), 12);
+    // One of another kind cannot give what the unit gives, and is kept.
     fs::write(
         root.join("tay.yaml"),
-        definitions.replace("{ kind: password }", "{ kind: password, length: 12 }"),
+        shorter.replace("{ kind: password, length: 12 }", "{ kind: bytes }"),
     )
     .unwrap();
     let up = machine.at(&root, "up", &[]);
+    assert_eq!(up.code, 1);
     assert_eq!(
         up.last_change("notes-password"),
-        "ready generated again: the one it kept was generated for other settings"
+        "failed the one it keeps is a `password`, and its settings now ask for a `bytes`: `tay wipe notes-password --yes` makes a new one"
     );
-    assert_eq!(
-        kept(&root, "notes-password")["value"]
-            .as_str()
-            .unwrap()
-            .len(),
-        12
-    );
-    // A secret kept in a form this tay does not read is not replaced.
+    assert_eq!(kept(&root, "notes-password"), made);
+}
+
+#[test]
+fn a_secret_kept_in_a_form_tay_cannot_read_is_kept_and_fails_its_unit() {
+    let machine = Machine::new();
+    let root = machine.stack("notes");
+    assert_eq!(machine.at(&root, "up", &[]).code, 0);
     let key = root.join(".tay/state/secrets/notes-key");
     fs::write(&key, "not what tay writes").unwrap();
     let up = machine.at(&root, "up", &[]);

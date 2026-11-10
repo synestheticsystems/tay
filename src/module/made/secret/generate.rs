@@ -46,8 +46,14 @@ enum SecretError {
     Length(i64),
     #[error("it has not been generated")]
     Missing,
-    #[error("the one it keeps was generated for other settings")]
-    OtherSettings,
+    #[error(
+        "the one it keeps is a `{kept}`, and its settings now ask for a `{asked}`: `tay wipe {unit} --yes` makes a new one"
+    )]
+    OtherKind {
+        kept: &'static str,
+        asked: &'static str,
+        unit: String,
+    },
     #[error("the one it keeps, in `{}`, is not in a form this tay reads", .0.display())]
     Unread(std::path::PathBuf),
     #[error("the key pair cannot be made: {0}")]
@@ -65,6 +71,48 @@ enum Asked {
     Password { length: usize },
     Bytes { length: usize, encoding: Encoded },
     Keypair { algorithm: Algorithm },
+}
+
+impl Asked {
+    /// The kind, as `kind` is written.
+    fn kind(&self) -> &'static str {
+        match self {
+            Asked::Password { .. } => "password",
+            Asked::Bytes { .. } => "bytes",
+            Asked::Keypair { .. } => "keypair",
+        }
+    }
+
+    /// The settings that differ in `now`, by name, when it asks for the
+    /// same kind; `None` when it asks for another.
+    fn differing(&self, now: &Asked) -> Option<Vec<&'static str>> {
+        let named = |pairs: &[(&'static str, bool)]| {
+            pairs
+                .iter()
+                .filter(|(_, differs)| *differs)
+                .map(|(name, _)| *name)
+                .collect()
+        };
+        match (self, now) {
+            (Asked::Password { length }, Asked::Password { length: now }) => {
+                Some(named(&[("length", length != now)]))
+            }
+            (
+                Asked::Bytes { length, encoding },
+                Asked::Bytes {
+                    length: length_now,
+                    encoding: encoding_now,
+                },
+            ) => Some(named(&[
+                ("length", length != length_now),
+                ("encoding", encoding != encoding_now),
+            ])),
+            (Asked::Keypair { algorithm }, Asked::Keypair { algorithm: now }) => {
+                Some(named(&[("algorithm", algorithm != now)]))
+            }
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -101,27 +149,50 @@ impl Made for SecretSettings<Filled> {
     fn make(&self, place: &UnitPlace, _: bool) -> Result<Exists, Failure> {
         let asked = self.asked()?;
         let path = path(place);
-        let detail = match read(&path)? {
-            Some(stored) if stored.asked == asked => return Ok(exists(&stored, "kept")),
-            Some(_) => "generated again: the one it kept was generated for other settings",
-            None => "generated",
-        };
+        if let Some(stored) = read(&path)? {
+            return Ok(kept(&stored, asked, place)?);
+        }
         let stored = Stored {
             asked,
             generated: generate(asked)?,
         };
         keep(&path, &stored)?;
-        Ok(exists(&stored, detail))
+        Ok(exists(&stored, "generated"))
     }
 
     fn check(&self, place: &UnitPlace) -> Result<Exists, Failure> {
         let asked = self.asked()?;
         match read(&path(place))? {
-            Some(stored) if stored.asked == asked => Ok(exists(&stored, "kept")),
-            Some(_) => Err(SecretError::OtherSettings.into()),
+            Some(stored) => Ok(kept(&stored, asked, place)?),
             None => Err(SecretError::Missing.into()),
         }
     }
+}
+
+/// The secret `stored` for the unit at `place`, which its settings now
+/// ask to be as `asked`. Kept beats written: one generated with another
+/// `length` or `encoding` is kept, saying so, since whatever already holds
+/// it would not change with it; one of another kind cannot give what the
+/// unit must give.
+fn kept(stored: &Stored, asked: Asked, place: &UnitPlace) -> Result<Exists, SecretError> {
+    let wipe = || format!("`tay wipe {} --yes` makes a new one", place.unit);
+    let differing = stored
+        .asked
+        .differing(&asked)
+        .ok_or_else(|| SecretError::OtherKind {
+            kept: stored.asked.kind(),
+            asked: asked.kind(),
+            unit: place.unit.clone(),
+        })?;
+    let detail = match differing.as_slice() {
+        [] => "kept".to_string(),
+        settings => format!(
+            "kept, though its settings now ask for another {}: {}",
+            crate::diagnostic::quoted_list(settings),
+            wipe()
+        ),
+    };
+    Ok(exists(stored, &detail))
 }
 
 impl SecretSettings<Filled> {
@@ -320,6 +391,18 @@ mod tests {
         assert!(padded.len() == 24 && padded.ends_with("=="));
         let url = value(Encoded::Base64url);
         assert!(url.len() == 22 && !url.contains(['=', '+', '/']));
+    }
+
+    #[test]
+    fn a_kept_secret_differs_by_the_settings_it_was_generated_for_or_by_its_kind() {
+        let bytes = |length, encoding| Asked::Bytes { length, encoding };
+        let hex = bytes(16, Encoded::Hex);
+        assert_eq!(hex.differing(&bytes(16, Encoded::Hex)), Some(vec![]));
+        assert_eq!(
+            hex.differing(&bytes(32, Encoded::Base64)),
+            Some(vec!["length", "encoding"])
+        );
+        assert_eq!(hex.differing(&Asked::Password { length: 16 }), None);
     }
 
     #[test]

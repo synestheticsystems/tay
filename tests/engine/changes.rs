@@ -136,9 +136,10 @@ fn a_unit_whose_secret_changed_is_started_again_by_the_secrets_name_alone() {
         kept["value"].as_str().unwrap().to_string()
     };
     let first = secret();
-    // The token is made again for its new length, and the unit given it
-    // is started again.
-    let changed = machine.at(&root, "up", &["--set", "settings.length=24"]);
+    // A token that is no longer kept is generated again, another, and the
+    // unit given it is started again.
+    std::fs::remove_file(root.join(".tay/state/secrets/token")).unwrap();
+    let changed = machine.at(&root, "up", &[]);
     assert_eq!(changed.code, 0, "{}{}", changed.stdout, changed.stderr);
     assert!(
         changed
@@ -148,7 +149,7 @@ fn a_unit_whose_secret_changed_is_started_again_by_the_secrets_name_alone() {
         changed.stdout
     );
     let second = secret();
-    assert_eq!(second.len(), 24);
+    assert_ne!(second, first);
     let started =
         std::fs::read_to_string(root.join(".tay/state/units/guarded/started-from.json")).unwrap();
     let status = machine.at(&root, "status", &["--json"]);
