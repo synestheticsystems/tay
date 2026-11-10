@@ -58,6 +58,7 @@ fn folders_and_files_that_define_no_unit_are_errors_rather_than_skipped() {
     assert_eq!(
         run.errors(),
         [
+            "stack/units/Bad_Unit/unit.yaml:1:1: the folder's name is the unit's name: `Bad_Unit` must start with a lower-case letter",
             "stack/units/empty.yaml:1:1: this file defines no unit: its mapping is empty",
             "stack/units/extra.yml:1:1: this is not a definition: this folder holds `<name>/unit.yaml` and `<anything>.yaml` (tay reads `.yaml`, not `.yml`)",
             "stack/units/notes:1:1: this is not a definition: this folder holds `<name>/unit.yaml` and `<anything>.yaml`, and this folder has no `unit.yaml`",

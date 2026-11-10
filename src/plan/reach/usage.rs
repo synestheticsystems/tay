@@ -4,9 +4,9 @@
 use std::fs;
 use std::path::Path;
 
-use crate::definition::read::references::references as cross_references;
-use crate::diagnostic::Diagnostic;
+use crate::definition::read::cross_references::references as cross_references;
 use crate::diagnostic::source::Loc;
+use crate::diagnostic::{Diagnostic, quoted_list};
 use crate::module::{Destination, Form, PathUse, Slot, Want};
 use crate::syntax::expr::{self, Expr};
 
@@ -148,15 +148,7 @@ impl Planner<'_> {
     }
 
     fn check_destination(&mut self, value: &Resolved, destination: Destination, loc: Loc) {
-        let secrets = || {
-            value
-                .value
-                .secrets()
-                .iter()
-                .map(|s| format!("`{s}`"))
-                .collect::<Vec<_>>()
-                .join(", ")
-        };
+        let secrets = || quoted_list(value.value.secrets());
         let secret = value.value.is_secret();
         match destination {
             Destination::Readable(what) if secret => self.resolver.d.error(

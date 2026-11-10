@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 use crate::definition::{Choices, Profile, SettingValue, Stack, Unit, Way};
 use crate::diagnostic::source::Loc;
-use crate::diagnostic::{Diagnostic, Diagnostics};
+use crate::diagnostic::{Diagnostic, Diagnostics, quoted_list};
 use crate::syntax::names::NameAt;
 
 /// The choices in force once every place has had its say.
@@ -147,18 +147,11 @@ pub fn choose<'u>(
     {
         return Ok((way, loc));
     }
-    let quoted = |names: Vec<&str>| {
-        names
-            .iter()
-            .map(|name| format!("`{name}`"))
-            .collect::<Vec<_>>()
-            .join(", ")
-    };
     let why = match layered.run_default.as_slice() {
         [] => "no `run.default` is chosen".to_string(),
         defaults => format!(
             "`run.default` ({}) names none of them",
-            quoted(defaults.iter().map(|d| d.name.as_str()).collect())
+            quoted_list(defaults.iter().map(|d| &d.name))
         ),
     };
     let error = Diagnostic::new(
@@ -166,7 +159,7 @@ pub fn choose<'u>(
         format!(
             "unit `{}` has the ways {}, and no choice names one: `run.units` does not name it, and {why}",
             unit.name.name,
-            quoted(unit.way_names())
+            quoted_list(unit.way_names())
         ),
     );
     Err(match layered.run_default.first() {

@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use crate::diagnostic::Diagnostics;
+use crate::diagnostic::{Diagnostics, quoted_list};
 use crate::syntax::expr::{self, Expr, ExprKind, Type};
 use crate::syntax::yaml::Node;
 use crate::value::Value;
@@ -185,14 +185,7 @@ impl Want {
 
     fn expects(&self) -> String {
         match self {
-            Want::OneOf(choices) => format!(
-                "one of {}",
-                choices
-                    .iter()
-                    .map(|c| format!("`{c}`"))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
+            Want::OneOf(choices) => format!("one of {}", quoted_list(*choices)),
             Want::Duration => "a whole number followed by s, m or h, such as `2m`".to_string(),
             Want::FileMode => "permissions in octal, such as `\"0600\"`".to_string(),
             Want::FileName => "a file name with no folder in it".to_string(),

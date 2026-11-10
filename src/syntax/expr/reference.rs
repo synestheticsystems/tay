@@ -1,5 +1,6 @@
 //! What may stand between `${` and `}`.
 
+use crate::diagnostic::quoted_list;
 use crate::diagnostic::source::Loc;
 use crate::syntax::names;
 
@@ -100,11 +101,7 @@ impl EnvField {
 
     /// The fields, as a message lists them.
     fn listed() -> String {
-        let names: Vec<String> = EnvField::ALL
-            .iter()
-            .map(|(name, _)| format!("`{name}`"))
-            .collect();
-        names.join(", ")
+        quoted_list(EnvField::ALL.iter().map(|(name, _)| name))
     }
 }
 

@@ -2,8 +2,8 @@
 //! templates and the profiles, and the environment's own choices.
 
 mod choices;
+pub mod cross_references;
 mod files;
-pub mod references;
 mod settings;
 mod unit;
 mod version;
@@ -13,7 +13,7 @@ use std::path::Path;
 
 use crate::definition::{Places, Profile, Stack, Unit};
 use crate::diagnostic::source::{Loc, Sources};
-use crate::diagnostic::{Diagnostic, Diagnostics};
+use crate::diagnostic::{Diagnostic, Diagnostics, quoted_list};
 use crate::syntax::fields::{self, Fields};
 use crate::syntax::names::{self, NameAt, RESERVED_UNIT_NAMES};
 
@@ -235,9 +235,5 @@ pub fn profile_list(profiles: &[Profile]) -> String {
     if profiles.is_empty() {
         return "none".to_string();
     }
-    profiles
-        .iter()
-        .map(|p| format!("`{}`", p.name.name))
-        .collect::<Vec<_>>()
-        .join(", ")
+    quoted_list(profiles.iter().map(|p| &p.name.name))
 }

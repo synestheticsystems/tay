@@ -1,6 +1,8 @@
-//! Every name and reference in the definitions points at something that
-//! exists: checked across all units and all their ways, whether or
-//! not they come up, so a mistake shows before the unit is ever used.
+//! Every name and reference in the definitions and the choices points at
+//! something that exists: a need, a wait, a volume mounted, the container a
+//! command runs in, a reference, and what a choice names. Checked across
+//! all units and all their ways, whether or not they come up, so a mistake
+//! shows before the unit is ever used.
 
 use crate::definition::reference_errors;
 use crate::definition::{Body, Check, Choices, GiveValue, Mechanism, SettingValue, Stack, Unit};

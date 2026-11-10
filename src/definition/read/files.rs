@@ -121,8 +121,9 @@ impl<'a> Reader<'a> {
         );
     }
 
-    /// The name a file or folder gives what it defines.
-    fn file_name(&mut self, path: &Path, node: &Node, what: &str) -> Option<NameAt> {
+    /// The name a file or folder gives what it defines: `entry` says which
+    /// it is, `what` what it defines.
+    fn entry_name(&mut self, path: &Path, node: &Node, entry: &str, what: &str) -> Option<NameAt> {
         let name = discover::stem(path);
         match names::name_problem(&name) {
             None => Some(NameAt {
@@ -132,7 +133,7 @@ impl<'a> Reader<'a> {
             Some(problem) => {
                 self.d.error(
                     node.loc,
-                    format!("the file's name is {what}'s name: {problem}"),
+                    format!("the {entry}'s name is {what}'s name: {problem}"),
                 );
                 None
             }
@@ -147,7 +148,7 @@ impl<'a> Reader<'a> {
                     let Some(node) = self.parse(&path) else {
                         continue;
                     };
-                    let Some(name) = self.file_name(&path, &node, "the template") else {
+                    let Some(name) = self.entry_name(&path, &node, "file", "the template") else {
                         continue;
                     };
                     templates.push(template::read(name, &node, self.d));
@@ -177,7 +178,7 @@ impl<'a> Reader<'a> {
                     let Some(node) = self.parse(&file) else {
                         continue;
                     };
-                    let Some(name) = self.file_name(&path, &node, "the unit") else {
+                    let Some(name) = self.entry_name(&path, &node, "folder", "the unit") else {
                         continue;
                     };
                     units.push(unit::read(name, &node, templates, self.d));
@@ -212,7 +213,7 @@ impl<'a> Reader<'a> {
                     let Some(node) = self.parse(&path) else {
                         continue;
                     };
-                    let Some(name) = self.file_name(&path, &node, "the profile") else {
+                    let Some(name) = self.entry_name(&path, &node, "file", "the profile") else {
                         continue;
                     };
                     profiles.extend(choices::profile(name, &node, self.d));

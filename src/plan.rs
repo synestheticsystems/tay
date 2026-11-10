@@ -77,7 +77,7 @@ pub fn plan(root: &Path, options: &Options, sources: &mut Sources, d: &mut Diagn
     let profile_missing =
         profile.is_none() && (options.profile.is_some() || stack.default_profile.is_some());
     if every_file_parsed {
-        read::references::check(&stack, &places.in_order(), d);
+        read::cross_references::check(&stack, &places.in_order(), d);
         if !profile_missing {
             choices::check_up_given(&stack, &layered, d);
         }
