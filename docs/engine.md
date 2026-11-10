@@ -49,7 +49,7 @@ When a unit fails, `tay up` names it, gives the reason and the last lines it wro
 | 1 | A unit failed, or something was left that could not be stopped |
 | 2 | The definitions have errors, or what was asked does not fit this stack: a unit that does not exist, a restart of a unit that is made, an argument an action does not declare |
 | 3 | This tay is too old for the definitions |
-| 4 | Refused as things stand: another change is running (the message says which, and since when), or what was asked needs something that is not up (the message says what) |
+| 4 | Refused as things stand: another change is running (the message says which, and since when), or what was asked needs something that is not up, or could only be done by disturbing a unit that is up (the message says what) |
 | 5 | The daemon could not be started or reached |
 
 `tay run` is the one exception: when the action ran to an end, `tay run` exits with the action's own status, whatever number that is. When the action never ran, it exits with one of the codes above, and tay's message on standard error says which case it is.
@@ -195,7 +195,7 @@ Docker is a container's parent: it keeps the exit code, says whether the contain
 
 **A container whose settings have changed is replaced.** When the container that exists was created from other settings than the plan now gives (another image, environment, mount or published port), `tay up` removes it and creates it again. Its volumes stay.
 
-**When a container ends,** tay reads from Docker how: the exit code, and whether it was killed for memory. The unit's `restart` decides what follows, as for a process, and the count of attempts is kept the same way.
+**When a container ends,** tay reads from Docker how: the exit code, and whether it was killed for memory, as far as Docker says: on Linux Docker sometimes fails to record a memory kill. The unit's `restart` decides what follows, as for a process, and the count of attempts is kept the same way.
 
 **Finding containers again.** A new daemon asks Docker for the containers with the environment's label. One that runs is adopted. One that has ended is reported with how it ended, and its restart policy applies. A command that ran in a container leaves nothing in Docker once it has ended, so the daemon that saw it end keeps a record of how, and a new daemon finds the command from that record. Any other unit the plan has and Docker does not is simply not started yet.
 
@@ -217,7 +217,7 @@ Each of these is one change, taken by the daemon in turn like any other.
 
 **`tay restart UNIT...`** stops each unit named and starts it again, with a new first attempt, bringing up what the unit needs as `tay up UNIT` would. Units that need it are left running: one that suffers shows it by its own check and follows its own `restart`. A command is run again from its `check`. A unit that is made, or a group, has nothing to restart, and naming one is an error (exit code 2). On an environment that is down there is nothing to restart either (exit code 4).
 
-**`tay run ACTION [NAME=VALUE...]`** runs a unit that has `action: true`, with its arguments, after bringing up what it needs. It works on an environment that is up and on one that is down, and leaves the environment as it found it:
+**`tay run ACTION [NAME=VALUE...]`** runs a unit that has `action: true`, with its arguments, after bringing up what it needs. It works on an environment that is up, on one that is down and on one that was never brought up, and leaves the environment as it found it:
 
 - What `tay run` had to bring up for the action is stopped again when the action ends.
 - It never stops, restarts or replaces a unit that is up. If the action could only run by doing that, `tay run` is refused and says which unit (exit code 4).
@@ -236,7 +236,7 @@ Each of these is one change, taken by the daemon in turn like any other.
 | A secret, a file, a port | The stored secret, the written file, the kept number |
 | A process | Nothing beyond its record |
 
-In order: every running unit that needs the unit, directly or through others, or that mounts one of its volumes, is stopped; the unit is stopped; what it keeps is removed; and, if the environment is meant to be up, everything is brought up again as `tay up` would, so commands that needed it check again and run again where their work is gone.
+In order: every running unit that needs the unit or mounts one of its volumes, directly or through other units that do, is stopped; the unit is stopped; what it keeps is removed; and, if the environment is meant to be up, everything is brought up again as `tay up` would, so commands that needed it check again and run again where their work is gone.
 
 - Only a unit in the environment's plan can be wiped. What a unit left out of `up` still keeps is removed by `tay wipe --all`.
 - A wipe that would itself stop a unit a command's `undo` needs is refused like one whose need is not up.
@@ -244,7 +244,7 @@ In order: every running unit that needs the unit, directly or through others, or
 
 **`tay wipe --all --yes`** takes the environment down and removes everything it keeps: every volume, and `.tay/` but for `choices.yaml`. No `undo` runs, since everything an undo would act on goes too. Without `--yes` either form changes nothing and says what it would remove.
 
-**On an environment that is down,** `tay run`, `tay wipe` and anything else that needed a daemon leave none behind: once the change is done and nothing runs, the daemon exits.
+**On an environment that is down,** `tay run`, `tay wipe` and anything else that needed a daemon leave none behind: once the change is done and nothing runs, the daemon removes the environment's network, as `tay down` does, and exits.
 
 ## When something changes
 

@@ -265,7 +265,7 @@ A unit gives values; other units use them by reference. A reference is `${...}` 
 | `${self.name}` | A value this same unit gives |
 | `${settings.a.b}` | A setting |
 | `${environment.name}` and the rest | This environment (see below) |
-| `${host.listen}` | The address a host process listens on so that this machine's containers can reach it and other machines cannot. It is `127.0.0.1` where Docker runs in a virtual machine of its own, as on a Mac, and the host's address on the environment's network where Docker runs on the host itself, as on Linux |
+| `${host.listen}` | The address a host process listens on so that this machine's containers can reach it and other machines cannot. It is `127.0.0.1` where Docker runs in a virtual machine of its own, as on a Mac, and the host's address on the environment's network where Docker runs on the host itself, as on Linux. When nothing in the plan runs in a container there is no container to reach the process, so it is `127.0.0.1` on every system, and a stack of host processes alone needs no Docker |
 | `${params.name}` | A template's parameter. Templates only |
 | `${args.name}` | An action's argument. Actions only |
 
