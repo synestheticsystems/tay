@@ -11,7 +11,7 @@ mod version;
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::definition::{Choices, Profile, Stack, Unit};
+use crate::definition::{Places, Profile, Stack, Unit};
 use crate::diagnostic::source::{Loc, Sources};
 use crate::diagnostic::{Diagnostic, Diagnostics};
 use crate::syntax::fields::{self, Fields};
@@ -19,7 +19,8 @@ use crate::syntax::names::{self, NameAt, RESERVED_UNIT_NAMES};
 
 use files::Reader;
 
-pub use choices::{assignment, choices_file};
+use choices::assignment;
+pub use choices::choices_file;
 pub use files::discover::{STACK_FILE, find_root};
 pub use version::THIS_TAY;
 
@@ -91,7 +92,6 @@ pub fn read(root: &Path, sources: &mut Sources, d: &mut Diagnostics) -> Outcome 
     unique_claims(&units, reader.d);
     let profiles = reader.profiles(profiles_dir);
     check_default_profile(node.loc, default_profile.as_ref(), &profiles, reader.d);
-    let environment_choices = reader.environment_choices();
     let stack = Stack {
         root: root.to_path_buf(),
         name: stack_name,
@@ -101,7 +101,6 @@ pub fn read(root: &Path, sources: &mut Sources, d: &mut Diagnostics) -> Outcome 
         units,
         profiles,
         defaults,
-        environment_choices,
     };
     Outcome::Read {
         stack: Box::new(stack),
@@ -109,22 +108,43 @@ pub fn read(root: &Path, sources: &mut Sources, d: &mut Diagnostics) -> Outcome 
     }
 }
 
-/// Reads this person's own choices for the stack `stack`,
-/// `~/.config/tay/<stack>.yaml`, if the file exists.
-pub fn personal_choices(
-    home: &Path,
-    stack: &str,
-    root: &Path,
+/// Reads every place choices are written for the stack under `profile`, in
+/// the order they are layered: this person's own file in `home`, unless the
+/// profile is a production one, the environment's file, and each `--set`.
+/// Gives whether every file in them parsed.
+pub fn places<'s>(
+    stack: &'s Stack,
+    profile: Option<&'s Profile>,
+    home: Option<&Path>,
+    sets: &[String],
     sources: &mut Sources,
     d: &mut Diagnostics,
-) -> Option<Choices> {
-    let path = home.join(".config/tay").join(format!("{stack}.yaml"));
-    if !path.is_file() {
-        return None;
-    }
-    let mut reader = Reader::new(root, sources, d);
-    let node = reader.parse(&path)?;
-    choices_file(&node, reader.d)
+) -> (Places<'s>, bool) {
+    let mut reader = Reader::new(&stack.root, sources, d);
+    // A production stack must not change with whoever runs the command.
+    let production = profile.is_some_and(|profile| profile.production.is_some());
+    let personal = match (home, &stack.name) {
+        (Some(home), Some(name)) if !production => {
+            let path = home.join(".config/tay").join(format!("{}.yaml", name.name));
+            reader.choices_file(&path)
+        }
+        _ => None,
+    };
+    let environment =
+        reader.choices_file(&stack.root.join(ENVIRONMENT_FOLDER).join("choices.yaml"));
+    let every_file_parsed = reader.every_file_parsed;
+    let sets = sets
+        .iter()
+        .filter_map(|set| assignment(set, sources, d))
+        .collect();
+    let places = Places {
+        defaults: &stack.defaults,
+        profile,
+        personal,
+        environment,
+        sets,
+    };
+    (places, every_file_parsed)
 }
 
 /// Unit names are unique across the stack, and none is a name references use.

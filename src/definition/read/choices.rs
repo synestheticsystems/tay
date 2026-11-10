@@ -1,5 +1,5 @@
 //! Choices, written in the same shape in each place: the stack's defaults in
-//! `tay.yaml`, a profile, the personal file, the environment's
+//! `tay.yaml`, a profile, this person's own file, the environment's
 //! `.tay/choices.yaml`, and `--set`.
 
 use crate::definition::{Choices, Profile, SettingValue, Written};
@@ -40,7 +40,7 @@ pub fn profile(name: NameAt, node: &Node, d: &mut Diagnostics) -> Option<Profile
     })
 }
 
-/// The personal file or the environment's file. They have a profile's
+/// This person's own file or the environment's file. They have a profile's
 /// shape, but only a profile says whether it is a production one and what
 /// it requires.
 pub fn choices_file(node: &Node, d: &mut Diagnostics) -> Option<Choices> {

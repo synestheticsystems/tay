@@ -68,21 +68,17 @@ pub fn check_up_given(stack: &Stack, layered: &Layered, d: &mut Diagnostics) {
     if !layered.up_given {
         d.error(
             stack.loc,
-            "nothing says what comes up: none of tay.yaml, the profile, the personal file, the environment's file and `--set` gives `up`",
+            "nothing says what comes up: none of tay.yaml, the profile, this person's own file, the environment's file and `--set` gives `up`",
         );
     }
 }
 
 /// Each setting the profile requires must be given a value that is not
-/// empty by one of the choices the format counts for it: the profile, the
-/// environment's file or a `--set`, the last of these that gives one. The
-/// stack's default is not among them, nor is the personal file.
-pub fn check_required(
-    stack: &Stack,
-    profile: &Profile,
-    counting: &[&Choices],
-    d: &mut Diagnostics,
-) {
+/// empty by a choice made for this environment, in one of `made`: the
+/// profile, this person's own file where it is read, the environment's file
+/// or a `--set`, the last of these that gives one. The stack's default is
+/// not a choice.
+pub fn check_required(stack: &Stack, profile: &Profile, made: &[&Choices], d: &mut Diagnostics) {
     for required in &profile.require {
         if stack.setting(&required.name).is_none() {
             d.error(
@@ -94,7 +90,7 @@ pub fn check_required(
             );
             continue;
         }
-        let given = counting.iter().rev().find_map(|place| {
+        let given = made.iter().rev().find_map(|place| {
             place
                 .settings
                 .iter()
@@ -102,11 +98,16 @@ pub fn check_required(
                 .find(|(name, _)| name.name == required.name)
                 .map(|(_, value)| value)
         });
+        // A production profile does not read this person's own file.
+        let places = match profile.production {
+            Some(_) => "the profile, the environment's file or a `--set`",
+            None => "the profile, this person's own file, the environment's file or a `--set`",
+        };
         match given {
             None => d.error(
                 required.loc,
                 format!(
-                    "the profile `{}` requires setting `{}`, and no choice gives it a value: the profile, the environment's file or a `--set` must (its default does not count)",
+                    "the profile `{}` requires setting `{}`, and no choice gives it a value: {places} must (its default does not count)",
                     profile.name.name, required.name
                 ),
             ),

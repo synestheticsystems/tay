@@ -32,3 +32,38 @@ pub struct Choices {
     /// folder's name.
     pub label: Option<String>,
 }
+
+/// Every place choices are written, in the order they are layered, later
+/// ones winning.
+#[derive(Debug)]
+pub struct Places<'s> {
+    /// `up` and `run` as `tay.yaml` writes them.
+    pub defaults: &'s Choices,
+    pub profile: Option<&'s Profile>,
+    /// This person's own file, read only when the profile is not a
+    /// production one.
+    pub personal: Option<Choices>,
+    /// This environment's `.tay/choices.yaml`.
+    pub environment: Option<Choices>,
+    /// Each `--set`, in the order written.
+    pub sets: Vec<Choices>,
+}
+
+impl Places<'_> {
+    pub fn in_order(&self) -> Vec<&Choices> {
+        [self.defaults].into_iter().chain(self.made()).collect()
+    }
+
+    /// Every place but the stack's own defaults: the ones whose values are
+    /// choices made for this environment, which is what a profile's
+    /// `require` counts.
+    pub fn made(&self) -> Vec<&Choices> {
+        self.profile
+            .map(|profile| &profile.choices)
+            .into_iter()
+            .chain(self.personal.as_ref())
+            .chain(self.environment.as_ref())
+            .chain(&self.sets)
+            .collect()
+    }
+}

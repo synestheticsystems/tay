@@ -1,4 +1,4 @@
-//! Choices layered across the stack, the profile, the personal file, the
+//! Choices layered across the stack, the profile, this person's own file, the
 //! environment's file and `--set`, later ones winning; and what a choice
 //! must give.
 
@@ -31,7 +31,7 @@ fn each_place_wins_over_the_ones_before_it() {
 
 #[test]
 fn up_from_the_profile_is_adjusted_by_up_add_and_up_remove_in_later_places() {
-    // The profile brings up one and two, the personal file adds three, the
+    // The profile brings up one and two, this person's own file adds three, the
     // environment's file removes two, and `--set` adds four.
     let plan = plan(&["--set", "up_add=four"]);
     let mut names = unit_names(&plan);
@@ -71,7 +71,7 @@ fn no_place_giving_up_is_an_error() {
     assert_eq!(
         run.errors(),
         [
-            "tay.yaml:1:1: nothing says what comes up: none of tay.yaml, the profile, the personal file, the environment's file and `--set` gives `up`"
+            "tay.yaml:1:1: nothing says what comes up: none of tay.yaml, the profile, this person's own file, the environment's file and `--set` gives `up`"
         ]
     );
     assert_eq!(
@@ -100,22 +100,21 @@ fn the_label_is_the_folder_name_after_the_stack_name_unless_a_choice_sets_it() {
 
 #[test]
 fn a_required_setting_must_be_given_a_value_that_is_not_empty_by_a_choice() {
-    // `base_domain` has only its default, which does not count, and the
-    // personal file's value does not count either; the environment's file
-    // gives `region` an empty value.
-    let run = plan_with_home("required", &fixture("homes/required"), &[]);
+    // `base_domain` has only its default, which does not count; the
+    // environment's file gives `region` an empty value.
+    let run = crate::support::plan("required", &[]);
     assert_eq!(run.code, 2);
     assert_eq!(
         run.errors(),
         [
-            "stack/profiles/deploy.yaml:2:11: the profile `deploy` requires setting `base_domain`, and no choice gives it a value: the profile, the environment's file or a `--set` must (its default does not count)",
+            "stack/profiles/deploy.yaml:2:11: the profile `deploy` requires setting `base_domain`, and no choice gives it a value: the profile, this person's own file, the environment's file or a `--set` must (its default does not count)",
             ".tay/choices.yaml:2:11: the profile `deploy` requires setting `region`, and the value given here is empty",
             "  stack/profiles/deploy.yaml:2:37: it is required here",
         ]
     );
     let run = plan_with_home(
         "required",
-        &fixture("homes/required"),
+        &fixture("homes/none"),
         &[
             "--set",
             "settings.base_domain=example.org",
@@ -124,6 +123,34 @@ fn a_required_setting_must_be_given_a_value_that_is_not_empty_by_a_choice() {
         ],
     );
     assert_eq!(run.code, 0, "{}", run.stderr);
+}
+
+#[test]
+fn this_persons_own_file_gives_a_required_setting_where_it_is_read() {
+    // This person's own file gives `base_domain`, so only `region` is missing.
+    let run = plan_with_home("required", &fixture("homes/required"), &[]);
+    assert_eq!(
+        run.errors(),
+        [
+            ".tay/choices.yaml:2:11: the profile `deploy` requires setting `region`, and the value given here is empty",
+            "  stack/profiles/deploy.yaml:2:37: it is required here",
+        ]
+    );
+}
+
+#[test]
+fn a_production_profile_counts_no_personal_file_for_a_required_setting() {
+    let run = plan_with_home(
+        "required",
+        &fixture("homes/required"),
+        &["--profile", "locked"],
+    );
+    assert_eq!(
+        run.errors(),
+        [
+            "stack/profiles/locked.yaml:3:11: the profile `locked` requires setting `base_domain`, and no choice gives it a value: the profile, the environment's file or a `--set` must (its default does not count)"
+        ]
+    );
 }
 
 #[test]

@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use crate::diagnostic::source::Loc;
 use crate::syntax::names::NameAt;
 
-pub use choices::{Choices, Profile};
+pub use choices::{Choices, Places, Profile};
 pub use setting::{SettingDecl, SettingValue, Written};
 pub use unit::{
     Action, Arg, Body, Check, Endpoint, Give, GiveValue, Mechanism, Ready, Restart, Unit, Way,
@@ -31,8 +31,6 @@ pub struct Stack {
     /// `up` and `run` as `tay.yaml` writes them: the first place choices
     /// are layered from.
     pub defaults: Choices,
-    /// `.tay/choices.yaml`, when the environment has one.
-    pub environment_choices: Option<Choices>,
 }
 
 impl Stack {

@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::definition::read;
-use crate::definition::{Choices, Profile, Stack};
+use crate::definition::{Profile, Stack};
 use crate::diagnostic::source::{Loc, Sources};
 use crate::diagnostic::{Diagnostic, Diagnostics};
 use crate::syntax::expr::Expr;
@@ -65,27 +65,10 @@ pub fn plan(root: &Path, options: &Options, sources: &mut Sources, d: &mut Diagn
     };
     let profile = choose_profile(&stack, options.profile.as_deref(), sources, d);
     let production = profile.and_then(|profile| profile.production);
-    // A production stack must not change with whoever runs the command.
-    let personal = match (&options.home, &stack.name, production) {
-        (Some(home), Some(name), None) => {
-            read::personal_choices(home, &name.name, root, sources, d)
-        }
-        _ => None,
-    };
-    let sets: Vec<Choices> = options
-        .sets
-        .iter()
-        .filter_map(|set| read::assignment(set, sources, d))
-        .collect();
-    let profile_choices = profile.map(|profile| &profile.choices);
-    let places: Vec<&Choices> = [&stack.defaults]
-        .into_iter()
-        .chain(profile_choices)
-        .chain(personal.as_ref())
-        .chain(stack.environment_choices.as_ref())
-        .chain(&sets)
-        .collect();
-    let layered = choices::layer(places.iter().copied());
+    let home = options.home.as_deref();
+    let (places, places_parsed) = read::places(&stack, profile, home, &options.sets, sources, d);
+    let every_file_parsed = every_file_parsed && places_parsed;
+    let layered = choices::layer(places.in_order());
     // With a file that did not parse, the set of units is not known, and
     // every reference to a unit in it would be reported as missing; nor is
     // it known whether a place gives `up` or a required setting.
@@ -94,17 +77,12 @@ pub fn plan(root: &Path, options: &Options, sources: &mut Sources, d: &mut Diagn
     let profile_missing =
         profile.is_none() && (options.profile.is_some() || stack.default_profile.is_some());
     if every_file_parsed {
-        read::references::check(&stack, &places, d);
+        read::references::check(&stack, &places.in_order(), d);
         if !profile_missing {
             choices::check_up_given(&stack, &layered, d);
         }
         if let Some(profile) = profile {
-            let counting: Vec<&Choices> = profile_choices
-                .into_iter()
-                .chain(stack.environment_choices.as_ref())
-                .chain(&sets)
-                .collect();
-            choices::check_required(&stack, profile, &counting, d);
+            choices::check_required(&stack, profile, &places.made(), d);
         }
     }
     if !d.is_empty() {
@@ -114,7 +92,6 @@ pub fn plan(root: &Path, options: &Options, sources: &mut Sources, d: &mut Diagn
     let Some(stack_name) = &stack.name else {
         return Outcome::Errors;
     };
-    let home = options.home.as_deref();
     let Some(environment) = Environment::of(&stack, &stack_name.name, profile, &layered, home, d)
     else {
         return Outcome::Errors;

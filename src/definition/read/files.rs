@@ -14,7 +14,7 @@ use crate::syntax::names::{self, NameAt};
 use crate::syntax::yaml::{self, Node};
 
 use super::unit::{self, template};
-use super::{ENVIRONMENT_FOLDER, choices, choices_file};
+use super::{choices, choices_file};
 
 pub struct Reader<'a> {
     root: &'a Path,
@@ -225,12 +225,12 @@ impl<'a> Reader<'a> {
         profiles
     }
 
-    pub fn environment_choices(&mut self) -> Option<Choices> {
-        let path = self.root.join(ENVIRONMENT_FOLDER).join("choices.yaml");
+    /// The choices file at `path`, if there is one.
+    pub fn choices_file(&mut self, path: &Path) -> Option<Choices> {
         if !path.is_file() {
             return None;
         }
-        let node = self.parse(&path)?;
+        let node = self.parse(path)?;
         choices_file(&node, self.d)
     }
 }
