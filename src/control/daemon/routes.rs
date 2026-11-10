@@ -127,15 +127,7 @@ fn up(daemon: &Arc<Daemon>, asked: UpRequest) -> Response<Body> {
             change
         }
         Some(change) if change.kind == kind => Arc::clone(change),
-        Some(change) => {
-            return json(
-                StatusCode::CONFLICT,
-                &Refused {
-                    change: change.describe(),
-                    since: change.since,
-                },
-            );
-        }
+        Some(change) => return refused(change),
     };
     drop(under_way);
     follow(change)
@@ -157,13 +149,7 @@ where
         .lock()
         .expect("the change under way is not poisoned");
     if let Some(change) = under_way.as_ref() {
-        return json(
-            StatusCode::CONFLICT,
-            &Refused {
-                change: change.describe(),
-                since: change.since,
-            },
-        );
+        return refused(change);
     }
     let change = Change::new(kind);
     let made = match make(Arc::clone(&change)) {
@@ -184,13 +170,7 @@ fn remembered(daemon: &Arc<Daemon>, remember: &Remember) -> Response<Body> {
         .lock()
         .expect("the change under way is not poisoned");
     if let Some(change) = under_way.as_ref() {
-        return json(
-            StatusCode::CONFLICT,
-            &Refused {
-                change: change.describe(),
-                since: change.since,
-            },
-        );
+        return refused(change);
     }
     log(&format!("change: {}", remember.describe()));
     match remember.apply(&daemon.environment.layout) {
@@ -263,6 +243,17 @@ async fn status(daemon: &Arc<Daemon>) -> Response<Body> {
         })
         .collect();
     json(StatusCode::OK, &Status { units })
+}
+
+/// The answer to a change asked for while `change` is under way.
+fn refused(change: &Change) -> Response<Body> {
+    json(
+        StatusCode::CONFLICT,
+        &Refused {
+            change: change.describe(),
+            since: change.since,
+        },
+    )
 }
 
 /// An answer that is what `change` says, as it says it.
