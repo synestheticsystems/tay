@@ -1,15 +1,18 @@
 //! `secret`: a value generated once and kept for the environment.
 
+mod generate;
+
 use crate::diagnostic::Diagnostics;
 use crate::syntax::fields::{self, Fields};
 use crate::syntax::names::NameAt;
 use crate::syntax::yaml::Node;
-use crate::value::Value;
+use crate::value::Filled;
 
 use crate::module::description::{
     Description, ModuleGive, ModuleValue, ReadyWithoutCheck, RestartOn, UnitKind,
 };
-use crate::module::settings::{Destination, MapSlots, Settings, Slot, maybe};
+use crate::module::operations::Operations;
+use crate::module::settings::{Destination, MapValues, Slot, maybe};
 use crate::module::want::Want;
 use crate::module::{Cx, Module};
 
@@ -22,8 +25,14 @@ const ENCODINGS: &[&str] = &["hex", "base64", "base64url"];
 
 const ALGORITHMS: &[&str] = &["ed25519", "rsa-2048"];
 
-/// What a secret unit generates, each value a [`Slot`] as written or a
-/// [`Value`] once resolved.
+/// The names of the values a secret unit gives: `value` for a password or
+/// bytes, `public` and `private` for a key pair.
+const VALUE: &str = "value";
+const PUBLIC: &str = "public";
+const PRIVATE: &str = "private";
+
+/// What a secret unit generates, each value a [`Slot`] as written, a
+/// [`Value`](crate::value::Value) once resolved, and [`Filled`] once filled.
 #[derive(Debug)]
 enum SecretSettings<V> {
     /// Letters and digits. `None` length: 32 characters.
@@ -37,12 +46,13 @@ enum SecretSettings<V> {
     Keypair { algorithm: V },
 }
 
-impl MapSlots for SecretSettings<Slot> {
+impl<V> MapValues for SecretSettings<V> {
+    type Value = V;
     type With<W> = SecretSettings<W>;
 
-    fn map_slots<'a, W>(
+    fn map_values<'a, W>(
         &'a self,
-        f: &mut dyn FnMut(&'a Slot) -> Option<W>,
+        f: &mut dyn FnMut(&'a V) -> Option<W>,
     ) -> Option<SecretSettings<W>> {
         Some(match self {
             SecretSettings::Password { length } => SecretSettings::Password {
@@ -63,7 +73,11 @@ impl MapSlots for SecretSettings<Slot> {
     }
 }
 
-impl Settings for SecretSettings<Value> {}
+impl From<SecretSettings<Filled>> for Operations {
+    fn from(settings: SecretSettings<Filled>) -> Operations {
+        Operations::Made(Box::new(settings))
+    }
+}
 
 impl Module for Secret {
     fn name(&self) -> &'static str {
@@ -74,8 +88,8 @@ impl Module for Secret {
         let settings = read(with, cx)?;
         // Each value the kind gives, and whether it is secret.
         let gives: &[(&str, bool)] = match settings {
-            SecretSettings::Password { .. } | SecretSettings::Bytes { .. } => &[("value", true)],
-            SecretSettings::Keypair { .. } => &[("public", false), ("private", true)],
+            SecretSettings::Password { .. } | SecretSettings::Bytes { .. } => &[(VALUE, true)],
+            SecretSettings::Keypair { .. } => &[(PUBLIC, false), (PRIVATE, true)],
         };
         let gives = gives
             .iter()

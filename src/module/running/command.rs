@@ -5,15 +5,17 @@ use crate::diagnostic::{Diagnostic, Diagnostics};
 use crate::syntax::fields::{self, Fields};
 use crate::syntax::names::{self, NameAt};
 use crate::syntax::yaml::Node;
-use crate::value::Value;
+use crate::value::Filled;
 
+use super::NotRunnable;
 use super::command_line::{RunForm, run_form};
 use super::mounts::{self, Mount, mounts};
 use super::variables::{Variables, variables};
 use crate::module::description::{
     Description, ModuleGive, ModuleValue, Output, ReadyWithoutCheck, RestartOn, Runs, UnitKind,
 };
-use crate::module::settings::{Destination, MapSlots, Settings, Slot, each_named, maybe};
+use crate::module::operations::Operations;
+use crate::module::settings::{Destination, MapValues, Slot, each_named, maybe};
 use crate::module::want::{PathUse, Want};
 use crate::module::{Cx, Module};
 
@@ -38,7 +40,7 @@ const FIELDS: &[&str] = &[
 
 const FILE_PATH: Destination = Destination::Readable("a file path");
 
-/// A command's settings, each value a [`Slot`] as written or a [`Value`]
+/// A command's settings, each value a [`Slot`] as written or a [`Value`](crate::value::Value)
 /// once resolved. Where it runs, inside another unit's container (`in`) or
 /// not, is in the unit's description.
 #[derive(Debug)]
@@ -71,12 +73,13 @@ enum WhenRemoved {
     Undo,
 }
 
-impl MapSlots for CommandSettings<Slot> {
+impl<V> MapValues for CommandSettings<V> {
+    type Value = V;
     type With<W> = CommandSettings<W>;
 
-    fn map_slots<'a, W>(
+    fn map_values<'a, W>(
         &'a self,
-        f: &mut dyn FnMut(&'a Slot) -> Option<W>,
+        f: &mut dyn FnMut(&'a V) -> Option<W>,
     ) -> Option<CommandSettings<W>> {
         let run = self.run.map(f);
         let check = maybe(&self.check, &mut |form| form.map(f));
@@ -105,7 +108,15 @@ impl MapSlots for CommandSettings<Slot> {
     }
 }
 
-impl Settings for CommandSettings<Value> {}
+/// tay cannot run such a unit yet, so its operations fail, saying so, and
+/// what its settings say is not used.
+impl From<CommandSettings<Filled>> for Operations {
+    fn from(_: CommandSettings<Filled>) -> Operations {
+        Operations::Running(Box::new(NotRunnable {
+            module: Command.name(),
+        }))
+    }
+}
 
 impl Module for Command {
     fn name(&self) -> &'static str {
@@ -495,7 +506,7 @@ mod tests {
         );
         let mut resolved = Vec::new();
         let settings = read
-            .map_slots(&mut |slot| {
+            .map_values(&mut |slot| {
                 let text = slot.expr.literal_text()?;
                 resolved.push(text.clone());
                 Some(text)

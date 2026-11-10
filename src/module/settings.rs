@@ -1,14 +1,17 @@
-//! A module's own settings for one unit: as written, each value a [`Slot`],
-//! and once the planner has resolved every slot, each value a [`Value`].
-//! The planner turns the one into the other without knowing the module.
+//! A module's own settings for one unit, in three stages: as written, each
+//! value a [`Slot`]; once the planner has resolved every slot, each value a
+//! [`Value`]; and once the engine has filled every placeholder, each value
+//! [`Filled`], from which the unit's operations act. The planner and the
+//! engine turn each stage into the next without knowing the module.
 
 use std::fmt;
 
 use crate::diagnostic::Diagnostics;
 use crate::syntax::expr::Expr;
 use crate::syntax::yaml::Node;
-use crate::value::Value;
+use crate::value::{Filled, Placeholder, Unfilled, Value};
 
+use super::operations::Operations;
 use super::want::Want;
 
 /// A module's own settings for one unit as written: every value a [`Slot`]
@@ -25,34 +28,42 @@ pub trait WrittenSettings: fmt::Debug {
 }
 
 /// A module's own settings for one unit with every value resolved: what the
-/// module brings the unit up from. The plan holds them without knowing their
-/// type, so whatever is later done with a unit by its module is asked of
-/// them.
-pub trait Settings: fmt::Debug {}
+/// plan holds for the unit without knowing its module.
+pub trait Settings: fmt::Debug + Send + Sync {
+    /// The unit's operations, from these settings with every placeholder
+    /// filled by `fill`; why a value could not be filled, when one cannot.
+    fn fill(
+        &self,
+        fill: &mut dyn FnMut(&Placeholder) -> Result<Filled, Unfilled>,
+    ) -> Result<Operations, Unfilled>;
+}
 
-/// A module's settings as written, which can be rebuilt with each slot
-/// passed through a function: how each module's settings become written
-/// settings the planner can resolve.
-pub trait MapSlots {
+/// A module's settings, of any stage, which can be rebuilt with each value
+/// passed through a function: how each module's settings as written become
+/// settings the planner resolves, and resolved ones become settings the
+/// engine fills.
+pub trait MapValues {
+    /// The values the settings hold at this stage.
+    type Value;
     /// The same settings with values of type `W`.
     type With<W>;
 
-    /// The settings with each slot passed through `f`, every one even when
-    /// one fails, so that each error is reported; `None` if any failed.
-    fn map_slots<'a, W>(
+    /// The settings with each value passed through `f`, every one even when
+    /// one fails, so that each failure is reported; `None` if any failed.
+    fn map_values<'a, W>(
         &'a self,
-        f: &mut dyn FnMut(&'a Slot) -> Option<W>,
+        f: &mut dyn FnMut(&'a Self::Value) -> Option<W>,
     ) -> Option<Self::With<W>>;
 }
 
 impl<S> WrittenSettings for S
 where
-    S: MapSlots + fmt::Debug,
+    S: MapValues<Value = Slot> + fmt::Debug,
     S::With<Value>: Settings + 'static,
 {
     fn slots(&self) -> Vec<&Slot> {
         let mut slots = Vec::new();
-        self.map_slots(&mut |slot| {
+        self.map_values(&mut |slot| {
             slots.push(slot);
             Some(())
         });
@@ -63,7 +74,32 @@ where
         &self,
         resolve: &mut dyn FnMut(&Slot) -> Option<Value>,
     ) -> Option<Box<dyn Settings>> {
-        Some(Box::new(self.map_slots(resolve)?))
+        Some(Box::new(self.map_values(resolve)?))
+    }
+}
+
+impl<S> Settings for S
+where
+    S: MapValues<Value = Value> + fmt::Debug + Send + Sync,
+    S::With<Filled>: Into<Operations>,
+{
+    fn fill(
+        &self,
+        fill: &mut dyn FnMut(&Placeholder) -> Result<Filled, Unfilled>,
+    ) -> Result<Operations, Unfilled> {
+        let mut unfilled = None;
+        let filled = self.map_values(&mut |value| match value.fill(fill) {
+            Ok(filled) => Some(filled),
+            Err(why) => {
+                unfilled.get_or_insert(why);
+                None
+            }
+        });
+        match (filled, unfilled) {
+            (Some(filled), _) => Ok(filled.into()),
+            (None, Some(why)) => Err(why),
+            (None, None) => unreachable!("settings are left unfilled only by a value that was not"),
+        }
     }
 }
 

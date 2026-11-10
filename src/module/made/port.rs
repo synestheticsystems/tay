@@ -1,21 +1,28 @@
 //! `port`: a host port held for this environment.
 
+mod hold;
+mod kept;
+
 use crate::syntax::fields::Fields;
 use crate::syntax::names::NameAt;
 use crate::syntax::yaml::Node;
-use crate::value::Value;
+use crate::value::Filled;
 
 use crate::module::description::{
     Description, ModuleGive, ModuleValue, ReadyWithoutCheck, RestartOn, UnitKind,
 };
-use crate::module::settings::{Destination, MapSlots, Settings, Slot};
+use crate::module::operations::Operations;
+use crate::module::settings::{Destination, MapValues, Slot};
 use crate::module::want::Want;
 use crate::module::{Cx, Module};
 
 pub struct Port;
 
-/// The number a port unit is held at, a [`Slot`] as written or a [`Value`]
-/// once resolved.
+/// The name of the value a port unit gives: its number.
+const NUMBER: &str = "number";
+
+/// The number a port unit is held at, a [`Slot`] as written, a [`Value`](crate::value::Value)
+/// once resolved, and [`Filled`] once filled.
 #[derive(Debug)]
 enum PortSettings<V> {
     /// Any number tay chooses.
@@ -26,12 +33,13 @@ enum PortSettings<V> {
     Fixed(V),
 }
 
-impl MapSlots for PortSettings<Slot> {
+impl<V> MapValues for PortSettings<V> {
+    type Value = V;
     type With<W> = PortSettings<W>;
 
-    fn map_slots<'a, W>(
+    fn map_values<'a, W>(
         &'a self,
-        f: &mut dyn FnMut(&'a Slot) -> Option<W>,
+        f: &mut dyn FnMut(&'a V) -> Option<W>,
     ) -> Option<PortSettings<W>> {
         Some(match self {
             PortSettings::Any => PortSettings::Any,
@@ -41,7 +49,11 @@ impl MapSlots for PortSettings<Slot> {
     }
 }
 
-impl Settings for PortSettings<Value> {}
+impl From<PortSettings<Filled>> for Operations {
+    fn from(settings: PortSettings<Filled>) -> Operations {
+        Operations::Made(Box::new(settings))
+    }
+}
 
 impl Module for Port {
     fn name(&self) -> &'static str {
@@ -53,7 +65,7 @@ impl Module for Port {
         Some(Description {
             gives: vec![ModuleGive {
                 name: NameAt {
-                    name: "number".to_string(),
+                    name: NUMBER.to_string(),
                     loc: cx.uses,
                 },
                 value: ModuleValue::Port,

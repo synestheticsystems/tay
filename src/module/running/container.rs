@@ -4,14 +4,16 @@ mod read;
 
 use crate::syntax::names::NameAt;
 use crate::syntax::yaml::Node;
-use crate::value::Value;
+use crate::value::Filled;
 
+use super::NotRunnable;
 use super::mounts::{self, Mount};
 use super::variables::Variables;
 use crate::module::description::{
     Concern, Description, ReadyWithoutCheck, RestartOn, Runs, UnitKind,
 };
-use crate::module::settings::{MapSlots, Settings, Slot, each, each_named, maybe};
+use crate::module::operations::Operations;
+use crate::module::settings::{MapValues, each, each_named, maybe};
 use crate::module::{Cx, Module};
 
 pub struct Container;
@@ -20,7 +22,25 @@ pub struct Container;
 /// gives it.
 pub const HOST_IN_CONTAINERS: &str = "host.docker.internal";
 
-/// A container's settings, each value a [`Slot`] as written or a [`Value`]
+/// `${host.listen}`: the address a host process listens on so that this
+/// machine's containers can reach it and other machines cannot. On macOS,
+/// Docker Desktop brings a container's connections to the host's own
+/// address.
+#[cfg(target_os = "macos")]
+pub fn host_listen() -> Result<&'static str, &'static str> {
+    Ok("127.0.0.1")
+}
+
+/// `${host.listen}` elsewhere: the host's address on the environment's
+/// network, which is known once the network exists.
+#[cfg(not(target_os = "macos"))]
+pub fn host_listen() -> Result<&'static str, &'static str> {
+    Err(
+        "on this system it is the host's address on the environment's network, and tay does not make networks yet",
+    )
+}
+
+/// A container's settings, each value a [`Slot`](crate::module::Slot) as written or a [`Value`](crate::value::Value)
 /// once resolved. Its published ports are in the unit's description, where
 /// the planner decides which are opened.
 #[derive(Debug)]
@@ -101,12 +121,13 @@ impl<V> Volume<V> {
     }
 }
 
-impl MapSlots for ContainerSettings<Slot> {
+impl<V> MapValues for ContainerSettings<V> {
+    type Value = V;
     type With<W> = ContainerSettings<W>;
 
-    fn map_slots<'a, W>(
+    fn map_values<'a, W>(
         &'a self,
-        f: &mut dyn FnMut(&'a Slot) -> Option<W>,
+        f: &mut dyn FnMut(&'a V) -> Option<W>,
     ) -> Option<ContainerSettings<W>> {
         let image = self.image.map(f);
         let command = maybe(&self.command, &mut |words| each(words, f));
@@ -142,7 +163,15 @@ impl MapSlots for ContainerSettings<Slot> {
     }
 }
 
-impl Settings for ContainerSettings<Value> {}
+/// tay cannot run such a unit yet, so its operations fail, saying so, and
+/// what its settings say is not used.
+impl From<ContainerSettings<Filled>> for Operations {
+    fn from(_: ContainerSettings<Filled>) -> Operations {
+        Operations::Running(Box::new(NotRunnable {
+            module: Container.name(),
+        }))
+    }
+}
 
 impl Module for Container {
     fn name(&self) -> &'static str {
@@ -184,6 +213,7 @@ impl Module for Container {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::module::settings::Slot;
     use crate::module::testing::{self, check};
     use crate::module::want::{PathUse, Want};
     use read::read;
@@ -338,7 +368,7 @@ mod tests {
         // no-new-privileges and 100.
         let mut resolved = 0;
         assert!(
-            read.map_slots(&mut |_| {
+            read.map_values(&mut |_| {
                 resolved += 1;
                 Some(())
             })

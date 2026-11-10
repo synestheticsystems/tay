@@ -90,6 +90,7 @@ impl Resolver<'_> {
             GiveValue::Module(ModuleValue::Port) => {
                 Ok(Resolved::known(Value::Placeholder(Placeholder::Port {
                     unit: unit.name.name.clone(),
+                    name: name.to_string(),
                 })))
             }
             GiveValue::Module(ModuleValue::Generated { secret }) => Ok(Resolved::known(

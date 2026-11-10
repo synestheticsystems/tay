@@ -4,9 +4,13 @@
 //! can fill `"${a.value}:${b.value}"` from what it has allocated, generated,
 //! been asked with or seen produced.
 
+mod filled;
+
 use std::fmt;
 
 use crate::syntax::expr::{Literal, Type};
+
+pub use filled::{Filled, Unfilled};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Value {
@@ -29,8 +33,8 @@ pub enum Bit {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Placeholder {
     /// The number of a host port the unit holds for this environment, given
-    /// when it is allocated.
-    Port { unit: String },
+    /// when it is allocated, and the name the unit gives it by.
+    Port { unit: String, name: String },
     /// A value a unit generates once and keeps, the first time the
     /// environment is brought up. A key pair's public half is not secret.
     Generated {
@@ -116,7 +120,7 @@ impl Placeholder {
             Placeholder::SecretSetting { .. }
             | Placeholder::Generated { secret: true, .. }
             | Placeholder::Produced { secret: true, .. } => "<secret>".to_string(),
-            Placeholder::Port { unit } => format!("<port: {unit}>"),
+            Placeholder::Port { unit, .. } => format!("<port: {unit}>"),
             Placeholder::Generated { unit, name, .. } => format!("<generated: {unit}.{name}>"),
             Placeholder::Produced { unit, name, .. } => format!("<produced: {unit}.{name}>"),
             Placeholder::Arg { name, .. } => format!("<arg: {name}>"),
@@ -127,13 +131,25 @@ impl Placeholder {
     }
 }
 
-/// A value exactly, when all of it is known before start and none of it is
-/// secret.
+/// A value written out exactly: what a value known before start with no
+/// secret in it is, and what a value is once it is filled.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Exact {
     Text(String),
     Number(i64),
     Bool(bool),
+}
+
+impl Exact {
+    /// The value as text: text as it is, a number in digits, and true or
+    /// false as those words.
+    pub fn as_text(&self) -> String {
+        match self {
+            Exact::Text(text) => text.clone(),
+            Exact::Number(n) => n.to_string(),
+            Exact::Bool(b) => b.to_string(),
+        }
+    }
 }
 
 impl Value {
@@ -264,6 +280,7 @@ mod tests {
             Bit::Text("http://127.0.0.1:".into()),
             Bit::Placeholder(Placeholder::Port {
                 unit: "web-port".into(),
+                name: "number".into(),
             }),
         ]);
         assert_eq!(value.shown(), "http://127.0.0.1:<port: web-port>");
@@ -278,6 +295,7 @@ mod tests {
     fn text_side_by_side_is_joined() {
         let port = Placeholder::Port {
             unit: "web-port".into(),
+            name: "number".into(),
         };
         assert_eq!(
             Value::from_bits([

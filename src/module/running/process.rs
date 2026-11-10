@@ -3,12 +3,14 @@
 use crate::syntax::fields::{self, Fields};
 use crate::syntax::names;
 use crate::syntax::yaml::Node;
-use crate::value::Value;
+use crate::value::Filled;
 
+use super::NotRunnable;
 use super::command_line::{COMMAND_LINE, argv, argv_list};
 use super::variables::{Variables, variables};
 use crate::module::description::{Description, ReadyWithoutCheck, RestartOn, Runs, UnitKind};
-use crate::module::settings::{Destination, MapSlots, Settings, Slot, each, maybe};
+use crate::module::operations::Operations;
+use crate::module::settings::{Destination, MapValues, Slot, each, maybe};
 use crate::module::want::{PathUse, Want};
 use crate::module::{Cx, Module};
 
@@ -23,7 +25,7 @@ const FIELDS: &[&str] = &[
     "prepare",
 ];
 
-/// A process's settings, each value a [`Slot`] as written or a [`Value`]
+/// A process's settings, each value a [`Slot`] as written or a [`Value`](crate::value::Value)
 /// once resolved.
 #[derive(Debug)]
 struct ProcessSettings<V> {
@@ -38,12 +40,13 @@ struct ProcessSettings<V> {
     prepare: Vec<Vec<V>>,
 }
 
-impl MapSlots for ProcessSettings<Slot> {
+impl<V> MapValues for ProcessSettings<V> {
+    type Value = V;
     type With<W> = ProcessSettings<W>;
 
-    fn map_slots<'a, W>(
+    fn map_values<'a, W>(
         &'a self,
-        f: &mut dyn FnMut(&'a Slot) -> Option<W>,
+        f: &mut dyn FnMut(&'a V) -> Option<W>,
     ) -> Option<ProcessSettings<W>> {
         let command = each(&self.command, f);
         let workdir = maybe(&self.workdir, f);
@@ -60,7 +63,15 @@ impl MapSlots for ProcessSettings<Slot> {
     }
 }
 
-impl Settings for ProcessSettings<Value> {}
+/// tay cannot run such a unit yet, so its operations fail, saying so, and
+/// what its settings say is not used.
+impl From<ProcessSettings<Filled>> for Operations {
+    fn from(_: ProcessSettings<Filled>) -> Operations {
+        Operations::Running(Box::new(NotRunnable {
+            module: Process.name(),
+        }))
+    }
+}
 
 impl Module for Process {
     fn name(&self) -> &'static str {
@@ -137,6 +148,7 @@ mod tests {
     use super::*;
     use crate::module::settings::WrittenSettings;
     use crate::module::testing::{self, check};
+    use crate::value::Value;
 
     fn settings(with: &str) -> ProcessSettings<Slot> {
         let (settings, errors) = testing::read(with, |node, cx| read(Some(node), cx));
@@ -194,7 +206,7 @@ mod tests {
         assert_eq!(read.slots().len(), 10);
         // Each value is resolved where it is written: here, to its own text.
         let resolved = read
-            .map_slots(&mut |slot| Some(Value::text(format!("{:?}", slot.expr.kind))))
+            .map_values(&mut |slot| Some(Value::text(format!("{:?}", slot.expr.kind))))
             .unwrap();
         let text = |value: &Value| value.exact_text().unwrap();
         assert_eq!(resolved.command.len(), 3);
@@ -210,7 +222,7 @@ mod tests {
     fn a_value_that_cannot_be_resolved_leaves_no_settings_and_every_value_is_tried() {
         let read = settings("command: [a, b, c]\n");
         let mut tried = 0;
-        let resolved = read.map_slots(&mut |_| {
+        let resolved = read.map_values(&mut |_| {
             tried += 1;
             (tried != 2).then(|| Value::text("x"))
         });

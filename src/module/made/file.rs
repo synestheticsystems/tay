@@ -1,17 +1,20 @@
 //! `file`: a file tay writes from values, in the environment's state folder.
 
+mod write;
+
 use crate::diagnostic::Diagnostics;
 use crate::diagnostic::source::Loc;
 use crate::syntax::expr::{EnvField, Expr, ExprKind, Piece, Reference, Target};
 use crate::syntax::fields::{self, Fields};
 use crate::syntax::names::NameAt;
 use crate::syntax::yaml::Node;
-use crate::value::Value;
+use crate::value::Filled;
 
 use crate::module::description::{
     Claim, Description, ModuleGive, ModuleValue, ReadyWithoutCheck, RestartOn, UnitKind,
 };
-use crate::module::settings::{Destination, MapSlots, Settings, Slot, maybe};
+use crate::module::operations::Operations;
+use crate::module::settings::{Destination, MapValues, Slot, maybe};
 use crate::module::want::{PathUse, Want};
 use crate::module::{Cx, Module};
 
@@ -22,8 +25,13 @@ const FIELDS: &[&str] = &["content", "template", "name", "folder", "mode", "over
 /// The folder under the state folder that file units write in.
 const FILES: &str = "files";
 
-/// A file unit's settings, each value a [`Slot`] as written or a [`Value`]
-/// once resolved.
+/// The names of the values a file unit gives: its file's path, and the
+/// folder it is in.
+const PATH: &str = "path";
+const DIR: &str = "dir";
+
+/// A file unit's settings, each value a [`Slot`] as written, a [`Value`](crate::value::Value)
+/// once resolved, and [`Filled`] once filled.
 #[derive(Debug)]
 struct FileSettings<V> {
     /// The text written: `content`, or the file `template` names, whose
@@ -40,12 +48,13 @@ struct FileSettings<V> {
     overwrite: Option<V>,
 }
 
-impl MapSlots for FileSettings<Slot> {
+impl<V> MapValues for FileSettings<V> {
+    type Value = V;
     type With<W> = FileSettings<W>;
 
-    fn map_slots<'a, W>(
+    fn map_values<'a, W>(
         &'a self,
-        f: &mut dyn FnMut(&'a Slot) -> Option<W>,
+        f: &mut dyn FnMut(&'a V) -> Option<W>,
     ) -> Option<FileSettings<W>> {
         let content = f(&self.content);
         let mode = maybe(&self.mode, f);
@@ -60,7 +69,11 @@ impl MapSlots for FileSettings<Slot> {
     }
 }
 
-impl Settings for FileSettings<Value> {}
+impl From<FileSettings<Filled>> for Operations {
+    fn from(settings: FileSettings<Filled>) -> Operations {
+        Operations::Made(Box::new(settings))
+    }
+}
 
 impl Module for File {
     fn name(&self) -> &'static str {
@@ -93,7 +106,7 @@ impl Module for File {
             }),
         };
         Some(Description {
-            gives: vec![given("path", path), given("dir", dir)],
+            gives: vec![given(PATH, path), given(DIR, dir)],
             claims: vec![claim],
             ..Description::new(
                 UnitKind::Made,

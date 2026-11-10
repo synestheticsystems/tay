@@ -194,14 +194,14 @@ mod tests {
         // The command's words, the port a placeholder that names its unit.
         assert!(
             web.contains(
-                r#"command: [Text([Text("serve")]), Text([Text("--port")]), Placeholder(Port { unit: "web-port" })]"#
+                r#"command: [Text([Text("serve")]), Text([Text("--port")]), Placeholder(Port { unit: "web-port", name: "number" })]"#
             ),
             "{web}"
         );
         // The API's address as the host, where `web` runs, sees it.
         assert!(
             web.contains(
-                r#"("API_URL", Text([Text("http://127.0.0.1:"), Placeholder(Port { unit: "api-port" })]))"#
+                r#"("API_URL", Text([Text("http://127.0.0.1:"), Placeholder(Port { unit: "api-port", name: "number" })]))"#
             ),
             "{web}"
         );

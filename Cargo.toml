@@ -10,7 +10,9 @@ keywords = ["orchestration", "dev-environment", "containers", "processes", "yaml
 categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
+base64ct = { version = "1.6", features = ["alloc"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
+rsa = "0.9"
 rustix = { version = "1", features = ["fs", "net", "process"] }
 saphyr-parser = "0.3.3"
 serde = { version = "1", features = ["derive"] }
@@ -19,3 +21,8 @@ thiserror = "2"
 
 [dev-dependencies]
 tempfile = "3"
+
+# A key pair's primes are found by this crate's arithmetic, which without
+# optimization takes seconds for one RSA key; the tests make several.
+[profile.dev.package.num-bigint-dig]
+opt-level = 3

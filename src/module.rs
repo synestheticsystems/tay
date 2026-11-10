@@ -5,6 +5,7 @@
 
 mod description;
 mod made;
+mod operations;
 mod running;
 mod settings;
 mod want;
@@ -19,8 +20,9 @@ pub use description::{
     Concern, Description, ModuleValue, Output, PublishEntry, ReadyWithoutCheck, RestartOn, Runs,
     UnitKind, VolumeMount,
 };
+pub use operations::{Exists, Made, Operations, UnitPlace, Values};
 pub use running::command_line::argv;
-pub use running::container::HOST_IN_CONTAINERS;
+pub use running::container::{HOST_IN_CONTAINERS, host_listen};
 pub use settings::{Destination, Settings, Slot};
 pub use want::{Duration, Form, PathUse, Want};
 
