@@ -1,40 +1,31 @@
 //! The plan as a person reads it.
 
-use std::fmt::Write;
-
 use crate::plan::{Because, GivenLine, Plan, PlannedUnit, Readiness, Running, Seen, Way};
 
 pub fn plan(plan: &Plan) -> String {
-    let mut out = String::new();
     let profile = match (&plan.profile, plan.production) {
         (Some(profile), true) => format!("profile `{profile}` (production)"),
         (Some(profile), false) => format!("profile `{profile}`"),
         (None, _) => "no profile".to_string(),
     };
-    let _ = writeln!(
-        out,
+    let mut lines = vec![format!(
         "Plan for stack `{}`, {profile}, in {}",
         plan.stack, plan.root
-    );
-    match plan.units.len() {
-        0 => {
-            let _ = writeln!(out, "Nothing comes up: `up` names no unit.");
-        }
-        1 => {
-            let _ = writeln!(out, "1 unit comes up.");
-        }
-        n => {
-            let _ = writeln!(out, "{n} units come up, in an order they could start in.");
-        }
-    }
+    )];
+    lines.push(match plan.units.len() {
+        0 => "Nothing comes up: `up` names no unit.".to_string(),
+        1 => "1 unit comes up.".to_string(),
+        n => format!("{n} units come up, in an order they could start in."),
+    });
     for (i, unit) in plan.units.iter().enumerate() {
-        out.push('\n');
-        unit_block(&mut out, i + 1, unit);
+        lines.push(String::new());
+        unit_lines(&mut lines, i + 1, unit);
     }
-    out
+    lines.push(String::new());
+    lines.join("\n")
 }
 
-fn unit_block(out: &mut String, number: usize, unit: &PlannedUnit) {
+fn unit_lines(lines: &mut Vec<String>, number: usize, unit: &PlannedUnit) {
     let way = match &unit.way {
         Way::Group => "a group".to_string(),
         Way::Module {
@@ -49,19 +40,18 @@ fn unit_block(out: &mut String, number: usize, unit: &PlannedUnit) {
             format!("uses `{module}`{alternative}, {}", running(runs))
         }
     };
-    let _ = writeln!(out, "{number}. {}: {way}", unit.name);
+    lines.push(format!("{number}. {}: {way}", unit.name));
     if let Some(doc) = &unit.doc {
-        let _ = writeln!(out, "   {doc}");
+        lines.push(format!("   {doc}"));
     }
     for need in &unit.needs {
-        let _ = match &need.because {
-            Because::Written => writeln!(out, "   needs {}", need.unit),
-            Because::Uses(value) => writeln!(
-                out,
+        lines.push(match &need.because {
+            Because::Written => format!("   needs {}", need.unit),
+            Because::Uses(value) => format!(
                 "   needs {}, because it uses {value}, which {} produces by running",
                 need.unit, need.unit
             ),
-        };
+        });
     }
     for after in &unit.after {
         let comes_up = if after.comes_up {
@@ -69,25 +59,22 @@ fn unit_block(out: &mut String, number: usize, unit: &PlannedUnit) {
         } else {
             ", which does not come up"
         };
-        let _ = writeln!(out, "   waits for {} (after){comes_up}", after.unit);
+        lines.push(format!("   waits for {} (after){comes_up}", after.unit));
     }
     match &unit.ready {
         Readiness::Group => {}
-        Readiness::Default(how) => {
-            let _ = writeln!(out, "   ready: {how}");
-        }
+        Readiness::Default(how) => lines.push(format!("   ready: {how}")),
         Readiness::Check {
             check,
             target,
             within,
         } => {
             let target: Vec<&str> = target.iter().map(|t| t.text.as_str()).collect();
-            let _ = writeln!(
-                out,
+            lines.push(format!(
                 "   ready: {check} check of {}, within {}",
                 target.join(" "),
                 within.text
-            );
+            ));
         }
     }
     if let Some(restart) = &unit.restart {
@@ -96,16 +83,16 @@ fn unit_block(out: &mut String, number: usize, unit: &PlannedUnit) {
             .as_ref()
             .map(|a| format!(", up to {} attempts", a.text))
             .unwrap_or_default();
-        let _ = match restart.on.text.as_str() {
-            "never" => writeln!(out, "   restart: never"),
-            on => writeln!(out, "   restart: on {on}{attempts}"),
-        };
+        lines.push(match restart.on.text.as_str() {
+            "never" => "   restart: never".to_string(),
+            on => format!("   restart: on {on}{attempts}"),
+        });
     }
     for folder in &unit.watch {
-        let _ = writeln!(out, "   watches {}", folder.text);
+        lines.push(format!("   watches {}", folder.text));
     }
     for given in &unit.gives {
-        given_line(out, given);
+        given_lines(lines, given);
     }
 }
 
@@ -119,7 +106,7 @@ fn running(runs: &Running) -> String {
     }
 }
 
-fn given_line(out: &mut String, given: &GivenLine) {
+fn given_lines(lines: &mut Vec<String>, given: &GivenLine) {
     let mut notes = Vec::new();
     if given.secret {
         notes.push("secret".to_string());
@@ -141,10 +128,10 @@ fn given_line(out: &mut String, given: &GivenLine) {
     };
     let (host, containers) = (seen(&given.from_host), seen(&given.from_containers));
     if host == containers {
-        let _ = writeln!(out, "   gives {} = {host}{notes}", given.name);
+        lines.push(format!("   gives {} = {host}{notes}", given.name));
     } else {
-        let _ = writeln!(out, "   gives {}{notes}", given.name);
-        let _ = writeln!(out, "     from the host: {host}");
-        let _ = writeln!(out, "     from a container: {containers}");
+        lines.push(format!("   gives {}{notes}", given.name));
+        lines.push(format!("     from the host: {host}"));
+        lines.push(format!("     from a container: {containers}"));
     }
 }

@@ -1,7 +1,6 @@
 //! The command line: `tay plan`, `tay --version` and `tay --help`.
 
 use std::ffi::OsString;
-use std::io::Write;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -210,9 +209,7 @@ impl PlanArgs {
 }
 
 fn print_json(value: &serde_json::Value) {
-    let mut out = std::io::stdout().lock();
-    let _ = writeln!(
-        out,
+    println!(
         "{}",
         serde_json::to_string_pretty(value).expect("a JSON value always serializes")
     );

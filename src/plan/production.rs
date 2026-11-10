@@ -89,6 +89,8 @@ impl Planner<'_> {
             unit: Some(unit),
             asker,
         };
+        // The source is also one of the unit's slots, so a failure to resolve
+        // it has been reported where the unit's values were used.
         let value = self.resolver.resolve(from, scope).ok()?;
         let Some(text) = value.exact_text() else {
             return Some("it mounts a source that is not known before start".to_string());
