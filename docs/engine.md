@@ -52,6 +52,8 @@ When a unit fails, `tay up` names it, gives the reason and the last lines it wro
 | 4 | Refused as things stand: another change is running (the message says which, and since when), or what was asked needs something that is not up (the message says what) |
 | 5 | The daemon could not be started or reached |
 
+`tay run` is the one exception: when the action ran to an end, `tay run` exits with the action's own status, whatever number that is. When the action never ran, it exits with one of the codes above, and tay's message on standard error says which case it is.
+
 ## A unit's state
 
 | State | Means |
@@ -215,7 +217,13 @@ Each of these is one change, taken by the daemon in turn like any other.
 
 **`tay restart UNIT...`** stops each unit named and starts it again, with a new first attempt, bringing up what the unit needs as `tay up UNIT` would. Units that need it are left running: one that suffers shows it by its own check and follows its own `restart`. A command is run again from its `check`. A unit that is made, or a group, has nothing to restart, and naming one is an error (exit code 2). On an environment that is down there is nothing to restart either (exit code 4).
 
-**`tay run ACTION [NAME=VALUE...]`** runs a unit that has `action: true`, with its arguments, after bringing up what it needs. It prints what the action prints and exits as the action did. An argument the action does not declare, or a missing one that has no default, is an error before anything runs. An action's values are given to whoever asked and are not kept: `tay run` prints each value the action produced, by name, after the action's own output. A value declared secret is the exception: tay never prints one, so an action that hands a person a credential writes it to a file of its own and gives the file's path.
+**`tay run ACTION [NAME=VALUE...]`** runs a unit that has `action: true`, with its arguments, after bringing up what it needs. It works on an environment that is up and on one that is down, and leaves the environment as it found it:
+
+- What `tay run` had to bring up for the action is stopped again when the action ends.
+- It never stops, restarts or replaces a unit that is up. If the action could only run by doing that, `tay run` is refused and says which unit (exit code 4).
+- An argument the action does not declare, or a missing one that has no default, is an error before anything runs. An argument is read as its default's type, and as text when it has no default.
+- The action's own lines go to standard output as they are written, and `tay run` exits as the action did. tay's own lines go to standard error.
+- An action's values are given to whoever asked and are not kept: `tay run` prints each value the action produced, by name, after the action's output. A value declared secret prints as `<secret>`, never as itself, so an action that hands a person a credential writes it to a file of its own and gives the file's path.
 
 **`tay set PLACE=VALUE...`** and **`tay unset PLACE...`** change what the environment remembers being asked for, in the places `--set` takes, and nothing else: no unit is touched until the next `tay up`. `tay up --set` is the same thing followed by `up`. `tay unset` forgets one place, so the profile's or the stack's value holds again; a place with nothing remembered is an error. `tay set` plans the stack with the new values before remembering them, and remembers nothing if it no longer plans. `tay set` with nothing after it lists what is remembered: the profile, the units and each place. A secret setting's value is never printed. Neither command starts a daemon: with none running, the change is made under the daemon's own lock.
 
@@ -228,10 +236,43 @@ Each of these is one change, taken by the daemon in turn like any other.
 | A secret, a file, a port | The stored secret, the written file, the kept number |
 | A process | Nothing beyond its record |
 
-In order: every running unit that needs the unit is stopped, the unit is stopped, what it keeps is removed, and, if the environment is meant to be up, everything is brought up again as `tay up` would, so commands that needed it check again and run again where their work is gone.
+In order: every running unit that needs the unit, directly or through others, or that mounts one of its volumes, is stopped; the unit is stopped; what it keeps is removed; and, if the environment is meant to be up, everything is brought up again as `tay up` would, so commands that needed it check again and run again where their work is gone.
+
+- Only a unit in the environment's plan can be wiped. What a unit left out of `up` still keeps is removed by `tay wipe --all`.
+- A wipe that would itself stop a unit a command's `undo` needs is refused like one whose need is not up.
+- If a removal fails, the wipe stops there and says what was removed and what was not. What it stopped stays stopped until the next `tay up`.
 
 **`tay wipe --all --yes`** takes the environment down and removes everything it keeps: every volume, and `.tay/` but for `choices.yaml`. No `undo` runs, since everything an undo would act on goes too. Without `--yes` either form changes nothing and says what it would remove.
 
+**On an environment that is down,** `tay run`, `tay wipe` and anything else that needed a daemon leave none behind: once the change is done and nothing runs, the daemon exits.
+
+## When something changes
+
+*Not built, except that a container whose settings changed is replaced.*
+
+**What a unit was started from.** For each unit that is up, tay keeps a fingerprint of what it was started from: its filled settings, with each secret taken as a digest and never as its value; the content of every file it uses that tay knows of (a file a `file` unit wrote, a file another unit built and lists under `outputs`); and, for a container, the image it was created from, not the tag.
+
+**At `tay up` on an environment that is up,** each unit is compared with its fingerprint.
+
+- A unit whose settings, files or image differ from what it was started from is started again: a container is replaced, a process is restarted, a made unit is made again.
+- A unit that only receives a value from a unit that changed is started again if the value it receives changed, and left alone if it did not.
+- A command is checked again, as at every `tay up`.
+- Everything else is left running.
+
+`tay up` says of each unit it starts again what changed, by the setting's or the file's name, and never shows a secret.
+
+**Watching, in development.** A unit with `watch` is run again when a file under the paths it names changes: a command runs again, a process is restarted. Files that git ignores do not count. This is what rebuilds a service when its source is saved.
+
+- Changes are gathered for a moment, so that saving several files runs the unit once.
+- A change that arrives while the unit is running does not stop it. The unit runs once more when it ends, however many changes arrived meanwhile.
+- While a command runs again, and if it fails, the units that use what it builds stay as they are, `ready` on the last good build. Its failure shows on the command itself, with the last lines it wrote, and the next change runs it again.
+- When it succeeds, each unit that uses one of its `outputs` is restarted if that file's content differs from what the unit was started from, and left alone if it does not. So one build that changes one of three programs restarts one service.
+- `tay status` shows a command that is running again as `starting`, with what changed.
+
+Production profiles refuse a unit with `watch`, so none of this happens on a server.
+
+**A command with `when_removed: undo`** keeps, once it has run, what its `undo` needs: the command, where it runs, and its environment, the secrets with the secrets. At a `tay up` whose plan no longer has the unit, tay runs that `undo` before it stops anything else the plan no longer has, and then forgets it. If the `undo` fails, `tay up` says so, keeps it, and tries again at the next `tay up`. `tay wipe --all` runs none of them.
+
 ## Not in this document yet
 
-What restarts when a definition changes, for units other than containers. Watching files and running a unit again when they change. `when_removed: undo`. Running on a server under a service manager. These are written when they are built.
+Running on a server under a service manager. Written when it is built.
