@@ -195,7 +195,7 @@ Three of them **run** something: `process`, `container` and `command`. The other
 | `tmpfs` | A list of paths in the container that are kept in memory |
 | `publish` | A mapping from a container port to a host port, or to the long form `{ port, address, always }`. See "When a published port is opened" |
 | `aliases` | Further names for this container on the environment's network. Its unit name is always one |
-| `labels` | A mapping |
+| `labels` | A mapping. A label whose name begins `tay.` is tay's own and may not be written |
 | `user`, `workdir`, `platform` | As Docker means them |
 | `read_only`, `security_opt`, `pids_limit` | As Docker means them |
 

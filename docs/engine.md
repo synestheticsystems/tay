@@ -87,8 +87,6 @@ It keeps two facts about intent on disk: whether the environment is meant to be 
 
 ## What is kept on disk
 
-*Not built.*
-
 ```
 .tay/
   choices.yaml            this environment's choices; people write it
