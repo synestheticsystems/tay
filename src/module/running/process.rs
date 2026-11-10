@@ -5,7 +5,8 @@ use crate::syntax::names;
 use crate::syntax::yaml::Node;
 use crate::value::Value;
 
-use super::common::{Variables, argv, argv_list, variables};
+use super::command_line::{argv, argv_list};
+use super::variables::{Variables, variables};
 use crate::module::description::{Description, ReadyWithoutCheck, RestartOn, Runs, UnitKind};
 use crate::module::settings::{Destination, Settings, Slot, WrittenSettings, each, maybe};
 use crate::module::want::{PathUse, Want};

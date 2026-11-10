@@ -7,7 +7,9 @@ use crate::syntax::names::{self, NameAt};
 use crate::syntax::yaml::Node;
 use crate::value::Value;
 
-use super::common::{Mount, RunForm, Variables, mounts, run_form, variables};
+use super::command_line::{RunForm, run_form};
+use super::mounts::{Mount, mounts};
+use super::variables::{Variables, variables};
 use crate::module::description::{
     Description, ModuleGive, ModuleValue, Output, ReadyWithoutCheck, RestartOn, Runs, UnitKind,
 };
