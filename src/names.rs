@@ -1,5 +1,14 @@
 //! The rules names follow. A rule returns what is wrong with a name, if anything.
 
+use crate::source::Loc;
+
+/// A name and the place it is written.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NameAt {
+    pub name: String,
+    pub loc: Loc,
+}
+
 /// Names references use for themselves, so no unit may have them.
 pub const RESERVED_UNIT_NAMES: [&str; 5] = ["settings", "environment", "host", "self", "params"];
 
