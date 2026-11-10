@@ -98,7 +98,7 @@ enum Generated {
 }
 
 impl Made for SecretSettings<Filled> {
-    fn make(&self, place: &UnitPlace) -> Result<Exists, Failure> {
+    fn make(&self, place: &UnitPlace, _: bool) -> Result<Exists, Failure> {
         let asked = self.asked()?;
         let path = path(place);
         let detail = match read(&path)? {

@@ -182,3 +182,34 @@ fn a_fixed_port_that_is_taken_fails_its_unit_and_names_the_holder() {
         )
     );
 }
+
+#[test]
+fn a_port_the_environments_own_process_listens_on_is_not_taken_from_it() {
+    let machine = Machine::new();
+    let root = machine.stack("checks");
+    assert_eq!(machine.at(&root, "up", &["listener"]).code, 0);
+    let number = kept_ports(&root)["listener-port"].clone();
+    let listener = crate::harness::child(&root, "listener");
+    // At the next `tay up` the kept number is held by the environment's own
+    // process: it is kept, not chosen again.
+    let again = machine.at(&root, "up", &["listener"]);
+    assert_eq!(again.code, 0, "{}{}", again.stdout, again.stderr);
+    assert_eq!(
+        again.last_change("listener-port"),
+        format!("ready {number}, kept")
+    );
+    assert_eq!(kept_ports(&root)["listener-port"], number);
+    assert_eq!(crate::harness::child(&root, "listener"), listener);
+    // Nor does a fixed one fail its unit.
+    let free = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let set = format!("settings.fixed={free}");
+    let pinned = machine.at(&root, "up", &["pinned", "--set", &set]);
+    assert_eq!(pinned.code, 0, "{}{}", pinned.stdout, pinned.stderr);
+    let again = machine.at(&root, "up", &["pinned"]);
+    assert_eq!(again.code, 0, "{}{}", again.stdout, again.stderr);
+    assert_eq!(again.last_change("fixed-port"), format!("ready {free}"));
+}

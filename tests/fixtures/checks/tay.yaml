@@ -1,6 +1,8 @@
 format: 1
 stack: checks
 up: [site]
+settings:
+  fixed: { type: number }
 units:
   site-port: { uses: port }
   site:
@@ -44,3 +46,10 @@ units:
       workdir: "${environment.state}"
       prepare: [["${environment.root}/services/mark.sh", "${environment.state}/healthy"]]
     ready: { http: "http://127.0.0.1:${brief-port.number}/health", within: 8s }
+  fixed-port: { uses: port, with: { fixed: "${settings.fixed}" } }
+  pinned:
+    doc: Listens on a port that must be had.
+    uses: process
+    with:
+      command: ["python3", "${environment.root}/services/serve.py", "${fixed-port.number}"]
+    ready: { tcp: "127.0.0.1:${fixed-port.number}", within: 20s }

@@ -35,7 +35,10 @@ pub struct UnitPlace {
 /// a file written.
 pub trait Made: Send + Sync {
     /// Makes the unit, doing nothing when it already exists and is right.
-    fn make(&self, place: &UnitPlace) -> Result<Exists, Failure>;
+    /// `in_use` is whether a unit of the environment that uses its values
+    /// runs now, and so may hold what it made, as a process holds the port
+    /// it was given.
+    fn make(&self, place: &UnitPlace, in_use: bool) -> Result<Exists, Failure>;
 
     /// The unit as it exists now, from a check made now; why not, when it
     /// does not exist or is not right.

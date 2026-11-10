@@ -78,11 +78,12 @@ pub async fn bring_up(
         while moved {
             moved = bringing.settle_running();
             if !cancelled {
-                for (index, made) in bringing.start() {
+                for (index, made, in_use) in bringing.start() {
                     moved = true;
                     let supervisor = Arc::clone(supervisor);
                     let unit = units[index].name.clone();
-                    let task = making.spawn_blocking(move || made.make(&supervisor.place(&unit)));
+                    let task =
+                        making.spawn_blocking(move || made.make(&supervisor.place(&unit), in_use));
                     making_of.insert(task.id(), index);
                 }
                 moved |= bringing.handed;
@@ -154,7 +155,7 @@ impl Bringing<'_> {
     /// to be made. A group becomes ready at once, a unit that runs is handed
     /// to the supervisor, and a unit that cannot start yet is recorded
     /// waiting, or blocked.
-    fn start(&mut self) -> Vec<(usize, Box<dyn Made>)> {
+    fn start(&mut self) -> Vec<(usize, Box<dyn Made>, bool)> {
         let mut made = Vec::new();
         // A group made ready can clear the units after it.
         let mut moved = true;
@@ -205,7 +206,7 @@ impl Bringing<'_> {
                     Err(why) => self.record(index, UnitState::new(State::Failed, why.to_string())),
                     Ok(Operations::Made(operations)) => {
                         self.record(index, UnitState::new(State::Starting, "making it"));
-                        made.push((index, operations));
+                        made.push((index, operations, self.in_use(&planned.name)));
                     }
                     Ok(Operations::Running(running)) => {
                         self.supervisor.tend(&planned, running, Begin::Fresh, true);
@@ -216,6 +217,14 @@ impl Bringing<'_> {
             }
         }
         made
+    }
+
+    /// Whether a unit that uses `unit`'s values runs now.
+    fn in_use(&self, unit: &str) -> bool {
+        self.units
+            .iter()
+            .filter(|user| user.needs.iter().any(|need| need.unit == unit))
+            .any(|user| self.supervisor.is_tended(&user.name))
     }
 
     /// Settles each unit that runs that has become ready or failed, or can

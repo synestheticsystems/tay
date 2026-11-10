@@ -68,10 +68,10 @@ impl fmt::Display for Taken {
 }
 
 impl Made for PortSettings<Filled> {
-    fn make(&self, place: &UnitPlace) -> Result<Exists, Failure> {
+    fn make(&self, place: &UnitPlace, in_use: bool) -> Result<Exists, Failure> {
         let mut ports = Ports::lock(&place.environment).map_err(PortError::from)?;
         let unit = place.unit.as_str();
-        let taken = |number| taken(&ports, number, unit);
+        let taken = |number| taken(&ports, number, unit, in_use);
         let (number, detail) = match (self, ports.kept(unit)) {
             (PortSettings::Fixed(fixed), _) => {
                 let fixed = port_number(fixed, "fixed")?;
@@ -147,10 +147,20 @@ fn port_number(value: &Filled, setting: &'static str) -> Result<u16, PortError> 
         .ok_or(PortError::NotAPort { setting, number })
 }
 
-/// What has `number`, if anything does but `unit`.
-fn taken(ports: &Ports<'_>, number: u16, unit: &str) -> Result<Option<Taken>, PortError> {
+/// What has `number`, if anything does but `unit`. A number `unit` keeps,
+/// while a unit of this environment that uses it runs, is held by that
+/// unit, as well as tay can tell, and so by nothing else.
+fn taken(
+    ports: &Ports<'_>,
+    number: u16,
+    unit: &str,
+    in_use: bool,
+) -> Result<Option<Taken>, PortError> {
     if let Some(holder) = ports.holder(number, unit) {
         return Ok(Some(Taken::By(holder)));
+    }
+    if in_use && ports.kept(unit) == Some(number) {
+        return Ok(None);
     }
     let free = is_free(number).map_err(|source| PortError::Untested { number, source })?;
     Ok((!free).then_some(Taken::Listening))
@@ -165,7 +175,7 @@ fn choose(ports: &Ports<'_>, unit: &str) -> Result<u16, PortError> {
     for step in 0..size {
         let offset = u16::try_from((start + step) % size).expect("an offset in the range fits");
         let number = RANGE.start() + offset;
-        if taken(ports, number, unit)?.is_none() {
+        if taken(ports, number, unit, false)?.is_none() {
             return Ok(number);
         }
     }

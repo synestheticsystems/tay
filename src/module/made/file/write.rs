@@ -47,7 +47,7 @@ struct Wanted {
 }
 
 impl Made for FileSettings<Filled> {
-    fn make(&self, place: &UnitPlace) -> Result<Exists, Failure> {
+    fn make(&self, place: &UnitPlace, _: bool) -> Result<Exists, Failure> {
         let wanted = self.wanted(place)?;
         let detail = match on_disk(&wanted.path)? {
             None => {
