@@ -16,7 +16,7 @@ pub struct Plan {
 pub struct PlannedUnit {
     pub name: String,
     pub doc: Option<String>,
-    pub way: Way,
+    pub mechanism: Mechanism,
     pub needs: Vec<Need>,
     pub after: Vec<After>,
     pub ready: Readiness,
@@ -26,12 +26,12 @@ pub struct PlannedUnit {
 }
 
 #[derive(Debug)]
-pub enum Way {
+pub enum Mechanism {
     /// A unit that only brings up what it needs.
     Group,
     Module {
         module: &'static str,
-        alternative: Option<String>,
+        way: Option<String>,
         runs: Running,
     },
 }

@@ -1,4 +1,4 @@
-//! Choices from every place, layered, and the alternative each unit runs as.
+//! Choices from every place, layered, and the way each unit runs.
 
 use std::collections::BTreeMap;
 
@@ -12,7 +12,7 @@ use crate::syntax::names::NameAt;
 pub struct Layered {
     pub up: Vec<NameAt>,
     pub run_default: Option<NameAt>,
-    /// By unit name: the unit as named, and the alternative chosen.
+    /// By unit name: the unit as named, and the way chosen.
     pub run_units: BTreeMap<String, (NameAt, NameAt)>,
     pub settings: BTreeMap<String, SettingValue>,
 }
@@ -34,10 +34,10 @@ pub fn layer<'c>(places: impl IntoIterator<Item = &'c Choices>) -> Layered {
         if let Some(default) = &place.run_default {
             layered.run_default = Some(default.clone());
         }
-        for (unit, alternative) in &place.run_units {
+        for (unit, way) in &place.run_units {
             layered
                 .run_units
-                .insert(unit.name.clone(), (unit.clone(), alternative.clone()));
+                .insert(unit.name.clone(), (unit.clone(), way.clone()));
         }
         for (name, value) in &place.settings {
             layered.settings.insert(name.name.clone(), value.clone());
@@ -54,25 +54,25 @@ fn add(list: &mut Vec<NameAt>, names: &[NameAt]) {
     }
 }
 
-/// The alternative `unit` runs as: `run.units.<unit>` if given, otherwise
-/// `run.default` if the unit has an alternative of that name. Gives the
-/// variant and where the choice was made, if the unit has alternatives.
+/// The way `unit` runs: `run.units.<unit>` if given, otherwise `run.default`
+/// if the unit has a way of that name. Gives the way's index, and where the
+/// choice was made if the unit has ways.
 pub fn choose(unit: &Unit, layered: &Layered) -> Result<(usize, Option<Loc>), Diagnostic> {
-    if !unit.has_alternatives() {
+    if !unit.has_ways() {
         return Ok((0, None));
     }
-    if let Some((_, alternative)) = layered.run_units.get(&unit.name.name)
-        && let Some(index) = unit.alternative(&alternative.name)
+    if let Some((_, way)) = layered.run_units.get(&unit.name.name)
+        && let Some(index) = unit.way(&way.name)
     {
-        return Ok((index, Some(alternative.loc)));
+        return Ok((index, Some(way.loc)));
     }
     if let Some(default) = &layered.run_default
-        && let Some(index) = unit.alternative(&default.name)
+        && let Some(index) = unit.way(&default.name)
     {
         return Ok((index, Some(default.loc)));
     }
-    let alternatives = unit
-        .alternative_names()
+    let ways = unit
+        .way_names()
         .iter()
         .map(|name| format!("`{name}`"))
         .collect::<Vec<_>>()
@@ -87,7 +87,7 @@ pub fn choose(unit: &Unit, layered: &Layered) -> Result<(usize, Option<Loc>), Di
     let error = Diagnostic::new(
         unit.name.loc,
         format!(
-            "unit `{}` has the alternatives {alternatives}, and no choice names one: `run.units` does not name it, and {why}",
+            "unit `{}` has the ways {ways}, and no choice names one: `run.units` does not name it, and {why}",
             unit.name.name
         ),
     );
@@ -138,7 +138,7 @@ mod tests {
 
     #[test]
     fn run_default_is_replaced_and_run_units_joined() {
-        let pair = |unit: &str, alt: &str| (names(&[unit])[0].clone(), names(&[alt])[0].clone());
+        let pair = |unit: &str, way: &str| (names(&[unit])[0].clone(), names(&[way])[0].clone());
         let profile = Choices {
             run_default: names(&["source"]).pop(),
             run_units: vec![pair("server", "image"), pair("proxy", "image")],

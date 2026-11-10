@@ -17,7 +17,9 @@ use crate::definition::{Choices, Profile, Stack};
 use crate::diagnostic::source::{Loc, Sources};
 use crate::diagnostic::{Diagnostic, Diagnostics};
 
-pub use model::{Because, GivenLine, Plan, PlannedUnit, Readiness, Running, Seen, Shown, Way};
+pub use model::{
+    Because, GivenLine, Mechanism, Plan, PlannedUnit, Readiness, Running, Seen, Shown,
+};
 pub use resolve::value::Exact;
 
 use resolve::{Environment, Resolver};

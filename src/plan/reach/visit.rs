@@ -1,13 +1,15 @@
 //! Visiting one unit that comes up: every value it uses resolved where it runs,
 //! what it needs and why, how it is known to be ready, and what it gives.
 
-use crate::definition::{Check, Variant};
+use crate::definition::{Check, Way};
 use crate::diagnostic::source::Loc;
 use crate::module::{Place, RestartDefault, Runs, Want};
 
 use super::usage::{ProducedUse, User};
 use crate::plan::Planner;
-use crate::plan::model::{Because, PlannedUnit, Readiness, RestartPolicy, Running, Shown, Way};
+use crate::plan::model::{
+    Because, Mechanism, PlannedUnit, Readiness, RestartPolicy, Running, Shown,
+};
 use crate::plan::resolve::Asker;
 use crate::plan::resolve::value::Resolved;
 
@@ -31,14 +33,14 @@ pub struct Visit {
 }
 
 impl Planner<'_> {
-    pub fn visit(&mut self, unit: usize, variant: usize) -> Visit {
+    pub fn visit(&mut self, unit: usize, way: usize) -> Visit {
         let stack = self.resolver.stack;
         let definition = &stack.units[unit];
-        let variant = &definition.variants[variant];
+        let way = &definition.ways[way];
         let mut produced = Vec::new();
-        let (way, ready, restart, watch, gives) = match &variant.module {
+        let (mechanism, ready, restart, watch, gives) = match &way.module {
             None => (
-                Way::Group,
+                Mechanism::Group,
                 Some(Readiness::Group),
                 Some(None),
                 Vec::new(),
@@ -56,30 +58,22 @@ impl Planner<'_> {
                     self.use_value(user, &slot.expr, slot.want, slot.place, &mut produced);
                 }
                 let running = self.running(runs);
-                let ready = self.readiness(
-                    user,
-                    variant,
-                    module.shape.ready_without_check,
-                    &mut produced,
-                );
-                let restart = self.restart(
-                    user,
-                    variant,
-                    module.shape.restart_by_default,
-                    &mut produced,
-                );
-                let watch = self.watch(user, variant, &mut produced);
-                let gives = self.gives(unit, variant);
-                let way = Way::Module {
+                let ready =
+                    self.readiness(user, way, module.shape.ready_without_check, &mut produced);
+                let restart =
+                    self.restart(user, way, module.shape.restart_by_default, &mut produced);
+                let watch = self.watch(user, way, &mut produced);
+                let gives = self.gives(unit, way);
+                let mechanism = Mechanism::Module {
                     module: module.module.name(),
-                    alternative: variant.alternative.as_ref().map(|alt| alt.name.clone()),
+                    way: way.name.as_ref().map(|name| name.name.clone()),
                     runs: running,
                 };
-                (way, ready, restart.map(Some), watch, gives)
+                (mechanism, ready, restart.map(Some), watch, gives)
             }
         };
-        let needs = self.needs(variant, produced);
-        let after = variant
+        let needs = self.needs(way, produced);
+        let after = way
             .after
             .iter()
             .filter_map(|name| Some((self.resolver.unit_index(&name.name)?, name.loc)))
@@ -88,7 +82,7 @@ impl Planner<'_> {
             Some(PlannedUnit {
                 name: definition.name.name.clone(),
                 doc: definition.doc.clone(),
-                way,
+                mechanism,
                 needs: Vec::new(),
                 after: Vec::new(),
                 ready: ready?,
@@ -130,11 +124,11 @@ impl Planner<'_> {
     fn readiness(
         &mut self,
         user: User<'_>,
-        variant: &Variant,
+        way: &Way,
         without_check: &'static str,
         produced: &mut Vec<ProducedUse>,
     ) -> Option<Readiness> {
-        let Some(ready) = &variant.ready else {
+        let Some(ready) = &way.ready else {
             return Some(Readiness::Default(without_check));
         };
         // tay makes `http` and `tcp` checks itself, from the host.
@@ -176,12 +170,12 @@ impl Planner<'_> {
     fn restart(
         &mut self,
         user: User<'_>,
-        variant: &Variant,
+        way: &Way,
         default: RestartDefault,
         produced: &mut Vec<ProducedUse>,
     ) -> Option<RestartPolicy> {
         const RESTART: Place = Place::Readable("a restart policy");
-        let written = variant.restart.as_ref();
+        let written = way.restart.as_ref();
         let mut on = Shown::word(default.on);
         if let Some(expr) = written.and_then(|r| r.on.as_ref()) {
             let want = Want::OneOf(&["failure", "always", "never"]);
@@ -206,11 +200,10 @@ impl Planner<'_> {
     fn watch(
         &mut self,
         user: User<'_>,
-        variant: &Variant,
+        way: &Way,
         produced: &mut Vec<ProducedUse>,
     ) -> Vec<Option<Shown>> {
-        variant
-            .watch
+        way.watch
             .iter()
             .map(|folder| {
                 let value = self.use_value(user, folder, Want::Text, WATCHED, produced)?;
@@ -231,8 +224,8 @@ impl Planner<'_> {
     }
 
     /// The needs as written, then each unit whose produced value is used.
-    fn needs(&mut self, variant: &Variant, produced: Vec<ProducedUse>) -> Vec<NeedEdge> {
-        let mut needs: Vec<NeedEdge> = variant
+    fn needs(&mut self, way: &Way, produced: Vec<ProducedUse>) -> Vec<NeedEdge> {
+        let mut needs: Vec<NeedEdge> = way
             .needs
             .iter()
             .filter_map(|name| {

@@ -1,5 +1,5 @@
 format: 1
-stack: alternatives
+stack: ways
 default_profile: dev
 units:
   server-port: { uses: port }

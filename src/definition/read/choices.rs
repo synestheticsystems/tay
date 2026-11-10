@@ -48,11 +48,11 @@ fn choices(file: &Fields<'_>, d: &mut Diagnostics) -> Choices {
     {
         choices.run_default = run
             .get("default")
-            .and_then(|node| fields::name(node, "an alternative", d));
+            .and_then(|node| fields::name(node, "a way", d));
         if let Some(units) = run.get("units") {
-            for (unit, alternative) in fields::keyed(units, "a unit", names::name_problem, d) {
-                if let Some(alternative) = fields::name(alternative, "an alternative", d) {
-                    choices.run_units.push((unit, alternative));
+            for (unit, way) in fields::keyed(units, "a unit", names::name_problem, d) {
+                if let Some(way) = fields::name(way, "a way", d) {
+                    choices.run_units.push((unit, way));
                 }
             }
         }

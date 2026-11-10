@@ -1,8 +1,8 @@
 //! Every name and reference in the definitions points at something that
-//! exists: checked across all units and all their alternatives, whether or
+//! exists: checked across all units and all their ways, whether or
 //! not they come up, so a mistake shows before the unit is ever used.
 
-use crate::definition::{Check, Choices, GiveValue, SettingValue, Stack, Unit, Variant};
+use crate::definition::{Check, Choices, GiveValue, SettingValue, Stack, Unit, Way};
 use crate::diagnostic::{Diagnostic, Diagnostics};
 use crate::module::{GivenValue, Runs};
 use crate::syntax::expr::{Expr, Reference, Target, UnitRef};
@@ -10,16 +10,16 @@ use crate::syntax::names::NameAt;
 
 pub fn check(stack: &Stack, places: &[&Choices], d: &mut Diagnostics) {
     for unit in &stack.units {
-        for variant in &unit.variants {
-            for name in variant.needs.iter().chain(&variant.after) {
+        for way in &unit.ways {
+            for name in way.needs.iter().chain(&way.after) {
                 unit_named(stack, name, d);
             }
-            if let Some(module) = &variant.module
+            if let Some(module) = &way.module
                 && let Runs::InsideUnit(inner) = &module.shape.runs
             {
                 unit_named(stack, inner, d);
             }
-            for expr in exprs(variant) {
+            for expr in exprs(way) {
                 references(stack, expr, Some(unit), d);
             }
         }
@@ -34,13 +34,13 @@ pub fn check(stack: &Stack, places: &[&Choices], d: &mut Diagnostics) {
     }
 }
 
-/// Every value written in a variant.
-fn exprs(variant: &Variant) -> Vec<&Expr> {
+/// Every value written in a way.
+fn exprs(way: &Way) -> Vec<&Expr> {
     let mut all: Vec<&Expr> = Vec::new();
-    if let Some(module) = &variant.module {
+    if let Some(module) = &way.module {
         all.extend(module.shape.slots.iter().map(|slot| &slot.expr));
     }
-    for give in &variant.gives {
+    for give in &way.gives {
         match &give.value {
             GiveValue::Value(expr) | GiveValue::Module(GivenValue::Expr(expr)) => all.push(expr),
             GiveValue::Endpoint(endpoint) => {
@@ -50,17 +50,17 @@ fn exprs(variant: &Variant) -> Vec<&Expr> {
             GiveValue::Module(_) => {}
         }
     }
-    if let Some(ready) = &variant.ready {
+    if let Some(ready) = &way.ready {
         match &ready.check {
             Check::Http(expr) | Check::Tcp(expr) | Check::Log(expr) => all.push(expr),
             Check::Command(words) => all.extend(words),
         }
         all.push(&ready.within);
     }
-    if let Some(restart) = &variant.restart {
+    if let Some(restart) = &way.restart {
         all.extend(restart.on.iter().chain(&restart.attempts));
     }
-    all.extend(&variant.watch);
+    all.extend(&way.watch);
     all
 }
 
@@ -111,17 +111,13 @@ fn reference_target(
             unit, name, part, ..
         } => {
             let Some(owner) = owner(unit, d) else { return };
-            if owner.variants.is_empty() {
+            if owner.ways.is_empty() {
                 return;
             }
-            let gives: Vec<_> = owner
-                .variants
-                .iter()
-                .filter_map(|variant| variant.give(name))
-                .collect();
+            let gives: Vec<_> = owner.ways.iter().filter_map(|way| way.give(name)).collect();
             if gives.is_empty() {
                 let mut names: Vec<&str> = owner
-                    .variants
+                    .ways
                     .iter()
                     .flat_map(|v| v.gives.iter().map(|g| g.name.name.as_str()))
                     .collect();
@@ -156,9 +152,9 @@ fn reference_target(
         }
         Target::Output { unit, name } => {
             let Some(owner) = owner(unit, d) else { return };
-            if !owner.variants.is_empty()
+            if !owner.ways.is_empty()
                 && !owner
-                    .variants
+                    .ways
                     .iter()
                     .any(|v| v.outputs.iter().any(|o| o.name == *name))
             {
@@ -197,29 +193,26 @@ fn choices(stack: &Stack, place: &Choices, d: &mut Diagnostics) {
     {
         unit_named(stack, name, d);
     }
-    for (unit_name, alternative) in &place.run_units {
+    for (unit_name, way) in &place.run_units {
         let Some(unit) = unit_named(stack, unit_name, d) else {
             continue;
         };
-        if unit.variants.is_empty() {
+        if unit.ways.is_empty() {
             continue;
         }
-        if !unit.has_alternatives() {
+        if !unit.has_ways() {
             d.error(
                 unit_name.loc,
-                format!(
-                    "unit `{}` has no alternatives to choose between",
-                    unit.name.name
-                ),
+                format!("unit `{}` has no ways to choose between", unit.name.name),
             );
-        } else if unit.alternative(&alternative.name).is_none() {
+        } else if unit.way(&way.name).is_none() {
             d.error(
-                alternative.loc,
+                way.loc,
                 format!(
-                    "unit `{}` has no alternative `{}`; its alternatives are {}",
+                    "unit `{}` has no way `{}`; its ways are {}",
                     unit.name.name,
-                    alternative.name,
-                    unit.alternative_names()
+                    way.name,
+                    unit.way_names()
                         .iter()
                         .map(|n| format!("`{n}`"))
                         .collect::<Vec<_>>()

@@ -7,7 +7,7 @@ use crate::definition::read::THIS_TAY;
 use crate::diagnostic::Diagnostic;
 use crate::diagnostic::source::{Loc, Source, Sources};
 use crate::plan::{
-    Because, Exact, GivenLine, Plan, PlannedUnit, Readiness, Running, Seen, Shown, Way,
+    Because, Exact, GivenLine, Mechanism, Plan, PlannedUnit, Readiness, Running, Seen, Shown,
 };
 
 pub const SCHEMA: u32 = 1;
@@ -65,13 +65,9 @@ fn at(loc: Loc, sources: &Sources) -> Value {
 }
 
 fn unit(unit: &PlannedUnit) -> Value {
-    let (module, alternative, runs, runs_inside) = match &unit.way {
-        Way::Group => (None, None, None, None),
-        Way::Module {
-            module,
-            alternative,
-            runs,
-        } => {
+    let (module, way, runs, runs_inside) = match &unit.mechanism {
+        Mechanism::Group => (None, None, None, None),
+        Mechanism::Module { module, way, runs } => {
             let (runs, inside) = match runs {
                 Running::OnHost => ("host", None),
                 Running::OwnContainer => ("own_container", None),
@@ -79,15 +75,15 @@ fn unit(unit: &PlannedUnit) -> Value {
                 Running::OneOffContainer => ("one_off_container", None),
                 Running::ByTay => ("tay", None),
             };
-            (Some(*module), alternative.as_deref(), Some(runs), inside)
+            (Some(*module), way.as_deref(), Some(runs), inside)
         }
     };
     json!({
         "name": unit.name,
         "doc": unit.doc,
-        "group": matches!(unit.way, Way::Group),
+        "group": matches!(unit.mechanism, Mechanism::Group),
         "module": module,
-        "alternative": alternative,
+        "way": way,
         "runs": runs,
         "runs_inside": runs_inside,
         "needs": unit.needs.iter().map(|need| match &need.because {

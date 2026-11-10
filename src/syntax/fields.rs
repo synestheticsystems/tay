@@ -125,7 +125,7 @@ pub fn boolean(node: &Node, what: &str, d: &mut Diagnostics) -> Option<bool> {
     }
 }
 
-/// A unit, template, profile or alternative name.
+/// A unit, template, profile or way name.
 pub fn name(node: &Node, what: &str, d: &mut Diagnostics) -> Option<NameAt> {
     named_by(node, what, names::name_problem, d)
 }

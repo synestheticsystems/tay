@@ -13,7 +13,7 @@ Plan for stack `shop`, profile `dev`, in <root>
      from the host: 127.0.0.1:<port: db-port>
      from a container: database:5432
 
-3. api: uses `process` (alternative `source`), runs on the host
+3. api: uses `process` (way `source`), runs on the host
    The shop's API.
    needs database
    needs build, because it uses build.outputs.server, which build produces by running

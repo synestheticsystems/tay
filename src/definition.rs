@@ -41,40 +41,39 @@ pub struct Unit {
     pub name: NameAt,
     pub doc: Option<String>,
     pub action: bool,
-    /// One variant for a unit with one way to run (or a group), one per
-    /// alternative for a unit with `run`. Empty when the unit's definition
-    /// could not be read, so that other units may still name it.
-    pub variants: Vec<Variant>,
+    /// The ways the unit can run: one, unnamed, for a unit with `uses` (or a
+    /// group, whose way has no module), and one per name under `run`. Empty
+    /// when the unit's definition could not be read, so that other units may
+    /// still name it.
+    pub ways: Vec<Way>,
 }
 
 impl Unit {
-    pub fn has_alternatives(&self) -> bool {
-        self.variants
-            .first()
-            .is_some_and(|variant| variant.alternative.is_some())
+    /// Whether the unit lists ways under `run`, so that a choice picks one.
+    pub fn has_ways(&self) -> bool {
+        self.ways.first().is_some_and(|way| way.name.is_some())
     }
 
-    pub fn alternative(&self, name: &str) -> Option<usize> {
-        self.variants.iter().position(|variant| {
-            variant
-                .alternative
-                .as_ref()
-                .is_some_and(|alt| alt.name == name)
-        })
-    }
-
-    pub fn alternative_names(&self) -> Vec<&str> {
-        self.variants
+    /// The index of the way named `name`.
+    pub fn way(&self, name: &str) -> Option<usize> {
+        self.ways
             .iter()
-            .filter_map(|variant| variant.alternative.as_ref().map(|alt| alt.name.as_str()))
+            .position(|way| way.name.as_ref().is_some_and(|own| own.name == name))
+    }
+
+    pub fn way_names(&self) -> Vec<&str> {
+        self.ways
+            .iter()
+            .filter_map(|way| way.name.as_ref().map(|name| name.name.as_str()))
             .collect()
     }
 }
 
-/// One way a unit runs, with the unit's own needs, waits and values joined in.
+/// One way a unit runs, with what the unit writes for all its ways joined in.
 #[derive(Debug)]
-pub struct Variant {
-    pub alternative: Option<NameAt>,
+pub struct Way {
+    /// The way's name under `run`; `None` for a unit with `uses`, or a group.
+    pub name: Option<NameAt>,
     /// `None` for a group.
     pub module: Option<ModuleUse>,
     pub needs: Vec<NameAt>,
@@ -86,7 +85,7 @@ pub struct Variant {
     pub watch: Vec<Expr>,
 }
 
-impl Variant {
+impl Way {
     pub fn give(&self, name: &str) -> Option<&Give> {
         self.gives.iter().find(|give| give.name.name == name)
     }
@@ -179,7 +178,7 @@ pub struct Choices {
     pub up_add: Vec<NameAt>,
     pub up_remove: Vec<NameAt>,
     pub run_default: Option<NameAt>,
-    /// A unit, and the alternative chosen for it.
+    /// A unit, and the way chosen for it.
     pub run_units: Vec<(NameAt, NameAt)>,
     pub settings: Vec<(NameAt, SettingValue)>,
 }

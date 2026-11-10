@@ -194,9 +194,9 @@ pub fn made_from(
             error
         });
     }
-    for variant in &mut made.variants {
-        variant.needs = unit::joined(&variant.needs, needs.clone());
-        variant.after = unit::joined(&variant.after, after.clone());
+    for way in &mut made.ways {
+        way.needs = unit::joined(&way.needs, needs.clone());
+        way.after = unit::joined(&way.after, after.clone());
     }
     if doc.is_some() {
         made.doc = doc;

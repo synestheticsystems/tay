@@ -1,5 +1,5 @@
 //! What comes up: the units in `up`, everything they need, and everything
-//! those need, under the alternatives chosen. `after` brings nothing in, and
+//! those need, under the ways chosen. `after` brings nothing in, and
 //! a unit that is an action comes up only when `up` names it.
 
 mod given;
@@ -41,10 +41,10 @@ impl Planner<'_> {
             if !seen.insert(unit) {
                 continue;
             }
-            let Some((variant, chosen_at)) = self.resolver.variant(unit) else {
+            let Some((way, chosen_at)) = self.resolver.way(unit) else {
                 continue;
             };
-            let plan = self.visit(unit, variant);
+            let plan = self.visit(unit, way);
             for need in &plan.needs {
                 let needed = &stack.units[need.unit];
                 if needed.action && !named.contains(&need.unit) {
@@ -60,7 +60,7 @@ impl Planner<'_> {
             }
             reached.chosen.push(Chosen {
                 unit,
-                variant,
+                way,
                 chosen_at,
             });
             reached.plans.push((unit, plan));

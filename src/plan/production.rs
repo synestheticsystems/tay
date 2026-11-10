@@ -12,10 +12,10 @@ use crate::syntax::names::NameAt;
 use super::Planner;
 use super::resolve::{Asker, Scope};
 
-/// A unit in the plan, with the alternative it runs as and where that was chosen.
+/// A unit in the plan, with the way it runs and where that was chosen.
 pub struct Chosen {
     pub unit: usize,
-    pub variant: usize,
+    pub way: usize,
     pub chosen_at: Option<Loc>,
 }
 
@@ -24,8 +24,8 @@ impl Planner<'_> {
         let stack = self.resolver.stack;
         for chosen in units {
             let unit = &stack.units[chosen.unit];
-            let variant = &unit.variants[chosen.variant];
-            let Some(module) = &variant.module else {
+            let way = &unit.ways[chosen.way];
+            let Some(module) = &way.module else {
                 continue;
             };
             let mut refusals: Vec<(Loc, String)> = Vec::new();
@@ -48,7 +48,7 @@ impl Planner<'_> {
                     }
                 }
             }
-            if let Some(first) = variant.watch.first() {
+            if let Some(first) = way.watch.first() {
                 refusals.push((first.loc, "it watches folders".to_string()));
             }
             for (loc, why) in refusals {
@@ -60,11 +60,8 @@ impl Planner<'_> {
                     ),
                 )
                 .with(marked_at, "the profile is marked production here");
-                if let (Some(at), Some(alternative)) = (chosen.chosen_at, &variant.alternative) {
-                    error = error.with(
-                        at,
-                        format!("alternative `{}` is chosen here", alternative.name),
-                    );
+                if let (Some(at), Some(name)) = (chosen.chosen_at, &way.name) {
+                    error = error.with(at, format!("way `{}` is chosen here", name.name));
                 }
                 self.resolver.d.push(error);
             }

@@ -12,7 +12,7 @@ pub struct NameAt {
 /// Names references use for themselves, so no unit may have them.
 pub const RESERVED_UNIT_NAMES: [&str; 5] = ["settings", "environment", "host", "self", "params"];
 
-/// The rule for unit, template, profile and alternative names: lower-case
+/// The rule for unit, template, profile and way names: lower-case
 /// letters, digits and hyphens, starting with a letter, at most 40 characters.
 pub fn name_problem(name: &str) -> Option<String> {
     if name.is_empty() {

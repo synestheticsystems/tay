@@ -124,14 +124,14 @@ impl<'s> Resolver<'s> {
         self.units.get(name).copied()
     }
 
-    /// The variant `unit` runs as, and where it was chosen. An error is
+    /// The way `unit` runs, and where it was chosen. An error is
     /// reported the first time the choice cannot be made.
-    pub fn variant(&mut self, unit: usize) -> Option<(usize, Option<Loc>)> {
+    pub fn way(&mut self, unit: usize) -> Option<(usize, Option<Loc>)> {
         if let Some(chosen) = self.chosen.get(&unit) {
             return *chosen;
         }
         let definition = &self.stack.units[unit];
-        let chosen = if definition.variants.is_empty() {
+        let chosen = if definition.ways.is_empty() {
             None
         } else {
             match choices::choose(definition, self.layered) {
@@ -146,11 +146,11 @@ impl<'s> Resolver<'s> {
         chosen
     }
 
-    /// Where `unit` runs under its chosen alternative; `None` for a group.
+    /// Where `unit` runs under its chosen way; `None` for a group.
     pub fn runs(&mut self, unit: usize) -> Option<&'s Runs> {
         let stack = self.stack;
-        let (variant, _) = self.variant(unit)?;
-        stack.units[unit].variants[variant]
+        let (way, _) = self.way(unit)?;
+        stack.units[unit].ways[way]
             .module
             .as_ref()
             .map(|module| &module.shape.runs)

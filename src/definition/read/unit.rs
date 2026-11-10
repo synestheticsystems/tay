@@ -1,7 +1,7 @@
-//! Reading one unit: its form (one module, alternatives, a template, or a
-//! group), and the variants the planner chooses between.
+//! Reading one unit: its form (one module, ways under `run`, a template, or a
+//! group), and the ways the planner chooses between.
 
-use crate::definition::{Give, GiveValue, ModuleUse, Unit, Variant};
+use crate::definition::{Give, GiveValue, ModuleUse, Unit, Way};
 use crate::diagnostic::{Diagnostic, Diagnostics};
 use crate::module::{self, Cx};
 use crate::syntax::fields::{self, Fields};
@@ -18,7 +18,7 @@ pub const UNIT_FIELDS: &[&str] = &[
     "gives", "action",
 ];
 
-const ALTERNATIVE_FIELDS: &[&str] = &[
+const WAY_FIELDS: &[&str] = &[
     "uses", "with", "needs", "after", "ready", "restart", "watch", "gives",
 ];
 
@@ -38,11 +38,11 @@ pub fn unreadable(name: NameAt) -> Unit {
         name,
         doc: None,
         action: false,
-        variants: Vec::new(),
+        ways: Vec::new(),
     }
 }
 
-/// Needs, waits and values written on the unit itself, joined into each of its variants.
+/// Needs, waits and values written on the unit itself, joined into each of its ways.
 #[derive(Default)]
 struct Shared {
     needs: Vec<NameAt>,
@@ -84,7 +84,7 @@ pub fn read_fields(name: NameAt, fields: &Fields<'_>, d: &mut Diagnostics) -> Un
         d.error(key.loc, "`params` goes with `from`: they fill a template");
     }
     let shared = Shared::read(fields, d);
-    let variants = match (fields.entry("uses"), fields.entry("run")) {
+    let ways = match (fields.entry("uses"), fields.entry("run")) {
         (Some(_), Some((run, _))) => {
             d.error(
                 run.loc,
@@ -92,23 +92,24 @@ pub fn read_fields(name: NameAt, fields: &Fields<'_>, d: &mut Diagnostics) -> Un
             );
             None
         }
-        (Some(_), None) => variant(&name.name, None, fields, Shared::default(), &shared, d)
-            .map(|variant| vec![variant]),
-        (None, Some((_, run))) => alternatives(&name, fields, run, &shared, d),
+        (Some(_), None) => {
+            way(&name.name, None, fields, Shared::default(), &shared, d).map(|way| vec![way])
+        }
+        (None, Some((_, run))) => ways(&name, fields, run, &shared, d),
         (None, None) => group(fields, shared, d),
     };
-    match variants {
-        Some(variants) if d.len() == errors_before => Unit {
+    match ways {
+        Some(ways) if d.len() == errors_before => Unit {
             name,
             doc,
             action,
-            variants,
+            ways,
         },
         _ => unreadable(name),
     }
 }
 
-fn group(fields: &Fields<'_>, shared: Shared, d: &mut Diagnostics) -> Option<Vec<Variant>> {
+fn group(fields: &Fields<'_>, shared: Shared, d: &mut Diagnostics) -> Option<Vec<Way>> {
     for (field, key) in fields.present() {
         if !matches!(field, "doc" | "needs") {
             d.error(
@@ -119,8 +120,8 @@ fn group(fields: &Fields<'_>, shared: Shared, d: &mut Diagnostics) -> Option<Vec
             );
         }
     }
-    Some(vec![Variant {
-        alternative: None,
+    Some(vec![Way {
+        name: None,
         module: None,
         needs: shared.needs,
         after: Vec::new(),
@@ -132,49 +133,49 @@ fn group(fields: &Fields<'_>, shared: Shared, d: &mut Diagnostics) -> Option<Vec
     }])
 }
 
-fn alternatives(
+fn ways(
     name: &NameAt,
     fields: &Fields<'_>,
     run: &Node,
     shared: &Shared,
     d: &mut Diagnostics,
-) -> Option<Vec<Variant>> {
+) -> Option<Vec<Way>> {
     for field in ["with", "ready", "restart", "watch"] {
         if let Some((key, _)) = fields.entry(field) {
             d.error(
                 key.loc,
-                format!("`{field}` goes in each alternative under `run`, not on the unit"),
+                format!("`{field}` goes in each way under `run`, not on the unit"),
             );
         }
     }
-    let listed = fields::keyed(run, "an alternative", names::name_problem, d);
+    let listed = fields::keyed(run, "a way", names::name_problem, d);
     if listed.is_empty() && run.as_map().is_some() {
-        d.error(run.loc, "`run` lists no alternatives");
+        d.error(run.loc, "`run` lists no ways");
     }
-    // Every alternative is read, so that the errors of each are reported.
-    let variants: Vec<Option<Variant>> = listed
+    // Every way is read, so that the errors of each are reported.
+    let ways: Vec<Option<Way>> = listed
         .into_iter()
-        .map(|(alternative, node)| {
-            let own = Fields::of(node, "an alternative", ALTERNATIVE_FIELDS, d)?;
+        .map(|(way_name, node)| {
+            let own = Fields::of(node, "a way", WAY_FIELDS, d)?;
             let own_shared = Shared::read(&own, d);
-            variant(&name.name, Some(alternative), &own, own_shared, shared, d)
+            way(&name.name, Some(way_name), &own, own_shared, shared, d)
         })
         .collect();
-    let variants: Vec<Variant> = variants.into_iter().collect::<Option<_>>()?;
-    same_value_names(name, &variants, d);
-    Some(variants)
+    let ways: Vec<Way> = ways.into_iter().collect::<Option<_>>()?;
+    same_value_names(name, &ways, d);
+    Some(ways)
 }
 
 /// One way to run: a module and its settings, with what the unit writes for
 /// all its ways joined to what this one writes.
-fn variant(
+fn way(
     unit: &str,
-    alternative: Option<NameAt>,
+    way_name: Option<NameAt>,
     fields: &Fields<'_>,
     own: Shared,
     shared: &Shared,
     d: &mut Diagnostics,
-) -> Option<Variant> {
+) -> Option<Way> {
     let (uses_key, uses) = fields.entry("uses").or_else(|| {
         d.error(
             fields.loc(),
@@ -216,8 +217,8 @@ fn variant(
             None => gives.push(give),
         }
     }
-    Some(Variant {
-        alternative,
+    Some(Way {
+        name: way_name,
         outputs: shape
             .outputs
             .iter()
@@ -253,38 +254,37 @@ pub fn joined(first: &[NameAt], more: Vec<NameAt>) -> Vec<NameAt> {
     all
 }
 
-/// Every alternative gives the same value names, so that a unit using one
+/// Every way gives the same value names, so that a unit using one
 /// does not break when the unit is switched to another way of running.
-fn same_value_names(unit: &NameAt, variants: &[Variant], d: &mut Diagnostics) {
-    let given = |variant: &Variant| -> Vec<NameAt> {
-        let outputs = variant.outputs.iter().map(|output| NameAt {
+fn same_value_names(unit: &NameAt, ways: &[Way], d: &mut Diagnostics) {
+    let given = |way: &Way| -> Vec<NameAt> {
+        let outputs = way.outputs.iter().map(|output| NameAt {
             name: format!("outputs.{}", output.name),
             loc: output.loc,
         });
-        variant
-            .gives
+        way.gives
             .iter()
             .map(|give| give.name.clone())
             .chain(outputs)
             .collect()
     };
-    // Each name, with the first alternative that gives it and where.
+    // Each name, with the first way that gives it and where.
     let mut every: Vec<(NameAt, &NameAt)> = Vec::new();
-    for variant in variants {
-        let Some(alternative) = &variant.alternative else {
+    for way in ways {
+        let Some(way_name) = &way.name else {
             continue;
         };
-        for name in given(variant) {
+        for name in given(way) {
             if !every.iter().any(|(n, _)| n.name == name.name) {
-                every.push((name, alternative));
+                every.push((name, way_name));
             }
         }
     }
-    for variant in variants {
-        let Some(this) = &variant.alternative else {
+    for way in ways {
+        let Some(this) = &way.name else {
             continue;
         };
-        let names = given(variant);
+        let names = given(way);
         for (name, that) in &every {
             if names.iter().any(|n| n.name == name.name) {
                 continue;
@@ -293,7 +293,7 @@ fn same_value_names(unit: &NameAt, variants: &[Variant], d: &mut Diagnostics) {
                 Diagnostic::new(
                     this.loc,
                     format!(
-                        "alternative `{}` of `{}` does not give `{}`, which alternative `{}` gives; every alternative gives the same values",
+                        "way `{}` of `{}` does not give `{}`, which way `{}` gives; every way gives the same values",
                         this.name, unit.name, name.name, that.name
                     ),
                 )

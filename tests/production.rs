@@ -43,9 +43,9 @@ fn each_thing_the_format_lists_is_refused_naming_its_unit() {
 }
 
 #[test]
-fn an_alternative_chosen_with_set_is_refused_too() {
+fn a_way_chosen_with_set_is_refused_too() {
     let clean = plan_json("production-clean", &[]);
-    assert_eq!(unit(&clean, "server")["alternative"], "image");
+    assert_eq!(unit(&clean, "server")["way"], "image");
     let run = plan("production-clean", &["--set", "run.units.server=source"]);
     assert_eq!(run.code, 2);
     assert_eq!(
@@ -53,7 +53,7 @@ fn an_alternative_chosen_with_set_is_refused_too() {
         [
             "tay.yaml:8:9: the production profile `deploy` refuses unit `server`: it runs on the host",
             "  stack/profiles/deploy.yaml:1:13: the profile is marked production here",
-            "  --set run.units.server: alternative `source` is chosen here",
+            "  --set run.units.server: way `source` is chosen here",
         ]
     );
 }

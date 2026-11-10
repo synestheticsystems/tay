@@ -44,9 +44,9 @@ impl Resolver<'_> {
         reference: &Reference,
     ) -> Res {
         let stack = self.stack;
-        let (variant, _) = self.variant(owner).ok_or(Fail::Reported)?;
+        let (way, _) = self.way(owner).ok_or(Fail::Reported)?;
         let unit = &stack.units[owner];
-        let Some(give) = unit.variants[variant].give(name) else {
+        let Some(give) = unit.ways[way].give(name) else {
             return self.fail(
                 reference.loc,
                 format!(
@@ -116,9 +116,9 @@ impl Resolver<'_> {
     /// `${unit.outputs.name}`: a file the unit builds when it runs.
     pub(super) fn output(&mut self, owner: usize, name: &str, reference: &Reference) -> Res {
         let stack = self.stack;
-        let (variant, _) = self.variant(owner).ok_or(Fail::Reported)?;
+        let (way, _) = self.way(owner).ok_or(Fail::Reported)?;
         let unit_name = &stack.units[owner].name.name;
-        if !stack.units[owner].variants[variant]
+        if !stack.units[owner].ways[way]
             .outputs
             .iter()
             .any(|output| output.name == name)

@@ -8,7 +8,7 @@
     "units": [
       {
         "after": [],
-        "alternative": null,
+        "way": null,
         "doc": null,
         "gives": [
           {
@@ -50,7 +50,7 @@
       },
       {
         "after": [],
-        "alternative": null,
+        "way": null,
         "doc": null,
         "gives": [
           {
@@ -106,7 +106,7 @@
       },
       {
         "after": [],
-        "alternative": "source",
+        "way": "source",
         "doc": "The shop's API.",
         "gives": [
           {
@@ -159,7 +159,7 @@
       },
       {
         "after": [],
-        "alternative": null,
+        "way": null,
         "doc": null,
         "gives": [],
         "group": false,
@@ -188,7 +188,7 @@
       },
       {
         "after": [],
-        "alternative": null,
+        "way": null,
         "doc": null,
         "gives": [
           {
@@ -228,7 +228,7 @@
       },
       {
         "after": [],
-        "alternative": null,
+        "way": null,
         "doc": "The shop's site, served by its development server.",
         "gives": [
           {
@@ -289,7 +289,7 @@
       },
       {
         "after": [],
-        "alternative": null,
+        "way": null,
         "doc": "Everything the shop needs to serve a page.",
         "gives": [],
         "group": true,

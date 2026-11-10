@@ -1,6 +1,6 @@
 //! The plan as a person reads it.
 
-use crate::plan::{Because, GivenLine, Plan, PlannedUnit, Readiness, Running, Seen, Way};
+use crate::plan::{Because, GivenLine, Mechanism, Plan, PlannedUnit, Readiness, Running, Seen};
 
 pub fn plan(plan: &Plan) -> String {
     let profile = match (&plan.profile, plan.production) {
@@ -26,21 +26,17 @@ pub fn plan(plan: &Plan) -> String {
 }
 
 fn unit_lines(lines: &mut Vec<String>, number: usize, unit: &PlannedUnit) {
-    let way = match &unit.way {
-        Way::Group => "a group".to_string(),
-        Way::Module {
-            module,
-            alternative,
-            runs,
-        } => {
-            let alternative = alternative
+    let mechanism = match &unit.mechanism {
+        Mechanism::Group => "a group".to_string(),
+        Mechanism::Module { module, way, runs } => {
+            let way = way
                 .as_ref()
-                .map(|alt| format!(" (alternative `{alt}`)"))
+                .map(|way| format!(" (way `{way}`)"))
                 .unwrap_or_default();
-            format!("uses `{module}`{alternative}, {}", running(runs))
+            format!("uses `{module}`{way}, {}", running(runs))
         }
     };
-    lines.push(format!("{number}. {}: {way}", unit.name));
+    lines.push(format!("{number}. {}: {mechanism}", unit.name));
     if let Some(doc) = &unit.doc {
         lines.push(format!("   {doc}"));
     }
