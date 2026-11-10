@@ -1,7 +1,8 @@
 //! Units that run on the host, through the real binary: each program under
 //! a keeper that outlives the daemon, found again by the next daemon, its
 //! readiness checked and its restarts made, stopped with all it started,
-//! commands run once with what they produce, and their logs.
+//! commands run once with what they produce, their logs, and what runs that
+//! the plan no longer has.
 
 mod commands;
 mod environment;
@@ -12,3 +13,4 @@ mod readiness;
 mod restarts;
 mod secrets;
 mod stopping;
+mod unplanned;

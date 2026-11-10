@@ -9,8 +9,7 @@
 use std::sync::Arc;
 
 use super::state::{State, UnitState};
-use super::supervisor::Supervisor;
-use crate::module::UnitKind;
+use super::supervisor::{Supervisor, runs};
 
 /// A unit that could not be stopped, or of which something was left, and
 /// why.
@@ -35,32 +34,34 @@ enum Pass {
 pub async fn take_down(supervisor: &Arc<Supervisor>, detail: &str) -> Result<Vec<Left>, String> {
     let units = supervisor.snapshot();
     let mut left = Vec::new();
-    for known in units.iter().rev() {
-        let planned = &known.planned;
-        let runs = matches!(
-            planned.mechanism.as_ref().map(|mechanism| &mechanism.kind),
-            Some(UnitKind::Runs(_))
-        );
-        let stopped = match runs {
-            true => supervisor.stop(planned).await,
-            false => Ok(()),
+    let planned = units
+        .iter()
+        .rev()
+        .map(|known| (known.planned.name.clone(), runs(&known.planned).cloned()));
+    let unplanned = units
+        .each_unplanned()
+        .map(|unplanned| (unplanned.name.clone(), Some(unplanned.runs.clone())));
+    for (unit, runs) in planned.chain(unplanned) {
+        let stopped = match &runs {
+            Some(runs) => supervisor.stop(&unit, runs).await,
+            None => Ok(()),
         };
         let state = match stopped {
             Ok(()) => UnitState::new(State::Stopped, detail),
             Err(reason) => {
                 left.push(Left {
-                    unit: planned.name.clone(),
+                    unit: unit.clone(),
                     reason: reason.clone(),
                 });
                 UnitState::new(State::Failed, format!("could not be stopped: {reason}"))
             }
         };
-        supervisor.record(&planned.name, state, None);
+        supervisor.record(&unit, state, None);
     }
-    // What runs of a unit the plan does not have, as one left from before
-    // a change of what was asked for, is stopped from its place alone, and
-    // then looked for again.
-    let known = |unit: &str| units.iter().any(|known| known.planned.name == unit);
+    // What runs of a unit the table does not have, as one left by a daemon
+    // that was killed, is stopped from its place alone, and then looked for
+    // again.
+    let known = |unit: &str| units.state(unit).is_some();
     for pass in [Pass::Stop, Pass::Check] {
         let found = supervisor
             .found_running()
@@ -70,7 +71,7 @@ pub async fn take_down(supervisor: &Arc<Supervisor>, detail: &str) -> Result<Vec
                 continue;
             }
             let stopped = match pass {
-                Pass::Stop => supervisor.stop_unplanned(&unit, runs).await,
+                Pass::Stop => supervisor.stop(&unit, &runs).await,
                 Pass::Check => Err("something of it still runs after it was stopped".to_string()),
             };
             if let Err(reason) = stopped {
@@ -78,25 +79,23 @@ pub async fn take_down(supervisor: &Arc<Supervisor>, detail: &str) -> Result<Vec
             }
         }
     }
-    for known in units.iter() {
-        let planned = &known.planned;
-        if left.iter().any(|left| left.unit == planned.name) {
+    let planned = units
+        .iter()
+        .filter_map(|known| Some((known.planned.name.clone(), runs(&known.planned)?.clone())));
+    let unplanned = units
+        .each_unplanned()
+        .map(|unplanned| (unplanned.name.clone(), unplanned.runs.clone()));
+    for (unit, runs) in planned.chain(unplanned) {
+        if left.iter().any(|left| left.unit == unit) {
             continue;
         }
-        let reason = match supervisor.running_now(planned).await {
+        let reason = match supervisor.running_now(&unit, &runs).await {
             Ok(false) => continue,
             Ok(true) => "something of it still runs after it was stopped".to_string(),
             Err(why) => format!("whether anything of it still runs cannot be told: {why}"),
         };
-        supervisor.record(
-            &planned.name,
-            UnitState::new(State::Failed, reason.clone()),
-            None,
-        );
-        left.push(Left {
-            unit: planned.name.clone(),
-            reason,
-        });
+        supervisor.record(&unit, UnitState::new(State::Failed, reason.clone()), None);
+        left.push(Left { unit, reason });
     }
     Ok(left)
 }

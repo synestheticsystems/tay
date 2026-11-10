@@ -70,8 +70,9 @@ for, and it writes nothing.
 
 tay up plans exactly as tay plan does, starts the environment's daemon if none
 runs, and has it bring up what the choices list under `up`, or the units named
-and what they need. It prints each change of state as it happens, and returns
-when everything asked for is ready or one of it can no longer become ready.
+and what they need. What runs and is not in the plan any more is stopped, and
+it says so. It prints each change of state as it happens, and returns when
+everything asked for is ready or one of it can no longer become ready.
 The environment remembers the profile, each --set and the units named, so a
 later plain tay up, tay status, tay plan and a daemon started afresh all see
 the same stack: --profile replaces the remembered profile, a --set replaces a
@@ -79,7 +80,8 @@ remembered one for the same place, and units named replace those remembered.
 
 tay down stops everything the environment runs, checks that nothing is left,
 and says so; its daemon exits. tay status prints each unit's state, from a
-check made now, and what the environment remembers being asked for. tay logs
+check made now, each unit that runs and is not in the plan any more, and what
+the environment remembers being asked for. tay logs
 prints what a unit wrote, each line with its time, and tay's notes of where
 each attempt starts and how it ended. tay ls prints the environments tay
 knows on this machine, and marks with * the one it is run in.

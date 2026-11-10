@@ -50,34 +50,6 @@ fn a_unit_outlives_its_daemon_goes_on_logging_and_is_found_again_without_startin
     assert!(!log(&root, "web").contains("attempt 2"));
 }
 
-#[test]
-fn a_second_start_of_a_unit_that_runs_is_refused() {
-    let machine = Machine::new();
-    let root = machine.stack("services");
-    assert_eq!(machine.at(&root, "up", &["web"]).code, 0);
-    let api = child(&root, "api");
-    // The environment is asked for `spawner` alone from now; `api` runs on,
-    // and a daemon started afresh plans without it.
-    assert_eq!(machine.at(&root, "up", &["spawner"]).code, 0);
-    machine.kill_daemon(&root);
-    assert_eq!(machine.at(&root, "status", &[]).code, 0);
-    let again = machine.at(&root, "up", &["api"]);
-    assert_eq!(again.code, 1, "{}", again.stdout);
-    assert_eq!(
-        again.last_change("api"),
-        "failed it is running already, under a keeper this daemon did not start"
-    );
-    assert_eq!(child(&root, "api"), api);
-    assert!(alive(api), "the one that ran is left as it was");
-    let web = child(&root, "web");
-    let down = machine.at(&root, "down", &[]);
-    assert_eq!(down.code, 0, "{}", down.stdout);
-    assert!(!alive(api), "`tay down` stops it all the same");
-    // And what runs of a unit the plan does not have at all.
-    assert!(!alive(web));
-    assert!(machine.processes().is_empty(), "{:?}", machine.processes());
-}
-
 /// Holds the lock on the machine's list of environments, through which
 /// every port is chosen, until it is dropped: a start that needs a port
 /// waits on it.

@@ -1,0 +1,16 @@
+format: 1
+stack: leaving
+up: [staying, leaving]
+units:
+  staying:
+    doc: Stays in the plan whatever the test does.
+    uses: process
+    with: { command: ["${environment.root}/services/waits.sh"] }
+  leaving:
+    doc: Leaves the plan when the test writes the definitions again without it.
+    uses: process
+    with: { command: ["${environment.root}/services/waits.sh"] }
+  joining:
+    doc: Comes into the plan when it is asked for by name.
+    uses: process
+    with: { command: ["${environment.root}/services/waits.sh"] }

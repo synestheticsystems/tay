@@ -130,8 +130,9 @@ fn down(daemon: &Arc<Daemon>) -> Response<Body> {
     follow(change)
 }
 
-/// Each unit the daemon knows, from a check made now. A unit the check
-/// finds in the state recorded keeps the time it took it.
+/// Each unit the daemon knows, from a check made now, and after them each
+/// the plan does not have of which something runs. A unit the check finds
+/// in the state recorded keeps the time it took it.
 async fn status(daemon: &Arc<Daemon>) -> Response<Body> {
     let units = daemon.supervisor.snapshot();
     let environment = Arc::clone(&daemon.environment);
@@ -140,7 +141,7 @@ async fn status(daemon: &Arc<Daemon>) -> Response<Body> {
         (units, found)
     })
     .await;
-    let (units, found) = match checked {
+    let (units, mut found) = match checked {
         Ok(checked) => checked,
         Err(error) => {
             return json(
@@ -151,13 +152,15 @@ async fn status(daemon: &Arc<Daemon>) -> Response<Body> {
             );
         }
     };
+    found.extend(engine::check_unplanned(&daemon.supervisor).await);
     let units = found
         .into_iter()
         .map(|found| {
             let since = units
-                .get(&found.unit)
-                .filter(|known| known.state.state == found.state.state)
-                .map_or_else(clock::now, |known| clock::seconds(known.since));
+                .state(&found.unit)
+                .filter(|state| state.state == found.state.state)
+                .and_then(|_| units.since(&found.unit))
+                .map_or_else(clock::now, clock::seconds);
             UnitStatus {
                 unit: found.unit,
                 state: found.state.state,

@@ -185,8 +185,9 @@ async fn start(layout: Layout) -> Result<(Arc<Daemon>, UnixListener, Socket), Ca
 
 /// Finds the units again as the daemon starts: those `tay plan` would
 /// list, with what the environment remembers being asked for, each as it is
-/// found. What runs is looked after again whether or not the environment is
-/// meant to be up, and what is made is checked when it is.
+/// found, and each that runs that the plan does not have. What runs is
+/// looked after again whether or not the environment is meant to be up,
+/// and what is made is checked when it is.
 fn found_again(supervisor: &Arc<Supervisor>) {
     let layout = &supervisor.environment.layout;
     let asked = match Asked::read(layout) {
@@ -220,6 +221,11 @@ fn found_again(supervisor: &Arc<Supervisor>) {
         }
     };
     engine::find_again(supervisor, &plan, up);
+    if let Err(why) = engine::find_unplanned(supervisor) {
+        log(&format!(
+            "what runs of units the plan does not have cannot be told: {why}"
+        ));
+    }
 }
 
 /// The definitions did not plan: each error as `tay plan` prints it.

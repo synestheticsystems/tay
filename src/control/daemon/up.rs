@@ -54,10 +54,34 @@ impl Daemon {
             return;
         }
         let units: Vec<Arc<PlannedUnit>> = plan.units.into_iter().map(Arc::new).collect();
-        self.supervisor.take_in(&units);
+        // What runs of a unit set apart that the plan has again, as one a
+        // daemon found running that its plan then lacked, is found again
+        // where it runs, and not started a second time.
+        let returned = self.supervisor.take_in(&units);
+        engine::find_again(&self.supervisor, &returned, true);
+        if let Err(why) = engine::find_unplanned(&self.supervisor) {
+            self.fail(
+                &change,
+                &format!("what runs of units the plan does not have cannot be told: {why}"),
+            );
+            return;
+        }
+        let unplanned: Vec<String> = self
+            .supervisor
+            .snapshot()
+            .each_unplanned()
+            .map(|unplanned| unplanned.name.clone())
+            .collect();
         change.say(Event::Units {
-            units: units.iter().map(|unit| unit.name.clone()).collect(),
+            units: units
+                .iter()
+                .map(|unit| unit.name.clone())
+                .chain(unplanned)
+                .collect(),
         });
+        // What runs and the plan no longer has is stopped first, so that
+        // nothing it holds is in the way of what the plan brings up.
+        engine::stop_unplanned(&self.supervisor).await;
         for unit in &units {
             if unit
                 .mechanism

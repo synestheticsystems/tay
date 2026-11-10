@@ -73,9 +73,10 @@ impl Supervisor {
         self.units.lock().expect("the units are not poisoned")
     }
 
-    /// Takes in the units of a plan, as [`Units::take_in`] does.
-    pub fn take_in(&self, plan: &[Arc<PlannedUnit>]) {
-        self.units().take_in(plan);
+    /// Takes in the units of a plan, as [`Units::take_in`] does, giving
+    /// each that comes back into it from among those set apart.
+    pub fn take_in(&self, plan: &[Arc<PlannedUnit>]) -> Vec<Arc<PlannedUnit>> {
+        self.units().take_in(plan)
     }
 
     /// The units as they stand now.
@@ -83,8 +84,24 @@ impl Supervisor {
         self.units().clone()
     }
 
+    /// The state of `unit`, planned or not.
     pub fn state(&self, unit: &str) -> Option<UnitState> {
-        self.units().get(unit).map(|known| known.state.clone())
+        self.units().state(unit).cloned()
+    }
+
+    /// Sets apart `unit`, which runs where `runs` says and which the plan
+    /// does not have, in `state`, and tells the daemon of it, unless the
+    /// table has it already.
+    pub fn take_in_unplanned(&self, unit: &str, runs: Runs, state: UnitState) {
+        if self.units().take_in_unplanned(unit, runs, state.clone()) {
+            (self.told)(unit, &state);
+            self.changes.send_modify(|count| *count += 1);
+        }
+    }
+
+    /// Forgets the unplanned unit `unit`, of which nothing runs any more.
+    pub fn forget(&self, unit: &str) {
+        self.units().forget(unit);
     }
 
     /// The values each unit that is ready gives.
@@ -168,15 +185,17 @@ impl Supervisor {
         tending.insert(planned.name.clone(), UnitTask { ended, stop });
     }
 
-    /// Stops `planned` and whatever it started, and waits until nothing of
-    /// it is left; why not, when something is. A unit no task looks after
-    /// is stopped from its place alone, whatever its settings.
-    pub async fn stop(&self, planned: &PlannedUnit) -> Result<(), String> {
+    /// Stops `unit`, which runs where `runs` says, and whatever it started,
+    /// and waits until nothing of it is left; why not, when something is:
+    /// through the task that looks after it, if one does, and otherwise
+    /// from its place alone, whatever its settings, as for a unit the plan
+    /// does not have.
+    pub async fn stop(&self, unit: &str, runs: &Runs) -> Result<(), String> {
         let tended = self
             .tending
             .lock()
             .expect("the tasks are not poisoned")
-            .get(&planned.name)
+            .get(unit)
             .filter(|tended| tended.is_live())
             .map(|tended| tended.stop.clone());
         if let Some(stop) = tended {
@@ -188,10 +207,7 @@ impl Supervisor {
                 return stopped;
             }
         }
-        let Some(runs) = runs(planned) else {
-            return Ok(());
-        };
-        stop_blocking(runs.clone(), self.place(&planned.name)).await
+        stop_blocking(runs.clone(), self.place(unit)).await
     }
 
     /// The units of which something runs now, found where units run,
@@ -200,19 +216,11 @@ impl Supervisor {
         module::found_running(&self.environment.layout).map_err(|failure| failure.to_string())
     }
 
-    /// Stops what runs of `unit`, which the plan does not have, from its
-    /// place alone, where `runs` says it runs.
-    pub async fn stop_unplanned(&self, unit: &str, runs: Runs) -> Result<(), String> {
-        stop_blocking(runs, self.place(unit)).await
-    }
-
-    /// Whether anything of `planned` runs now, from its place alone,
-    /// whatever its settings.
-    pub async fn running_now(&self, planned: &PlannedUnit) -> Result<bool, String> {
-        let Some(runs) = runs(planned).cloned() else {
-            return Ok(false);
-        };
-        let place = self.place(&planned.name);
+    /// Whether anything of `unit`, which runs where `runs` says, runs now,
+    /// from its place alone, whatever its settings.
+    pub async fn running_now(&self, unit: &str, runs: &Runs) -> Result<bool, String> {
+        let runs = runs.clone();
+        let place = self.place(unit);
         tokio::task::spawn_blocking(move || module::running_now(&runs, &place))
             .await
             .map_err(|error| format!("tay failed while looking at it: {error}"))?
@@ -238,7 +246,7 @@ impl Supervisor {
 }
 
 /// Where a unit that runs runs; `None` for one that is made, or a group.
-fn runs(planned: &PlannedUnit) -> Option<&Runs> {
+pub fn runs(planned: &PlannedUnit) -> Option<&Runs> {
     match &planned.mechanism.as_ref()?.kind {
         UnitKind::Runs(runs) => Some(runs),
         UnitKind::Made => None,
