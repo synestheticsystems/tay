@@ -1,11 +1,10 @@
 //! Settings: the value in force, typed as declared, and kept secret when
 //! declared so. A setting's value is literal, so it is built from nothing.
 
-use crate::definition::SettingValue;
+use crate::definition::{SettingValue, reference_errors};
 use crate::diagnostic::Diagnostic;
-use crate::diagnostic::source::Loc;
 use crate::plan::resolve::value::Resolved;
-use crate::syntax::expr::Literal;
+use crate::syntax::expr::{Literal, Reference};
 use crate::value::{Hole, Kept, Value};
 
 use super::{Fail, Res, Resolver};
@@ -32,9 +31,10 @@ impl Resolver<'_> {
         }
     }
 
-    pub(super) fn setting(&mut self, name: &str, at: Loc) -> Res {
+    pub(super) fn setting(&mut self, name: &str, reference: &Reference) -> Res {
+        let at = reference.loc;
         let Some(decl) = self.stack.setting(name) else {
-            return self.fail(at, format!("no setting `{name}` is declared in tay.yaml"));
+            return self.fail(reference_errors::no_setting(reference, name));
         };
         let written = match (self.layered.settings.get(name), &decl.default) {
             (Some(value), _) => value.clone(),

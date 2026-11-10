@@ -1,0 +1,7 @@
+format: 1
+stack: template-files
+up: [one, two]
+units:
+  p: { uses: port }
+  one: { uses: file, with: { template: ./a.tmpl } }
+  two: { uses: file, with: { template: ./a.tmpl, name: two.conf } }

@@ -2,8 +2,9 @@
 //! exists: checked across all units and all their ways, whether or
 //! not they come up, so a mistake shows before the unit is ever used.
 
+use crate::definition::reference_errors;
 use crate::definition::{Body, Check, Choices, GiveValue, Mechanism, SettingValue, Stack, Unit};
-use crate::diagnostic::{Diagnostic, Diagnostics};
+use crate::diagnostic::{Diagnostic, Diagnostics, quoted_list};
 use crate::module::{ModuleValue, Runs, UnitKind, VolumeMount};
 use crate::syntax::expr::{Expr, Part, Reference, Target, UnitRef, View};
 use crate::syntax::names::NameAt;
@@ -106,36 +107,31 @@ fn unit_named<'s>(stack: &'s Stack, name: &NameAt, d: &mut Diagnostics) -> Optio
     unit
 }
 
-fn references(stack: &Stack, expr: &Expr, this: Option<&Unit>, d: &mut Diagnostics) {
+/// Every reference in `expr`, written in `this` unit if it is in one, names
+/// something that exists and has what the reference asks for.
+pub fn references(stack: &Stack, expr: &Expr, this: Option<&Unit>, d: &mut Diagnostics) {
     for reference in expr.references() {
         reference_target(stack, reference, this, d);
     }
 }
 
-fn reference_target(
+pub fn reference_target(
     stack: &Stack,
     reference: &Reference,
     this: Option<&Unit>,
     d: &mut Diagnostics,
 ) {
-    let written = reference.written();
     let owner = |unit: &UnitRef, d: &mut Diagnostics| match unit {
         UnitRef::This => {
             if this.is_none() {
-                d.error(
-                    reference.loc,
-                    format!("`{written}`: `self` is used only inside a unit"),
-                );
+                d.push(reference_errors::self_outside_a_unit(reference));
             }
             this
         }
         UnitRef::Named(name) => {
             let found = stack.unit(name);
             if found.is_none() {
-                d.error(
-                    reference.loc,
-                    format!("`{written}`: there is no unit `{name}`"),
-                );
+                d.push(reference_errors::no_unit(reference, name));
             }
             found
         }
@@ -161,40 +157,24 @@ fn reference_target(
                     .collect();
                 names.sort_unstable();
                 names.dedup();
-                let list = if names.is_empty() {
-                    "nothing".to_string()
-                } else {
-                    names
-                        .iter()
-                        .map(|n| format!("`{n}`"))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                };
-                d.error(
-                    reference.loc,
-                    format!(
-                        "`{written}`: unit `{}` gives no `{name}`; it gives {list}",
-                        owner.name.name
-                    ),
-                );
+                d.push(reference_errors::gives_no(
+                    reference,
+                    &owner.name.name,
+                    name,
+                    &names,
+                ));
             } else if part.is_some()
                 && !gives
                     .iter()
                     .any(|g| matches!(g.value, GiveValue::Endpoint(_)))
             {
-                d.error(
-                    reference.loc,
-                    format!("`{written}`: `{name}` is not an endpoint, so it has no `.url`, `.host` or `.port`"),
-                );
+                d.push(reference_errors::not_an_endpoint(reference, name));
             } else if *part == Some(Part::Url)
                 && gives
                     .iter()
                     .all(|g| matches!(&g.value, GiveValue::Endpoint(e) if e.scheme.is_none()))
             {
-                d.error(
-                    reference.loc,
-                    format!("`{written}`: the endpoint has no `scheme`, so it has no URL"),
-                );
+                d.push(reference_errors::no_scheme(reference));
             }
         }
         Target::Output { unit, name, view } => {
@@ -208,48 +188,44 @@ fn reference_target(
                         .any(|output| output.name.name == *name)
                 })
             {
-                d.error(
-                    reference.loc,
-                    format!(
-                        "`{written}`: unit `{}` builds no output `{name}`",
-                        owner.name.name
-                    ),
-                );
+                d.push(reference_errors::builds_no_output(
+                    reference,
+                    &owner.name.name,
+                    name,
+                ));
             }
         }
         Target::Setting(name) => {
             if stack.setting(name).is_none() {
-                d.error(
-                    reference.loc,
-                    format!("`{written}`: no setting `{name}` is declared in tay.yaml"),
-                );
+                d.push(reference_errors::no_setting(reference, name));
             }
         }
-        Target::Param(_) => d.error(
-            reference.loc,
-            format!("`{written}` is a template's parameter, and this is not in a template"),
-        ),
-        Target::Arg(name) => match this.map(|unit| (unit, &unit.action)) {
-            Some((_, Some(action))) if action.args.iter().any(|arg| arg.name.name == *name) => {}
-            Some((unit, Some(_))) => d.error(
-                reference.loc,
-                format!(
-                    "`{written}`: action `{}` declares no argument `{name}`",
-                    unit.name.name
+        Target::Param(_) => d.push(reference_errors::param_outside_a_template(reference)),
+        Target::Arg(name) => {
+            let written = reference.written();
+            match this.map(|unit| (unit, &unit.action)) {
+                Some((_, Some(action))) if action.args.iter().any(|arg| arg.name.name == *name) => {
+                }
+                Some((unit, Some(_))) => d.error(
+                    reference.loc,
+                    format!(
+                        "`{written}`: action `{}` declares no argument `{name}`",
+                        unit.name.name
+                    ),
                 ),
-            ),
-            Some((unit, None)) => d.error(
-                reference.loc,
-                format!(
-                    "`{written}` is an action's argument, and unit `{}` is not an action",
-                    unit.name.name
+                Some((unit, None)) => d.error(
+                    reference.loc,
+                    format!(
+                        "`{written}` is an action's argument, and unit `{}` is not an action",
+                        unit.name.name
+                    ),
                 ),
-            ),
-            None => d.error(
-                reference.loc,
-                format!("`{written}` is an action's argument, and this is not in a unit"),
-            ),
-        },
+                None => d.error(
+                    reference.loc,
+                    format!("`{written}` is an action's argument, and this is not in a unit"),
+                ),
+            }
+        }
         Target::Environment(_) | Target::HostListen => {}
     }
 }
@@ -281,14 +257,7 @@ fn volume_owned(stack: &Stack, mounted: &VolumeMount, d: &mut Diagnostics) {
     owned.dedup();
     let list = match owned.as_slice() {
         [] => "it owns none".to_string(),
-        names => format!(
-            "its volumes are {}",
-            names
-                .iter()
-                .map(|n| format!("`{n}`"))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
+        names => format!("its volumes are {}", quoted_list(names)),
     };
     d.error(
         mounted.volume.loc,
@@ -305,22 +274,15 @@ fn view_unit(stack: &Stack, view: Option<&View>, reference: &Reference, d: &mut 
     let Some(View::Unit(name)) = view else {
         return;
     };
-    let written = reference.written();
     let Some(unit) = stack.unit(name) else {
-        d.error(
-            reference.loc,
-            format!("`{written}`: there is no unit `{name}`"),
-        );
+        d.push(reference_errors::no_unit(reference, name));
         return;
     };
     let runs = |mechanism: &&Mechanism| matches!(mechanism.description.kind, UnitKind::Runs(_));
     if !matches!(unit.body, Body::Unreadable) && !unit.mechanisms().iter().any(runs) {
-        d.error(
-            reference.loc,
-            format!(
-                "`{written}` asks for the view of unit `{name}`, which runs nowhere; the unit named after `@` must be one that runs"
-            ),
-        );
+        d.push(reference_errors::view_of_a_unit_that_runs_nowhere(
+            reference, name,
+        ));
     }
 }
 
@@ -356,11 +318,7 @@ fn choices(stack: &Stack, place: &Choices, d: &mut Diagnostics) {
                     "unit `{}` has no way `{}`; its ways are {}",
                     unit.name.name,
                     way.name,
-                    unit.way_names()
-                        .iter()
-                        .map(|n| format!("`{n}`"))
-                        .collect::<Vec<_>>()
-                        .join(", ")
+                    quoted_list(unit.way_names())
                 ),
             );
         }

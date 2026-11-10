@@ -1,6 +1,6 @@
 //! The values units give, and the files they build.
 
-use crate::definition::GiveValue;
+use crate::definition::{GiveValue, reference_errors};
 use crate::module::{ModuleValue, UnitKind};
 use crate::plan::resolve::value::Resolved;
 use crate::syntax::expr::{Part, Reference, UnitRef};
@@ -18,20 +18,11 @@ impl Resolver<'_> {
         match unit {
             UnitRef::This => match scope.unit {
                 Some(unit) => Ok(unit),
-                None => self.fail(
-                    reference.loc,
-                    format!(
-                        "`{}`: `self` is used only inside a unit",
-                        reference.written()
-                    ),
-                ),
+                None => self.fail(reference_errors::self_outside_a_unit(reference)),
             },
             UnitRef::Named(name) => match self.unit_index(name) {
                 Some(unit) => Ok(unit),
-                None => self.fail(
-                    reference.loc,
-                    format!("`{}`: there is no unit `{name}`", reference.written()),
-                ),
+                None => self.fail(reference_errors::no_unit(reference, name)),
             },
         }
     }
@@ -46,28 +37,22 @@ impl Resolver<'_> {
     ) -> Res {
         let stack = self.stack;
         let unit = &stack.units[owner];
-        let give = match self.chosen(owner).ok_or(Fail::Reported)? {
-            Chosen::Mechanism { mechanism, .. } => mechanism.give(name),
-            Chosen::Group(_) => None,
+        let gives = match self.chosen(owner).ok_or(Fail::Reported)? {
+            Chosen::Mechanism { mechanism, .. } => &mechanism.gives[..],
+            Chosen::Group(_) => &[],
         };
-        let Some(give) = give else {
-            return self.fail(
-                reference.loc,
-                format!(
-                    "`{}`: unit `{}` gives no `{name}`",
-                    reference.written(),
-                    unit.name.name
-                ),
-            );
+        let Some(give) = gives.iter().find(|give| give.name.name == name) else {
+            let mut names: Vec<&str> = gives.iter().map(|give| give.name.name.as_str()).collect();
+            names.sort_unstable();
+            return self.fail(reference_errors::gives_no(
+                reference,
+                &unit.name.name,
+                name,
+                &names,
+            ));
         };
         if part.is_some() && !matches!(give.value, GiveValue::Endpoint(_)) {
-            return self.fail(
-                reference.loc,
-                format!(
-                    "`{}`: `{name}` is not an endpoint, so it has no `.url`, `.host` or `.port`",
-                    reference.written()
-                ),
-            );
+            return self.fail(reference_errors::not_an_endpoint(reference, name));
         }
         let key = Key {
             unit: owner,
@@ -133,13 +118,9 @@ impl Resolver<'_> {
             Chosen::Group(_) => &[],
         };
         let Some(output) = outputs.iter().find(|output| output.name.name == name) else {
-            return self.fail(
-                reference.loc,
-                format!(
-                    "`{}`: unit `{unit_name}` builds no output `{name}`",
-                    reference.written()
-                ),
-            );
+            return self.fail(reference_errors::builds_no_output(
+                reference, unit_name, name,
+            ));
         };
         let key = Key {
             unit: owner,

@@ -4,6 +4,7 @@
 use std::fs;
 use std::path::Path;
 
+use crate::definition::read::references::references as cross_references;
 use crate::diagnostic::Diagnostic;
 use crate::diagnostic::source::Loc;
 use crate::module::{Destination, Form, PathUse, Slot, Want};
@@ -195,7 +196,10 @@ impl Planner<'_> {
     }
 
     /// Reads a file whose text has references in it, before start, and
-    /// resolves those references for `user`: the text is the value used.
+    /// resolves those references for `user`, whose setting at `at` names
+    /// it: the text is the value used. Its references are checked as those
+    /// written in a definition are. Each error in the file says which unit
+    /// it was found for, so that a file several units read is reported once.
     fn use_template_file(
         &mut self,
         user: User<'_>,
@@ -204,34 +208,59 @@ impl Planner<'_> {
         content: Destination,
         uses: &mut Uses,
     ) -> Option<Resolved> {
-        let file = Path::new(path);
-        let text = match fs::read_to_string(file) {
-            Ok(text) => text,
-            Err(error) => {
-                self.resolver.d.error(
-                    at,
-                    format!("the template file `{path}` cannot be read: {error}"),
-                );
-                return None;
-            }
-        };
-        let source = self.resolver.sources.add_file(file, &self.root);
-        let pieces = match expr::parse_document(&text, source) {
-            Ok(pieces) => pieces,
-            Err(error) => {
-                self.resolver.d.push(error);
-                return None;
-            }
-        };
+        let text = self.template_text(path, at)?;
+        let source = text.loc.source;
         let content = Slot {
-            expr: Expr {
-                loc: Loc::new(source, 1, 1),
-                kind: expr::ExprKind::Text(pieces),
-            },
+            expr: text,
             want: Want::Scalar,
             destination: content,
         };
-        self.use_value(user, &content, uses)
+        let outer = std::mem::take(&mut self.resolver.d);
+        let stack = self.resolver.stack;
+        let unit = &stack.units[user.unit];
+        cross_references(stack, &content.expr, Some(unit), &mut self.resolver.d);
+        let value = self.use_value(user, &content, uses);
+        let found = std::mem::replace(&mut self.resolver.d, outer);
+        for error in found.into_sorted() {
+            self.resolver.d.push(match error.loc.source == source {
+                true => error.with(at, format!("read for unit `{}` here", user.name)),
+                false => error,
+            });
+        }
+        value
+    }
+
+    /// The text of the template file at `path`, read once however many units
+    /// use it, as a value whose references are each at their place in it.
+    /// `None` when it cannot be read or a reference in it cannot be parsed,
+    /// which is reported.
+    fn template_text(&mut self, path: &str, at: Loc) -> Option<Expr> {
+        if !self.template_files.contains_key(path) {
+            let file = Path::new(path);
+            let text = match fs::read_to_string(file) {
+                Ok(text) => text,
+                Err(error) => {
+                    self.resolver.d.error(
+                        at,
+                        format!("the template file `{path}` cannot be read: {error}"),
+                    );
+                    return None;
+                }
+            };
+            let source = self.resolver.sources.add_file(file, &self.root);
+            let read = expr::parse_document(&text, source).map(|pieces| Expr {
+                loc: Loc::new(source, 1, 1),
+                kind: expr::ExprKind::Text(pieces),
+            });
+            self.template_files.insert(path.to_string(), read);
+        }
+        match &self.template_files[path] {
+            Ok(text) => Some(text.clone()),
+            Err(error) => {
+                self.resolver.d.push(error.clone());
+                None
+            }
+        }
     }
 }
 

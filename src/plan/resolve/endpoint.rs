@@ -8,7 +8,8 @@
 //! An endpoint that writes its `host` has no views: everyone gets that host
 //! and that port.
 
-use crate::definition::Endpoint;
+use crate::definition::{Endpoint, reference_errors};
+use crate::diagnostic::Diagnostic;
 use crate::module::{Form, HOST_IN_CONTAINERS, Published, Runs, UnitKind, Want};
 use crate::syntax::expr::{Expr, Part, Reference};
 
@@ -89,13 +90,7 @@ impl<'s> Resolver<'s> {
             }
             Some(Part::Url) => {
                 let Some(scheme) = &scheme else {
-                    return self.fail(
-                        reference.loc,
-                        format!(
-                            "`{}`: the endpoint has no `scheme`, so it has no URL",
-                            reference.written()
-                        ),
-                    );
+                    return self.fail(reference_errors::no_scheme(reference));
                 };
                 bits.extend(scheme.value.bits());
                 bits.push(Bit::Text("://".to_string()));
@@ -118,7 +113,10 @@ impl<'s> Resolver<'s> {
     fn part(&mut self, expr: &Expr, want: Want, own: Scope) -> Res {
         let value = self.resolve(expr, own)?;
         match want.problem(&Form::of(&value.value)) {
-            Some(problem) => self.fail(expr.loc, format!("{} {problem}", expr.subject())),
+            Some(problem) => self.fail(Diagnostic::new(
+                expr.loc,
+                format!("{} {problem}", expr.subject()),
+            )),
             None => Ok(value),
         }
     }
@@ -130,7 +128,7 @@ impl<'s> Resolver<'s> {
             && let Some(Bit::Text(leading)) = bits.first()
             && let Some(problem) = Endpoint::path_problem(leading)
         {
-            return self.fail(expr.loc, problem.to_string());
+            return self.fail(Diagnostic::new(expr.loc, problem));
         }
         Ok(value)
     }

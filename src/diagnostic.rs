@@ -55,6 +55,15 @@ impl Diagnostic {
     }
 }
 
+/// Names as a message lists them: each in backticks, joined with commas.
+pub fn quoted_list<S: AsRef<str>>(names: impl IntoIterator<Item = S>) -> String {
+    names
+        .into_iter()
+        .map(|name| format!("`{}`", name.as_ref()))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// The errors of one run.
 #[derive(Debug, Default)]
 pub struct Diagnostics {

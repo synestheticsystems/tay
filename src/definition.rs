@@ -2,6 +2,7 @@
 
 mod choices;
 pub mod read;
+pub mod reference_errors;
 mod setting;
 mod unit;
 

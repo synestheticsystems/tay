@@ -11,12 +11,14 @@ mod production;
 mod reach;
 mod resolve;
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::definition::read;
 use crate::definition::{Choices, Profile, Stack};
 use crate::diagnostic::source::{Loc, Sources};
 use crate::diagnostic::{Diagnostic, Diagnostics};
+use crate::syntax::expr::Expr;
 
 pub use model::{
     Because, Given, OpenedBy, Plan, PlannedMechanism, PlannedUnit, PublishedPort, Readiness, Seen,
@@ -46,6 +48,9 @@ pub struct Planner<'s> {
     resolver: Resolver<'s>,
     root: PathBuf,
     production: bool,
+    /// Each template file read so far, by path: its text, or why a
+    /// reference in it cannot be parsed.
+    template_files: HashMap<String, Result<Expr, Diagnostic>>,
 }
 
 /// Reads the stack at `root` and plans it.
@@ -118,6 +123,7 @@ pub fn plan(root: &Path, options: &Options, sources: &mut Sources, d: &mut Diagn
         resolver: Resolver::new(&stack, &layered, environment, sources),
         root: root.to_path_buf(),
         production: production.is_some(),
+        template_files: HashMap::new(),
     };
     let reached = planner.reach(&layered.up);
     if let (Some(profile), Some(marked_at)) = (profile, production) {

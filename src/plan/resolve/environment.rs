@@ -4,7 +4,7 @@ use std::path::Path;
 
 use crate::definition::read::ENVIRONMENT_FOLDER;
 use crate::definition::{Profile, Stack};
-use crate::diagnostic::Diagnostics;
+use crate::diagnostic::{Diagnostic, Diagnostics};
 use crate::plan::choices::Layered;
 use crate::plan::resolve::value::Resolved;
 use crate::syntax::expr::{EnvField, Reference};
@@ -122,13 +122,13 @@ impl Resolver<'_> {
             EnvField::Shared => match &environment.shared {
                 Some(shared) => Resolved::text(shared),
                 None => {
-                    return self.fail(
+                    return self.fail(Diagnostic::new(
                         reference.loc,
                         format!(
                             "`{}`: the home folder is not known, and the shared folder is in it",
                             reference.written()
                         ),
-                    );
+                    ));
                 }
             },
             EnvField::Id => Resolved::known(Value::Hole(Hole::EnvironmentId)),
@@ -136,10 +136,10 @@ impl Resolver<'_> {
             EnvField::Profile => match &environment.profile {
                 Some(profile) => Resolved::text(profile),
                 None => {
-                    return self.fail(
+                    return self.fail(Diagnostic::new(
                         reference.loc,
                         format!("`{}`: this stack has no profiles", reference.written()),
-                    );
+                    ));
                 }
             },
         })

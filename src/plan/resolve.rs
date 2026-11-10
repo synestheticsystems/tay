@@ -18,7 +18,7 @@ pub use environment::Environment;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
-use crate::definition::{Body, Mechanism, Stack};
+use crate::definition::{Body, Mechanism, Stack, reference_errors};
 use crate::diagnostic::source::{Loc, SourceId, Sources};
 use crate::diagnostic::{Diagnostic, Diagnostics};
 use crate::module::{Runs, UnitKind};
@@ -253,7 +253,7 @@ impl<'s> Resolver<'s> {
 
     fn reference(&mut self, reference: &Reference, scope: Scope) -> Res {
         match &reference.target {
-            Target::Setting(name) => self.setting(name, reference.loc),
+            Target::Setting(name) => self.setting(name, reference),
             Target::Environment(field) => self.environment_field(*field, reference),
             Target::HostListen => Ok(Resolved::known(Value::Hole(Hole::HostListen))),
             Target::Arg(name) => {
@@ -269,13 +269,7 @@ impl<'s> Resolver<'s> {
                     ty,
                 })))
             }
-            Target::Param(_) => self.fail(
-                reference.loc,
-                format!(
-                    "`{}` is a template's parameter, and this is not in a template",
-                    reference.written()
-                ),
-            ),
+            Target::Param(_) => self.fail(reference_errors::param_outside_a_template(reference)),
             Target::Value {
                 unit,
                 name,
@@ -312,22 +306,15 @@ impl<'s> Resolver<'s> {
             Some(View::Unit(name)) => name,
         };
         let Some(unit) = self.unit_index(name) else {
-            return self.fail(
-                reference.loc,
-                format!("`{}`: there is no unit `{name}`", reference.written()),
-            );
+            return self.fail(reference_errors::no_unit(reference, name));
         };
         // A way that cannot be chosen has been reported.
         self.chosen(unit).ok_or(Fail::Reported)?;
         match self.kind(unit) {
             Some(kind @ UnitKind::Runs(_)) => Ok(Asker::of(kind)),
-            _ => self.fail(
-                reference.loc,
-                format!(
-                    "`{}` asks for the view of unit `{name}`, which runs nowhere; the unit named after `@` must be one that runs",
-                    reference.written()
-                ),
-            ),
+            _ => self.fail(reference_errors::view_of_a_unit_that_runs_nowhere(
+                reference, name,
+            )),
         }
     }
 
@@ -382,8 +369,8 @@ impl<'s> Resolver<'s> {
         format!("{}.{}", self.stack.units[key.unit].name.name, key.name)
     }
 
-    fn fail<T>(&mut self, loc: Loc, message: String) -> Result<T, Fail> {
-        self.d.push(Diagnostic::new(loc, message));
+    fn fail<T>(&mut self, error: Diagnostic) -> Result<T, Fail> {
+        self.d.push(error);
         Err(Fail::Reported)
     }
 }

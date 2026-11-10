@@ -37,3 +37,24 @@ fn a_file_is_written_under_files_in_its_folder_in_the_state_folder() {
         format!("{}/.tay/state/files/credentials", root.display())
     );
 }
+
+#[test]
+fn a_template_file_is_read_once_and_its_references_checked_as_a_definitions_are() {
+    // Two units read `a.tmpl`: an error in it is reported once, naming each
+    // unit it was found for, in the words the same reference written in a
+    // definition would get.
+    let run = plan("template-files", &[]);
+    assert_eq!(run.code, 2);
+    assert_eq!(
+        run.errors(),
+        [
+            "a.tmpl:1:6: `${p.nmber}`: unit `p` gives no `nmber`; it gives `number`",
+            "  tay.yaml:6:40: read for unit `one` here",
+            "  tay.yaml:7:40: read for unit `two` here",
+            "a.tmpl:2:6: `${args.user}` is an action's argument, and unit `one` is not an action",
+            "  tay.yaml:6:40: read for unit `one` here",
+            "a.tmpl:2:6: `${args.user}` is an action's argument, and unit `two` is not an action",
+            "  tay.yaml:7:40: read for unit `two` here",
+        ]
+    );
+}
