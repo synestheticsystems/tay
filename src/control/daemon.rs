@@ -231,7 +231,7 @@ async fn found_again(supervisor: &Arc<Supervisor>) {
     engine::find_again(supervisor, &plan, up).await;
     // Nothing on a server is watched.
     if up && !production {
-        for problem in supervisor.watch(&plan) {
+        for problem in supervisor.watch(&plan).await {
             log(&problem);
         }
     }

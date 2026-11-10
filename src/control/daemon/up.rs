@@ -75,7 +75,7 @@ impl Daemon {
         // A production profile refuses a unit with `watch`, and nothing on
         // a server is watched in any case.
         if !production {
-            for notice in self.supervisor.watch(&units) {
+            for notice in self.supervisor.watch(&units).await {
                 change.say(Event::Notice { notice });
             }
         }

@@ -1,7 +1,9 @@
 //! Watching, in development: a unit with `watch` is run again when a file
 //! under the paths it names changes, files that git ignores excepted. The
 //! system says what changed, through the `notify` crate: FSEvents on macOS
-//! and inotify on Linux, so nothing is looked at while nothing changes.
+//! and inotify on Linux, so nothing is looked at while nothing changes. On
+//! Linux, where the system watches one folder at a time, a folder git
+//! ignores is not watched at all.
 //!
 //! The system may tell of a change made just before it was asked to
 //! watch, so a file that is there and was last changed before then has not
@@ -15,14 +17,16 @@
 //! started again if what it would be started from now differs from what
 //! it was started from, and left alone if not.
 
+mod folders;
+mod ignored;
+
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
-use tokio::io::AsyncWriteExt;
+use notify::event::ModifyKind;
+use notify::{Event, EventKind, RecommendedWatcher};
 use tokio::sync::mpsc;
 
 use super::started_from;
@@ -51,7 +55,7 @@ type Said = notify::Result<Event>;
 /// Begins to watch the files `planned` names under `watch`, telling the
 /// task it gives each change, which it runs the unit again for; why not,
 /// when they cannot be watched. The watch ends when the task does.
-pub fn watch(
+pub async fn watch(
     supervisor: &Arc<Supervisor>,
     planned: &Arc<PlannedUnit>,
 ) -> Result<impl Future<Output = ()> + Send + 'static, String> {
@@ -76,9 +80,7 @@ pub fn watch(
     })
     .map_err(|error| format!("its files cannot be watched: {error}"))?;
     for path in &paths {
-        watcher
-            .watch(path, RecursiveMode::Recursive)
-            .map_err(|error| format!("`{}` cannot be watched: {error}", path.display()))?;
+        folders::watch(&mut watcher, path).await?;
     }
     let watching = Watching {
         supervisor: Arc::clone(supervisor),
@@ -86,7 +88,7 @@ pub fn watch(
         paths,
         since,
         told,
-        _watcher: watcher,
+        watcher,
     };
     Ok(watching.run())
 }
@@ -101,7 +103,7 @@ struct Watching {
     since: SystemTime,
     told: mpsc::UnboundedReceiver<Said>,
     /// Watches for as long as it is held.
-    _watcher: RecommendedWatcher,
+    watcher: RecommendedWatcher,
 }
 
 impl Watching {
@@ -116,8 +118,28 @@ impl Watching {
                     Err(_) => break,
                 }
             }
+            self.watch_appeared(&mut gathered).await;
             if let Some(because) = gathered.because(&self).await {
                 run_again(&self.supervisor, &self.planned, &because).await;
+            }
+        }
+    }
+
+    /// Watches each folder made or moved under a watched one while changes
+    /// were gathered, where the system does not already, taking the files
+    /// in them among those that changed.
+    async fn watch_appeared(&mut self, gathered: &mut Gathered) {
+        for folder in &self.paths {
+            let appeared: Vec<PathBuf> = (gathered.appeared.iter())
+                .filter(|path| path.starts_with(folder))
+                .cloned()
+                .collect();
+            if appeared.is_empty() {
+                continue;
+            }
+            match folders::appeared(&mut self.watcher, folder, appeared).await {
+                Ok(files) => gathered.paths.extend(files),
+                Err(why) => gathered.problems.push(format!("watching its files: {why}")),
             }
         }
     }
@@ -147,10 +169,12 @@ impl Watching {
 }
 
 /// What the system said while changes were gathered: the files that
-/// changed, and what went wrong with watching them.
+/// changed, those of them that were made or moved there, and what went
+/// wrong with watching them.
 #[derive(Default)]
 struct Gathered {
     paths: BTreeSet<PathBuf>,
+    appeared: BTreeSet<PathBuf>,
     problems: Vec<String>,
 }
 
@@ -159,11 +183,21 @@ impl Gathered {
         match said {
             // A file read is not changed.
             Ok(event) if matches!(event.kind, EventKind::Access(_)) => {}
-            // What git keeps of a repository is none of its files.
-            Ok(event) => self.paths.extend(
-                (event.paths.into_iter())
-                    .filter(|path| !path.components().any(|part| part.as_os_str() == ".git")),
-            ),
+            Ok(event) => {
+                let appeared = matches!(
+                    event.kind,
+                    EventKind::Create(_) | EventKind::Modify(ModifyKind::Name(_))
+                );
+                // What git keeps of a repository is none of its files.
+                let paths = (event.paths.into_iter())
+                    .filter(|path| !path.components().any(|part| part.as_os_str() == ".git"));
+                for path in paths {
+                    if appeared {
+                        self.appeared.insert(path.clone());
+                    }
+                    self.paths.insert(path);
+                }
+            }
             // The system may have missed changes, so they are taken to have
             // come.
             Err(error) => self.problems.push(format!("watching its files: {error}")),
@@ -187,7 +221,7 @@ impl Gathered {
                 true => folder.as_path(),
                 false => folder.parent().unwrap_or(folder),
             };
-            match not_ignored(folder, under.clone()).await {
+            match ignored::not_ignored(folder, under.clone()).await {
                 Ok(counted) => changed.extend(counted),
                 Err(why) => {
                     problems.push(format!("which files git ignores cannot be told: {why}"));
@@ -214,59 +248,6 @@ impl Gathered {
         said.extend(problems);
         Some(said.join("; "))
     }
-}
-
-/// Of `paths`, those git does not ignore, asked of git in `folder`: every
-/// one of them where `folder` is in no repository of git's.
-async fn not_ignored(folder: &Path, paths: Vec<PathBuf>) -> Result<Vec<PathBuf>, String> {
-    let git = || {
-        let mut git = tokio::process::Command::new("git");
-        git.arg("-C").arg(folder).stderr(Stdio::piped());
-        git
-    };
-    let inside = git()
-        .args(["rev-parse", "--is-inside-work-tree"])
-        .stdout(Stdio::piped())
-        .output()
-        .await
-        .map_err(|error| format!("git cannot be run: {error}"))?;
-    if !inside.status.success() {
-        return Ok(paths);
-    }
-    let mut asking = git()
-        .args(["check-ignore", "-z", "--stdin"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-        .map_err(|error| format!("git cannot be run: {error}"))?;
-    let mut asked = Vec::new();
-    for path in &paths {
-        asked.extend_from_slice(path.as_os_str().as_encoded_bytes());
-        asked.push(0);
-    }
-    let mut stdin = asking.stdin.take().expect("its standard input is piped");
-    stdin
-        .write_all(&asked)
-        .await
-        .map_err(|error| format!("git cannot be asked: {error}"))?;
-    drop(stdin);
-    let answer = asking
-        .wait_with_output()
-        .await
-        .map_err(|error| format!("git cannot be asked: {error}"))?;
-    // It exits with 1 when it ignores none of them.
-    if !matches!(answer.status.code(), Some(0 | 1)) {
-        return Err(String::from_utf8_lossy(&answer.stderr).trim().to_string());
-    }
-    let ignored: BTreeSet<&[u8]> = answer
-        .stdout
-        .split(|byte| *byte == 0)
-        .filter(|path| !path.is_empty())
-        .collect();
-    Ok(paths
-        .into_iter()
-        .filter(|path| !ignored.contains(path.as_os_str().as_encoded_bytes()))
-        .collect())
 }
 
 /// Runs `planned` again because `because` changed, once it has settled:

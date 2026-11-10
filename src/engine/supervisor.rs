@@ -248,16 +248,19 @@ impl Supervisor {
     /// Watches the files each of `units` that has `watch` names, in place
     /// of what was watched before, running the unit again when they
     /// change; why each that cannot be watched is not.
-    pub fn watch(self: &Arc<Self>, units: &[Arc<PlannedUnit>]) -> Vec<String> {
+    pub async fn watch(self: &Arc<Self>, units: &[Arc<PlannedUnit>]) -> Vec<String> {
         self.stop_watching();
         let watched = units.iter().filter(|planned| {
             (planned.mechanism.as_ref()).is_some_and(|mechanism| !mechanism.watch.is_empty())
         });
         let mut problems = Vec::new();
-        let mut watching = self.watching.lock().expect("the watches are not poisoned");
         for planned in watched {
-            match watching::watch(self, planned) {
-                Ok(task) => watching.push(tokio::spawn(task).abort_handle()),
+            match watching::watch(self, planned).await {
+                Ok(task) => {
+                    let task = tokio::spawn(task).abort_handle();
+                    let mut watching = self.watching.lock().expect("the watches are not poisoned");
+                    watching.push(task);
+                }
                 Err(why) => problems.push(format!("`{}` is not watched: {why}", planned.name)),
             }
         }

@@ -4,7 +4,9 @@
 //! together run it once, and changes that come while it runs run it once
 //! more. While a command runs again, and if it fails, the units that use
 //! what it builds are left as they are; once it is done, each is started
-//! again only if the file it uses changed.
+//! again only if the file it uses changed. On Linux, where the system
+//! watches one folder at a time, a folder git ignores is not watched at
+//! all.
 
 use std::fs;
 use std::path::Path;
@@ -131,7 +133,9 @@ fn changes_while_a_command_runs_again_run_it_once_more_and_it_says_what_changed(
     fs::write(root.join("src/two.txt"), "dos\n").unwrap();
     std::thread::sleep(Duration::from_millis(500));
     fs::write(root.join("src/three.txt"), "tres\n").unwrap();
-    std::thread::sleep(Duration::from_millis(500));
+    // The system tells of both while the build holds, however loaded the
+    // machine is.
+    std::thread::sleep(QUIET);
     fs::write(root.join(".tay/state/go"), "").unwrap();
     said(&root, "second", "| two says dos");
     std::thread::sleep(QUIET);
@@ -147,4 +151,68 @@ fn a_watched_process_is_started_again_when_its_file_changes() {
     fs::write(root.join("src/ticker.txt"), "2\n").unwrap();
     said(&root, "ticker", "| ticks 2");
     assert_ne!(child(&root, "ticker"), first);
+}
+
+/// The folders and files the daemon of the environment at `root` asks the
+/// system to watch, by inode, as the system lists each watch.
+#[cfg(target_os = "linux")]
+fn watched(machine: &Machine, root: &Path) -> std::collections::BTreeSet<u64> {
+    let pid = machine.daemon_pid(root).expect("a daemon answers");
+    let mut inodes = std::collections::BTreeSet::new();
+    for entry in fs::read_dir(format!("/proc/{pid}/fdinfo")).unwrap() {
+        let info = fs::read_to_string(entry.unwrap().path()).unwrap_or_default();
+        let watches = info.lines().filter(|line| line.starts_with("inotify wd:"));
+        for watch in watches {
+            let inode = watch
+                .split_whitespace()
+                .find_map(|word| word.strip_prefix("ino:"))
+                .expect("a watch names its inode");
+            inodes.insert(u64::from_str_radix(inode, 16).unwrap());
+        }
+    }
+    inodes
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn on_linux_a_folder_git_ignores_is_not_watched_and_one_made_later_is() {
+    use std::os::unix::fs::MetadataExt;
+    let machine = Machine::new();
+    let root = machine.stack("watching");
+    repository(&root);
+    fs::create_dir_all(root.join("src/ignored/deep/deeper")).unwrap();
+    fs::create_dir_all(root.join("src/kept/deep")).unwrap();
+    let up = machine.at(&root, "up", &[]);
+    assert_eq!(up.code, 0, "{}{}", up.stdout, up.stderr);
+    let inode = |folder: &str| fs::metadata(root.join(folder)).unwrap().ino();
+    let watched_now = watched(&machine, &root);
+    for folder in ["src", "src/kept", "src/kept/deep"] {
+        assert!(
+            watched_now.contains(&inode(folder)),
+            "`{folder}` is watched"
+        );
+    }
+    for folder in ["src/ignored", "src/ignored/deep", "src/ignored/deep/deeper"] {
+        assert!(
+            !watched_now.contains(&inode(folder)),
+            "`{folder}` is not watched"
+        );
+    }
+    // A folder made later is watched once it is seen, and a file saved in
+    // it runs the build; one made where git ignores is not.
+    fs::create_dir_all(root.join("src/later/deep")).unwrap();
+    fs::create_dir(root.join("src/ignored/later")).unwrap();
+    assert!(
+        eventually(Duration::from_secs(30), || {
+            watched(&machine, &root).contains(&inode("src/later/deep"))
+        }),
+        "`src/later/deep` is watched"
+    );
+    assert!(!watched(&machine, &root).contains(&inode("src/ignored/later")));
+    assert_eq!(runs(&root), 1);
+    fs::write(root.join("src/later/deep/notes.txt"), "noted\n").unwrap();
+    assert!(
+        eventually(Duration::from_secs(30), || runs(&root) == 2),
+        "the build ran again"
+    );
 }
