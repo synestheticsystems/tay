@@ -59,7 +59,7 @@ When a unit fails, `tay up` names it, gives the reason and the last lines it wro
 | `failed` | It cannot become ready without a change. The detail gives the reason, the exit code or signal, and how many attempts were made |
 | `stopped` | It is not running because it was stopped or never asked for |
 
-- The time a unit has to become ready is its own `within`, counted from the start of the attempt. No constant in tay overrides it.
+- The time a unit has to become ready is its own `within`, counted from the moment its own program starts. Preparing, building and pulling come before that and are not counted. No constant in tay overrides it.
 - The daemon keeps checking after a unit is ready, so `unready` and a return to `ready` are both seen.
 - **Restarts.** When a unit that runs exits, its `restart` decides. `attempts` counts attempts in a row that did not reach `ready`; reaching `ready` starts the count again. When they are used up the unit is `failed`.
 - A unit whose need has failed stays `waiting` and is reported as blocked. It is never started against a failed need.
@@ -101,6 +101,7 @@ It keeps two facts about intent on disk: whether the environment is meant to be 
     secrets/              one file per secret, readable by this account only
     files/<folder>/<name> what `file` units write
     units/<unit>/         one folder per unit that runs: its lock, its record, the values it produced
+    attempts.json         what the daemon counts of each unit's attempts
   logs/
     <unit>/               that unit's log files
     tay/                  the daemon's own log
@@ -143,7 +144,7 @@ The order of events closes every gap:
 
 So the lock is held without a gap from before the keeper exists until it ends, and the system releases it if the keeper dies.
 
-- **Stopping** a unit signals the child's whole group, waits, and then kills what is left, so processes the unit started in turn go with it.
+- **Stopping** a unit signals the child's whole group, waits five seconds, and then kills what is left, so processes the unit started in turn go with it. When the child ends by itself, the keeper likewise stops what is left of its group, so that nothing a unit started is ever left running with no one who knows of it.
 - **Secrets** reach the child through its environment, which the keeper inherits from the daemon. They are never arguments.
 - Two limits are known and accepted. A process that puts itself in a session of its own escapes the stop. And if a keeper is killed, a child that prints dies at its next line, while a silent one lives on; the next daemon sees a record with no lock and no ending, and stops the recorded group.
 
@@ -167,7 +168,9 @@ A command killed part-way, or whose daemon was killed during it, is simply not d
 
 ### `process`
 
-`prepare` commands run to completion, in order, before the first start. Then the command runs under its keeper, with only the environment the definition gives it and the names under `inherit`.
+`prepare` commands run to completion, in order, before the first start of each bring-up, and not again before a restart. A `prepare` that fails fails the unit. Then the command runs under its keeper, with only the environment the definition gives it and the names under `inherit`, which are taken from the environment of the command that started the daemon.
+
+A process that ends is not ready, whatever its exit code: with nothing left to restart it, it is `failed`, and the detail says how it ended.
 
 ### Logs
 
@@ -175,7 +178,36 @@ Every line a unit writes while its keeper runs reaches `.tay/logs/<unit>/` with 
 
 ## Containers
 
-*Not built, and not yet written.* What is already settled is in `definition-format.md`: one network per environment, the labels `tay.environment` and `tay.unit` on everything tay creates, and published ports opened only when used from the host. Docker is a container's parent, keeps its exit code, and lists it by label, so a container needs no keeper.
+*Not built.*
+
+Docker is a container's parent: it keeps the exit code, says whether the container was killed for memory, holds its output with the time of each line, and lists it by label. So a container needs no keeper, and everything below is asked of Docker, never remembered.
+
+**What belongs to an environment.** One network, named `tay-<id>`, made when the first container needs it. Every container, volume and network tay creates carries the labels `tay.environment` (the id) and `tay.unit`. A container is named `tay-<id>-<unit>`, and on the network it answers to its unit's name and its `aliases`. Nothing without the environment's label is ever stopped, removed or changed.
+
+**Bringing a container up.**
+
+1. The image is pulled if it is not here, or built if the unit has `build`. Either shows in the unit's detail while it runs, and neither holds up a unit that does not need this one.
+2. The unit's volumes are made if missing, and given to their `owner` when they are made.
+3. The container is created from the unit's settings and started. A published port is given to Docker only if the plan opens it.
+4. Readiness is checked: the image's own health check, or having started, when the unit writes no `ready`; a `command` check runs inside the container; `http` and `tcp` checks are made from the host through the opened port; a `log` check reads what the container wrote.
+
+**A container whose settings have changed is replaced.** When the container that exists was created from other settings than the plan now gives (another image, environment, mount or published port), `tay up` removes it and creates it again. Its volumes stay.
+
+**When a container ends,** tay reads from Docker how: the exit code, and whether it was killed for memory. The unit's `restart` decides what follows, as for a process, and the count of attempts is kept the same way.
+
+**Finding containers again.** A new daemon asks Docker for the containers with the environment's label. One that runs is adopted. One that has ended is reported with how it ended, and its restart policy applies. A unit the plan has but Docker does not is simply not started yet.
+
+**Logs.** The daemon copies each container's output into the unit's log, with Docker's time for each line, from where it last stopped. A daemon that was away loses nothing Docker still has. Before a container is removed, what remains of its output is copied.
+
+**`tay down`** stops and removes the environment's containers and its network, and keeps its volumes: data is kept.
+
+**A command in a container.** With `in`, the command runs inside the named unit's running container, as `user` if given. With `image`, it runs as a container of its own on the environment's network, with `run` in place of the image's entrypoint, and is removed when it ends. Either way its `check` runs the same way first, its secrets reach it through its environment, and the file named by `TAY_VALUES` is fetched from where the command ran.
+
+**The host, seen from a container,** has one name on every system, so a definition never has to know which Docker it runs on. `${host.listen}` is the address a host process must listen on for containers to reach it and other machines not to.
+
+**Units the plan no longer has.** A unit that is running and is not in the plan any more is stopped at the next `tay up`, which says so, and `tay status` shows it until then. This holds for processes as for containers.
+
+**An environment leaves the machine's list** only when no process, container, volume or network of it is left.
 
 ## Not in this document yet
 
