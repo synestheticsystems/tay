@@ -1,4 +1,5 @@
-//! Units made from templates: parameters required, defaulted, or not declared.
+//! Units made from templates: parameters required, defaulted, or not
+//! declared, and of any YAML value.
 
 mod support;
 
@@ -30,8 +31,26 @@ fn a_missing_required_parameter_and_an_undeclared_one_are_errors() {
             "  stack/templates/database.yaml:1:1: the template is here",
             "tay.yaml:6:10: template `broken` needs the parameter `name`, which has no default",
             "  stack/templates/broken.yaml:2:3: the parameter is declared here",
+            // An error in the template's own text, found for each unit made
+            // from it, is reported once, naming each.
+            "stack/templates/bad-setting.yaml:5:11: `colour` is not a field of the settings of a `port` unit; its fields are prefer, fixed",
+            "  tay.yaml:7:12: for unit `first`, made from the template here",
+            "  tay.yaml:8:13: for unit `second`, made from the template here",
             // A template that uses a parameter it does not declare.
             "stack/templates/broken.yaml:6:13: `${params.nmae}` names a parameter this template does not declare",
+            // A mapping cannot be put inside text.
+            "stack/templates/inside-text.yaml:5:27: `${params.env}` is inside text, so its value must be text, a whole number or true or false; this is a mapping",
+            "  tay.yaml:9:12: for unit `third`, made from the template here",
         ]
     );
+}
+
+#[test]
+fn a_parameter_may_be_a_mapping_or_a_list_put_in_place_before_the_unit_is_read() {
+    // The template's unit-wide `env` is a parameter: the mapping given joins
+    // with the way's own `env`, and `command` is a list.
+    let plan = plan_json("template-ok", &[]);
+    let service = unit(&plan, "service");
+    assert_eq!(service["way"], "source");
+    assert_eq!(service["module"], "process");
 }

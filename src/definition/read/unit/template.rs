@@ -1,9 +1,12 @@
 //! Templates: unit shapes with holes, filled by `${params.name}`.
 //!
-//! A template's unit is checked once on its own, so an error in it is
-//! reported once. Each unit made from it is then the template's unit with
-//! the parameters put in place on the parsed structure, read like any other
-//! unit; what goes wrong there depends on the values given.
+//! A template's unit is checked on its own for what does not depend on its
+//! parameters: its fields, and that each `${params.x}` names a parameter it
+//! declares. Each unit made from it is the template's unit with the
+//! parameters put in place on the parsed structure, before anything else is
+//! read from it, since a parameter may be a whole mapping that a way's
+//! setting joins with; it is then read like any other unit. An error in the
+//! template's own text found that way names the unit it was found for.
 
 use std::collections::HashMap;
 
@@ -22,8 +25,8 @@ pub struct Template {
     pub name: NameAt,
     pub params: Vec<Param>,
     pub unit: Node,
-    /// Whether the template's own unit reads without errors. Units made from
-    /// a template that does not are not read, so its errors are not repeated.
+    /// Whether the template's own checks found no errors. Units made from a
+    /// template that has them are not read, so its errors are not repeated.
     pub readable: bool,
 }
 
@@ -43,9 +46,6 @@ pub fn read(name: NameAt, node: &Node, d: &mut Diagnostics) -> Option<Template> 
         .filter_map(|(name, decl)| {
             let decl = Fields::of(decl, "a parameter's declaration", &["default"], d)?;
             let default = decl.get("default").cloned();
-            if let Some(default) = &default {
-                scalar(default, d)?;
-            }
             Some(Param { name, default })
         })
         .collect();
@@ -55,7 +55,6 @@ pub fn read(name: NameAt, node: &Node, d: &mut Diagnostics) -> Option<Template> 
         d.error(key.loc, "a template may not itself use `from`");
     }
     check_params(&body, &params, d);
-    unit::read_fields(name.clone(), &fields, d);
     Some(Template {
         name,
         params,
@@ -72,8 +71,12 @@ fn check_params(node: &Node, params: &[Param], d: &mut Diagnostics) {
             .for_each(|e| check_params(&e.value, params, d)),
         Kind::Seq(items) => items.iter().for_each(|item| check_params(item, params, d)),
         Kind::Scalar(Scalar::Str(s)) => {
-            let Ok(kind) = expr::parse_string(&s.text, node.loc, s.content_column) else {
-                return;
+            let kind = match expr::parse_string(&s.text, node.loc, s.content_column) {
+                Ok(kind) => kind,
+                Err(error) => {
+                    d.push(error);
+                    return;
+                }
             };
             let references = match &kind {
                 ExprKind::Ref(reference) => vec![reference],
@@ -101,22 +104,6 @@ fn check_params(node: &Node, params: &[Param], d: &mut Diagnostics) {
             }
         }
         Kind::Scalar(_) => {}
-    }
-}
-
-fn scalar(node: &Node, d: &mut Diagnostics) -> Option<()> {
-    match &node.kind {
-        Kind::Scalar(Scalar::Str(_) | Scalar::Int(_) | Scalar::Bool(_)) => Some(()),
-        _ => {
-            d.error(
-                node.loc,
-                format!(
-                    "a parameter's value is text, a whole number or true or false; this is {}",
-                    node.describe()
-                ),
-            );
-            None
-        }
     }
 }
 
@@ -175,14 +162,16 @@ pub fn made_from(
     if !template.readable || d.len() != errors_before {
         return unit::unreadable(name);
     }
-    let Some(body) = substitute::substitute(&template.unit, &values, d) else {
-        return unit::unreadable(name);
-    };
+    // What goes wrong in the template's text is found for this unit, and
+    // says so.
     let mut found = Diagnostics::default();
-    let mut made = match Fields::of(&body, "a template's unit", UNIT_FIELDS, &mut found) {
-        Some(body_fields) => unit::read_fields(name.clone(), &body_fields, &mut found),
-        None => unit::unreadable(name.clone()),
-    };
+    let made = substitute::substitute(&template.unit, &values, &mut found).map(|body| {
+        match Fields::of(&body, "a template's unit", UNIT_FIELDS, &mut found) {
+            Some(body_fields) => unit::read_fields(name.clone(), &body_fields, &mut found),
+            None => unit::unreadable(name.clone()),
+        }
+    });
+    let mut made = made.unwrap_or_else(|| unit::unreadable(name.clone()));
     for error in found.into_sorted() {
         let in_template = error.loc.source == template.unit.loc.source;
         d.push(if in_template {
@@ -218,9 +207,7 @@ fn param_values(
         .unwrap_or_default();
     for (param, value) in given {
         if template.params.iter().any(|p| p.name.name == param.name) {
-            if scalar(value, d).is_some() {
-                values.insert(param.name, value.clone());
-            }
+            values.insert(param.name, value.clone());
         } else {
             let declared: Vec<&str> = template
                 .params

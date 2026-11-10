@@ -4,12 +4,13 @@
 use std::collections::HashMap;
 
 use crate::diagnostic::Diagnostics;
-use crate::syntax::expr::{self, ExprKind, Piece, Target};
+use crate::syntax::expr::{self, ExprKind, Piece, Reference, Target};
 use crate::syntax::yaml::{Entry, Kind, Node, Scalar, Str};
 
 /// The template's unit with each `${params.x}` replaced. A string that is the
-/// reference alone becomes the parameter's value, keeping its type; a
-/// reference inside text is replaced inside the text.
+/// reference alone becomes the parameter's value, whatever YAML it is; a
+/// reference inside text is replaced inside the text, and its value must
+/// then be text, a whole number or true or false.
 pub fn substitute(
     node: &Node,
     values: &HashMap<String, Node>,
@@ -48,33 +49,37 @@ fn substitute_text(
     values: &HashMap<String, Node>,
     d: &mut Diagnostics,
 ) -> Option<Node> {
-    let param = |piece: &Piece| match piece {
-        Piece::Ref(reference) => match &reference.target {
-            Target::Param(name) => values.get(name),
-            _ => None,
-        },
-        Piece::Lit(_) => None,
+    let param = |reference: &Reference| match &reference.target {
+        Target::Param(name) => values.get(name),
+        _ => None,
     };
     let pieces = match expr::parse_string(&s.text, node.loc, s.content_column) {
         Ok(ExprKind::Ref(reference)) => {
-            let whole = Piece::Ref(reference);
-            return Some(param(&whole).cloned().unwrap_or_else(|| node.clone()));
+            return Some(param(&reference).cloned().unwrap_or_else(|| node.clone()));
         }
-        Ok(ExprKind::Text(pieces)) if pieces.iter().any(|p| param(p).is_some()) => pieces,
+        Ok(ExprKind::Text(pieces))
+            if pieces
+                .iter()
+                .any(|p| matches!(p, Piece::Ref(r) if param(r).is_some())) =>
+        {
+            pieces
+        }
         _ => return Some(node.clone()),
     };
     let mut filled = Vec::new();
     for piece in &pieces {
-        let Some(value) = param(piece) else {
+        let named = match piece {
+            Piece::Ref(reference) => param(reference).map(|value| (reference, value)),
+            Piece::Lit(_) => None,
+        };
+        let Some((reference, value)) = named else {
             filled.push(piece.clone());
             continue;
         };
         match &value.kind {
             Kind::Scalar(Scalar::Str(v)) => {
-                match expr::parse_string(&v.text, value.loc, v.content_column) {
-                    Ok(ExprKind::Text(inner)) => filled.extend(inner),
-                    Ok(ExprKind::Ref(reference)) => filled.push(Piece::Ref(reference)),
-                    Ok(_) => unreachable!("a string parses as text or a reference"),
+                match expr::parse_pieces(&v.text, value.loc, v.content_column) {
+                    Ok(inner) => filled.extend(inner),
                     Err(error) => {
                         d.push(error);
                         return None;
@@ -83,7 +88,17 @@ fn substitute_text(
             }
             Kind::Scalar(Scalar::Int(n)) => filled.push(Piece::Lit(n.to_string())),
             Kind::Scalar(Scalar::Bool(b)) => filled.push(Piece::Lit(b.to_string())),
-            _ => return None,
+            _ => {
+                d.error(
+                    reference.loc,
+                    format!(
+                        "`{}` is inside text, so its value must be text, a whole number or true or false; this is {}",
+                        reference.written(),
+                        value.describe()
+                    ),
+                );
+                return None;
+            }
         }
     }
     let Some(text) = expr::write_pieces(&filled) else {

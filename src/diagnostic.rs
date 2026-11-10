@@ -83,11 +83,24 @@ impl Diagnostics {
     }
 
     /// The errors in the order of the sources they are in, each once. The same
-    /// error can be found along two paths (a value resolved for two units), and
-    /// a person should see it once.
+    /// error can be found along two paths (a value resolved for two units, a
+    /// template's text read for two units made from it), and a person should
+    /// see it once, with every other place each path involved.
     pub fn into_sorted(mut self) -> Vec<Diagnostic> {
         self.list.sort();
-        self.list.dedup();
-        self.list
+        let mut merged: Vec<Diagnostic> = Vec::new();
+        for diagnostic in self.list {
+            match merged.last_mut() {
+                Some(last) if last.loc == diagnostic.loc && last.message == diagnostic.message => {
+                    for related in diagnostic.related {
+                        if !last.related.contains(&related) {
+                            last.related.push(related);
+                        }
+                    }
+                }
+                _ => merged.push(diagnostic),
+            }
+        }
+        merged
     }
 }

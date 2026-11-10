@@ -121,15 +121,25 @@ pub fn parse_string(
     loc: Loc,
     content_column: Option<u32>,
 ) -> Result<ExprKind, Diagnostic> {
-    let place = |offset: usize| match content_column {
-        Some(column) => Loc { column, ..loc }.shifted(offset),
-        None => loc,
-    };
-    let pieces = split(text, &place)?;
+    let pieces = parse_pieces(text, loc, content_column)?;
     Ok(match pieces.as_slice() {
         [Piece::Ref(reference)] => ExprKind::Ref(reference.clone()),
         _ => ExprKind::Text(pieces),
     })
+}
+
+/// The literal pieces and references of a string that sits at `loc`,
+/// placed as [`parse_string`] places them.
+pub fn parse_pieces(
+    text: &str,
+    loc: Loc,
+    content_column: Option<u32>,
+) -> Result<Vec<Piece>, Diagnostic> {
+    let place = |offset: usize| match content_column {
+        Some(column) => Loc { column, ..loc }.shifted(offset),
+        None => loc,
+    };
+    split(text, &place)
 }
 
 /// Reads the references in the whole text of a file, placing each at its own

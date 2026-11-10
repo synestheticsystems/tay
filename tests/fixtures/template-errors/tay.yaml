@@ -4,4 +4,7 @@ units:
   no-name: { from: database }
   extra: { from: database, params: { name: x, colour: red } }
   odd: { from: broken }
+  first: { from: bad-setting, params: { env: { A: 1 } } }
+  second: { from: bad-setting, params: { env: { B: 2 } } }
+  third: { from: inside-text, params: { env: { C: 3 } } }
 up: []

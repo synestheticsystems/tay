@@ -1,6 +1,8 @@
 format: 1
 stack: template-ok
+run: { default: source }
 units:
   app-db: { from: database, params: { name: app } }
   report-db: { from: database, params: { name: report, owner: reports } }
-  all: { needs: [app-db, report-db] }
+  service: { from: service, params: { env: { MODE: fast }, command: [serve, --fast] } }
+  all: { needs: [app-db, report-db, service] }
