@@ -47,9 +47,9 @@ When a unit fails, `tay up` names it, gives the reason and the last lines it wro
 |---|---|
 | 0 | Done: everything asked for is ready (`up`), or nothing is left running (`down`) |
 | 1 | A unit failed, or something was left that could not be stopped |
-| 2 | The definitions have errors |
+| 2 | The definitions have errors, or what was asked does not fit this stack: a unit that does not exist, a restart of a unit that is made, an argument an action does not declare |
 | 3 | This tay is too old for the definitions |
-| 4 | Refused: another change is running. The message says which, and since when |
+| 4 | Refused as things stand: another change is running (the message says which, and since when), or what was asked needs something that is not up (the message says what) |
 | 5 | The daemon could not be started or reached |
 
 ## A unit's state
@@ -195,7 +195,7 @@ Docker is a container's parent: it keeps the exit code, says whether the contain
 
 **When a container ends,** tay reads from Docker how: the exit code, and whether it was killed for memory. The unit's `restart` decides what follows, as for a process, and the count of attempts is kept the same way.
 
-**Finding containers again.** A new daemon asks Docker for the containers with the environment's label. One that runs is adopted. One that has ended is reported with how it ended, and its restart policy applies. A unit the plan has but Docker does not is simply not started yet.
+**Finding containers again.** A new daemon asks Docker for the containers with the environment's label. One that runs is adopted. One that has ended is reported with how it ended, and its restart policy applies. A command that ran in a container leaves nothing in Docker once it has ended, so the daemon that saw it end keeps a record of how, and a new daemon finds the command from that record. Any other unit the plan has and Docker does not is simply not started yet.
 
 **Logs.** The daemon copies each container's output into the unit's log, with Docker's time for each line, from where it last stopped. A daemon that was away loses nothing Docker still has. Before a container is removed, what remains of its output is copied.
 
@@ -215,18 +215,18 @@ Docker is a container's parent: it keeps the exit code, says whether the contain
 
 Each of these is one change, taken by the daemon in turn like any other.
 
-**`tay restart UNIT...`** stops each unit named and starts it again, with a new first attempt. Units that need it are left running: one that suffers shows it by its own check and follows its own `restart`. A command is run again from its `check`. A unit that is made has nothing to restart, and naming one is an error.
+**`tay restart UNIT...`** stops each unit named and starts it again, with a new first attempt, bringing up what the unit needs as `tay up UNIT` would. Units that need it are left running: one that suffers shows it by its own check and follows its own `restart`. A command is run again from its `check`. A unit that is made, or a group, has nothing to restart, and naming one is an error (exit code 2). On an environment that is down there is nothing to restart either (exit code 4).
 
-**`tay run ACTION [NAME=VALUE...]`** runs a unit that has `action: true`, with its arguments, after bringing up what it needs. It prints what the action prints and exits as the action did. An argument the action does not declare, or a missing one that has no default, is an error before anything runs. An action's values are given to whoever asked and are not kept.
+**`tay run ACTION [NAME=VALUE...]`** runs a unit that has `action: true`, with its arguments, after bringing up what it needs. It prints what the action prints and exits as the action did. An argument the action does not declare, or a missing one that has no default, is an error before anything runs. An action's values are given to whoever asked and are not kept: `tay run` prints each value the action produced, by name, after the action's own output. A value declared secret is the exception: tay never prints one, so an action that hands a person a credential writes it to a file of its own and gives the file's path.
 
-**`tay set PLACE=VALUE...`** and **`tay unset PLACE...`** change what the environment remembers being asked for, in the places `--set` takes, and nothing else: no unit is touched until the next `tay up`. `tay up --set` is the same thing followed by `up`. `tay unset` forgets one place, so the profile's or the stack's value holds again. `tay set` with nothing after it lists what is remembered. A secret setting's value is never printed.
+**`tay set PLACE=VALUE...`** and **`tay unset PLACE...`** change what the environment remembers being asked for, in the places `--set` takes, and nothing else: no unit is touched until the next `tay up`. `tay up --set` is the same thing followed by `up`. `tay unset` forgets one place, so the profile's or the stack's value holds again; a place with nothing remembered is an error. `tay set` plans the stack with the new values before remembering them, and remembers nothing if it no longer plans. `tay set` with nothing after it lists what is remembered: the profile, the units and each place. A secret setting's value is never printed. Neither command starts a daemon: with none running, the change is made under the daemon's own lock.
 
 **`tay wipe UNIT... --yes`** removes what a unit keeps, so that it starts from nothing:
 
 | The unit is | What is removed |
 |---|---|
 | A container | Its volumes |
-| A command | What its `undo` undoes, and the values it produced. The units it needs must be up, or the wipe is refused and says which |
+| A command | What its `undo` undoes, and the values it produced. The units it needs must be up, or the wipe is refused and says which (exit code 4) |
 | A secret, a file, a port | The stored secret, the written file, the kept number |
 | A process | Nothing beyond its record |
 

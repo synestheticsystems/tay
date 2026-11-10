@@ -48,7 +48,7 @@ A folder that `tay.yaml` names and that does not exist is an error. The default 
 
 ### Names
 
-A unit, template, profile, way, volume or folder name is lower-case letters, digits and hyphens, starts with a letter, and is at most 40 characters. Unit names are unique across the whole stack, groups included; a duplicate is an error that names both places. The names `settings`, `environment`, `host`, `net`, `self`, `params` and `args` are not available to units, because references use them.
+A unit, template, profile, way, volume or folder name is lower-case letters, digits and hyphens, starts with a letter, and is at most 40 characters. Unit names are unique across the whole stack, groups included; a duplicate is an error that names both places. The names `settings`, `environment`, `host`, `net`, `self`, `params` and `args` are not available to units, because references use them, and neither is `tay`, which names tay's own log.
 
 The name of a value (in `gives`, `produces`, `outputs`, `params` or `args`) is lower-case letters, digits and underscores, and starts with a letter. `outputs` is not available as one.
 
