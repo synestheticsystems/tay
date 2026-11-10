@@ -1,9 +1,8 @@
 //! Generating a secret once and keeping it, in a file of its own in the
 //! state folder that only this account can read.
 
-use std::fs::{self, DirBuilder, Permissions};
+use std::fs;
 use std::io;
-use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use base64ct::{Base64, Base64UrlUnpadded, Encoding};
@@ -13,12 +12,9 @@ use rsa::{RsaPrivateKey, RsaPublicKey};
 use serde::{Deserialize, Serialize};
 
 use super::{PRIVATE, PUBLIC, SecretSettings, VALUE};
-use crate::disk::{DiskError, write_whole};
+use crate::disk::{DiskError, write_secret};
 use crate::module::operations::{self, Exists, Failure, Made, UnitPlace, Values, WrongType};
 use crate::value::Filled;
-
-/// The folder in the state folder that secrets are kept in, one file each.
-const SECRETS: &str = "secrets";
 
 /// How long a password is, in characters, and how many bytes `bytes`
 /// makes, when `length` does not say.
@@ -252,12 +248,7 @@ fn not_one_of(setting: &'static str, found: &str, wanted: &[&str]) -> SecretErro
 
 /// The file the unit's secret is kept in.
 pub(super) fn path(place: &UnitPlace) -> PathBuf {
-    place
-        .environment
-        .layout
-        .state()
-        .join(SECRETS)
-        .join(&place.unit)
+    place.environment.layout.secrets().join(&place.unit)
 }
 
 /// The secret stored at `path`; `None` when none is. One stored in a form
@@ -274,20 +265,10 @@ fn read(path: &Path) -> Result<Option<Stored>, SecretError> {
         .map_err(|_| SecretError::Unread(path.to_path_buf()))
 }
 
-/// Keeps the secret where only this account can read it: the folder is
-/// closed to others, and the file is written for its owner alone.
+/// Keeps the secret where only this account can read it.
 fn keep(path: &Path, stored: &Stored) -> Result<(), SecretError> {
-    let folder = path
-        .parent()
-        .expect("a secret's file is in the secrets folder");
-    DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(folder)
-        .and_then(|()| fs::set_permissions(folder, Permissions::from_mode(0o700)))
-        .map_err(DiskError::io(folder, "made"))?;
     let json = serde_json::to_string(stored).expect("a stored secret serializes");
-    Ok(write_whole(path, json.as_bytes(), 0o600)?)
+    Ok(write_secret(path, json.as_bytes())?)
 }
 
 fn generate(asked: Asked) -> Result<Generated, SecretError> {

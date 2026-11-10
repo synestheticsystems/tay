@@ -66,6 +66,12 @@ impl Layout {
         std::fs::create_dir_all(&state).map_err(DiskError::io(&state, "made"))
     }
 
+    /// `state/secrets/`: what the environment keeps that is secret, a file
+    /// for each unit that keeps any, readable by this account only.
+    pub fn secrets(&self) -> PathBuf {
+        self.state().join("secrets")
+    }
+
     /// `state/intent`: whether the environment is meant to be up.
     pub fn intent(&self) -> PathBuf {
         self.state().join("intent")

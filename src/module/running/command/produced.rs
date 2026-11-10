@@ -6,14 +6,13 @@
 //! whoever runs it. Nothing tay says of them quotes them.
 
 use std::collections::BTreeMap;
-use std::fs::{self, DirBuilder, Permissions};
+use std::fs;
 use std::io;
-use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value as Json};
 
-use crate::disk::{DiskError, remove_if_there, write_whole};
+use crate::disk::{DiskError, remove_if_there, write_secret, write_whole};
 use crate::module::operations::{Failure, UnitPlace, Values};
 use crate::syntax::names::NameAt;
 use crate::value::{Exact, Filled};
@@ -23,10 +22,6 @@ const WRITTEN: &str = "produced.json";
 
 /// The values kept that are not secret, in the unit's own folder.
 const KEPT: &str = "values.json";
-
-/// The folder in the state folder that secrets are kept in, one file for
-/// each unit that has any.
-const SECRETS: &str = "secrets";
 
 #[derive(Debug, thiserror::Error)]
 enum ProducedError {
@@ -172,12 +167,7 @@ fn kept_path(place: &UnitPlace) -> PathBuf {
 }
 
 fn secrets(place: &UnitPlace) -> PathBuf {
-    place
-        .environment
-        .layout
-        .state()
-        .join(SECRETS)
-        .join(&place.unit)
+    place.environment.layout.secrets().join(&place.unit)
 }
 
 fn keep(
@@ -200,16 +190,7 @@ fn keep(
             Err(error) => Err(DiskError::io(path, "removed")(error).into()),
         };
     }
-    let folder = path
-        .parent()
-        .expect("a secret's file is in the secrets folder");
-    DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(folder)
-        .and_then(|()| fs::set_permissions(folder, Permissions::from_mode(0o700)))
-        .map_err(DiskError::io(folder, "made"))?;
-    Ok(write_whole(&path, json(secret).as_bytes(), 0o600)?)
+    Ok(write_secret(&path, json(secret).as_bytes())?)
 }
 
 fn json(values: &Map<String, Json>) -> String {

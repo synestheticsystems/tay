@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 pub use environment::{Asked, Count, Counts, Environment, Id, Identity, Intent, Layout};
 pub use lock::Lock;
 pub use machine::{List, Listed, Machine, shared_folder, shared_folders, socket_fits};
-pub use whole::write_whole;
+pub use whole::{write_secret, write_whole};
 
 /// What went wrong with something tay keeps on disk.
 #[derive(Debug, thiserror::Error)]

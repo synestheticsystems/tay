@@ -1,10 +1,10 @@
 //! Writing a file whole: into a new file beside it, then moved into place,
 //! so that whoever reads it sees the old file or the new one and never half
-//! of either.
+//! of either; and a secret so, for this account alone.
 
-use std::fs::{self, OpenOptions, Permissions};
+use std::fs::{self, DirBuilder, OpenOptions, Permissions};
 use std::io::Write;
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -46,6 +46,24 @@ pub fn write_whole(path: &Path, bytes: &[u8], mode: u32) -> Result<(), DiskError
         let _ = fs::remove_file(&new);
     }
     written.map_err(DiskError::io(path, "written"))
+}
+
+/// Writes `bytes` to `path`, a file in a folder of secrets, for this
+/// account alone: the folder is made if it is not there and closed to
+/// others, and the file is written whole for its owner alone.
+pub fn write_secret(path: &Path, bytes: &[u8]) -> Result<(), DiskError> {
+    let Some(folder) = path.parent() else {
+        return Err(DiskError::io(path, "written")(std::io::Error::other(
+            "it is not a file's path",
+        )));
+    };
+    DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(folder)
+        .and_then(|()| fs::set_permissions(folder, Permissions::from_mode(0o700)))
+        .map_err(DiskError::io(folder, "made"))?;
+    write_whole(path, bytes, 0o600)
 }
 
 #[cfg(test)]
