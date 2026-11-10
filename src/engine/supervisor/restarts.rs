@@ -80,6 +80,10 @@ impl Tending {
             }
             (None, None) => {
                 self.earlier = Some(ended);
+                // It has ended, and is said so at once, though the next
+                // attempt waits for its needs and a pause.
+                let detail = self.detail(attempt + 1, "to start");
+                self.record(State::Starting, detail, None);
                 true
             }
         }

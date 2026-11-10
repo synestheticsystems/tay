@@ -168,7 +168,7 @@ impl Tending {
 
     /// What a person is told of attempt `attempt` doing `doing`, with how
     /// the one before it ended.
-    fn detail(&self, attempt: u32, doing: &str) -> String {
+    pub(super) fn detail(&self, attempt: u32, doing: &str) -> String {
         let mut detail = format!("attempt {attempt}, {doing}");
         for more in [&self.earlier, &self.unkept].into_iter().flatten() {
             detail.push_str("; ");
