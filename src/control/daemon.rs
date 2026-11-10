@@ -27,7 +27,7 @@ use tokio::net::UnixListener;
 use tokio::sync::watch;
 
 use crate::clock;
-use crate::control::protocol::{self, Event, UpRequest};
+use crate::control::protocol::{self, Event, Refused, UpRequest};
 use crate::definition::read::THIS_TAY;
 use crate::diagnostic::Diagnostics;
 use crate::diagnostic::source::Sources;
@@ -37,7 +37,7 @@ use crate::module::Occasion;
 use crate::plan::{self, Plan, PlannedUnit};
 use crate::print;
 
-use change::Change;
+use change::{Change, NotBegun};
 
 /// What the daemon holds while it runs.
 pub struct Daemon {
@@ -276,6 +276,20 @@ fn cannot_start(why: CannotStart) -> bool {
 }
 
 impl Daemon {
+    /// Refuses a change that brings up units unless the environment is
+    /// meant to be up, so that no unit is started against its intent.
+    fn meant_to_be_up(&self) -> Result<(), NotBegun> {
+        match Intent::read(&self.environment.layout) {
+            Ok(Intent::Up) => Ok(()),
+            Ok(Intent::Down) => Err(NotBegun::Refused(Refused::environment_down())),
+            Err(error) => Err(NotBegun::Refused(Refused::NotUp {
+                problem: format!(
+                    "whether the environment is meant to be up cannot be told: {error}"
+                ),
+            })),
+        }
+    }
+
     /// Asks the daemon to exit, once the answers under way have finished.
     /// The stack is left as it is, and a change under way stops.
     pub fn exit(&self, why: &str) {

@@ -37,12 +37,13 @@ pub struct Client {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
-    /// Another change is under way.
-    #[error("another change is running: `{}`, since {}", .0.change, crate::clock::utc(.0.since))]
-    Refused(Refused),
-    /// The change asked for cannot be made, as the daemon says.
+    /// The change was refused as things stand: another is under way, or
+    /// it needs something that is not up.
     #[error("{0}")]
-    Cannot(String),
+    Refused(Refused),
+    /// What was asked does not fit the stack, as the daemon says.
+    #[error("{0}")]
+    DoesNotFit(String),
     #[error("the daemon cannot be started: {0}")]
     NotStarted(#[from] NotStarted),
     #[error("the daemon cannot be reached: {0}")]
@@ -285,7 +286,7 @@ impl Client {
             return Err(match status {
                 StatusCode::CONFLICT => ClientError::Refused(parse(StatusCode::OK, &body)?),
                 StatusCode::UNPROCESSABLE_ENTITY => {
-                    ClientError::Cannot(parse::<Problem>(StatusCode::OK, &body)?.problem)
+                    ClientError::DoesNotFit(parse::<Problem>(StatusCode::OK, &body)?.problem)
                 }
                 _ => parse::<serde_json::Value>(status, &body)
                     .err()

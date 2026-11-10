@@ -1,7 +1,8 @@
 //! `tay restart UNIT...`: each unit named is stopped and started again with
 //! a new first attempt, what it needs brought up with it; units that need
-//! it are left running; a command is run again from its check; and a unit
-//! that runs nothing has nothing to restart.
+//! it are left running; a command is run again from its check; a unit that
+//! runs nothing has nothing to restart, and neither has an environment that
+//! is down.
 
 use std::fs;
 
@@ -80,18 +81,17 @@ fn restart_runs_a_command_again_from_its_check() {
     assert_eq!(fs::read_to_string(&done).unwrap(), "run\n");
 }
 
+/// What a restart on an environment that is down says, as one refused as
+/// things stand.
+const DOWN: &str = "tay restart: the environment is down: `tay up` brings it up\n";
+
 #[test]
-fn restart_of_a_unit_that_runs_nothing_or_is_not_planned_or_of_an_environment_down_is_an_error() {
+fn restart_of_a_unit_that_runs_nothing_or_is_not_planned_does_not_fit_and_of_an_environment_down_is_refused()
+ {
     let machine = Machine::new();
     let root = machine.stack("services");
     let never = machine.at(&root, "restart", &["web"]);
-    assert_eq!(
-        (never.code, never.stderr.as_str()),
-        (
-            2,
-            "tay restart: this environment has never been brought up: `tay up` brings it up\n"
-        )
-    );
+    assert_eq!((never.code, never.stderr.as_str()), (4, DOWN));
     assert_eq!(machine.at(&root, "up", &["ticking"]).code, 0);
     let made = machine.at(&root, "restart", &["ticks-port"]);
     assert_eq!(
@@ -112,14 +112,10 @@ fn restart_of_a_unit_that_runs_nothing_or_is_not_planned_or_of_an_environment_do
     let ticking = child(&root, "ticking");
     assert_eq!(machine.at(&root, "down", &[]).code, 0);
     let down = machine.at(&root, "restart", &["ticking"]);
-    assert_eq!(
-        (down.code, down.stderr.as_str()),
-        (
-            2,
-            "tay restart: the environment is down: `tay up` brings it up\n"
-        )
-    );
+    assert_eq!((down.code, down.stderr.as_str()), (4, DOWN));
     assert!(!crate::harness::alive(ticking));
+    // No daemon is started only to refuse it.
+    assert!(machine.daemon(&root).is_none());
 }
 
 #[test]

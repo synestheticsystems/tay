@@ -10,7 +10,7 @@ use hyper::body::{Bytes, Frame};
 use tokio::sync::watch;
 
 use crate::clock;
-use crate::control::protocol::{Event, Restart, UpRequest};
+use crate::control::protocol::{Event, Refused, Restart, UpRequest};
 
 /// What a change does. It has no `Debug`, since a `--set` it carries may
 /// hold a secret setting's value.
@@ -19,6 +19,15 @@ pub enum Kind {
     Up(UpRequest),
     Down,
     Restart(Restart),
+}
+
+/// Why a change is not begun, though no other change is under way.
+pub enum NotBegun {
+    /// What was asked does not fit the stack, as said.
+    DoesNotFit(String),
+    /// It is refused as things stand: what was asked needs something that
+    /// is not up.
+    Refused(Refused),
 }
 
 pub struct Change {

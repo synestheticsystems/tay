@@ -17,7 +17,7 @@ use hyper::{Method, Request, Response, StatusCode};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use super::change::{Change, Kind};
+use super::change::{Change, Kind, NotBegun};
 use super::down::Down;
 use super::{Daemon, log};
 use crate::clock;
@@ -134,12 +134,11 @@ fn up(daemon: &Arc<Daemon>, asked: UpRequest) -> Response<Body> {
 }
 
 /// Begins the change `kind`, which `make` makes, unless another change is
-/// under way; `make` says why it cannot be made, when it cannot, and the
-/// change then never begins.
+/// under way; `make` says why it is not begun, when it is not.
 fn begin<F>(
     daemon: &Arc<Daemon>,
     kind: Kind,
-    make: impl FnOnce(Arc<Change>) -> Result<F, String>,
+    make: impl FnOnce(Arc<Change>) -> Result<F, NotBegun>,
 ) -> Response<Body>
 where
     F: Future<Output = ()> + Send + 'static,
@@ -154,7 +153,10 @@ where
     let change = Change::new(kind);
     let made = match make(Arc::clone(&change)) {
         Ok(made) => made,
-        Err(problem) => return json(StatusCode::UNPROCESSABLE_ENTITY, &Problem { problem }),
+        Err(NotBegun::DoesNotFit(problem)) => {
+            return json(StatusCode::UNPROCESSABLE_ENTITY, &Problem { problem });
+        }
+        Err(NotBegun::Refused(refused)) => return json(StatusCode::CONFLICT, &refused),
     };
     *under_way = Some(Arc::clone(&change));
     drop(under_way);
@@ -249,7 +251,7 @@ async fn status(daemon: &Arc<Daemon>) -> Response<Body> {
 fn refused(change: &Change) -> Response<Body> {
     json(
         StatusCode::CONFLICT,
-        &Refused {
+        &Refused::AnotherChange {
             change: change.describe(),
             since: change.since,
         },

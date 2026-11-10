@@ -5,10 +5,9 @@
 
 use std::sync::Arc;
 
-use super::change::Change;
+use super::change::{Change, NotBegun};
 use super::{Daemon, log};
 use crate::control::protocol::{Event, Restart};
-use crate::disk::Intent;
 use crate::engine::{State, UnitState, runs};
 use crate::plan::PlannedUnit;
 
@@ -20,30 +19,30 @@ pub struct Restarting {
 }
 
 impl Daemon {
-    /// What `restart` acts on; why it cannot be made, when it cannot: the
-    /// environment is not meant to be up, or a unit named is not one that
-    /// runs in the plan the daemon holds.
-    pub fn restarting(&self, restart: &Restart) -> Result<Restarting, String> {
-        let intent = Intent::read(&self.environment.layout).map_err(|error| error.to_string())?;
-        if intent != Intent::Up {
-            return Err("the environment is down: `tay up` brings it up".to_string());
-        }
+    /// What `restart` acts on; why it is not begun, when it is not: a unit
+    /// named is not one that runs in the plan the daemon holds, or the
+    /// environment is not meant to be up.
+    pub fn restarting(&self, restart: &Restart) -> Result<Restarting, NotBegun> {
+        let does_not_fit = NotBegun::DoesNotFit;
         if restart.units.is_empty() {
-            return Err("name each unit to restart".to_string());
+            return Err(does_not_fit("name each unit to restart".to_string()));
         }
         let units = self.supervisor.snapshot();
         let mut named = Vec::new();
         for unit in &restart.units {
-            let known = units
-                .get(unit)
-                .ok_or_else(|| format!("there is no unit `{unit}` in this environment's plan"))?;
+            let known = units.get(unit).ok_or_else(|| {
+                does_not_fit(format!(
+                    "there is no unit `{unit}` in this environment's plan"
+                ))
+            })?;
             if runs(&known.planned).is_none() {
-                return Err(format!(
+                return Err(does_not_fit(format!(
                     "`{unit}` runs nothing, so it has nothing to restart: only a process, a container or a command does"
-                ));
+                )));
             }
             named.push(Arc::clone(&known.planned));
         }
+        self.meant_to_be_up()?;
         Ok(Restarting {
             named,
             with_needs: units.with_needs(&restart.units),

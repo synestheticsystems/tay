@@ -2,6 +2,7 @@
 //! with JSON bodies over the daemon's Unix socket, under `/v1/`. A change
 //! answers with its events as they happen, one JSON object to a line.
 
+use std::fmt;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -158,12 +159,38 @@ impl Event {
     }
 }
 
-/// Why a change was refused: another is running, since a time in seconds
-/// since 1970. It is the body of a `409 Conflict`.
+/// Why a change was refused as things stand, so that the same request may
+/// be made later: the body of a `409 Conflict`. A request that does not fit
+/// the stack is answered `422 Unprocessable Entity` with a [`Problem`].
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Refused {
-    pub change: String,
-    pub since: u64,
+#[serde(tag = "refused", rename_all = "snake_case")]
+pub enum Refused {
+    /// Another change is running, since a time in seconds since 1970.
+    AnotherChange { change: String, since: u64 },
+    /// What was asked needs something that is not up, as said.
+    NotUp { problem: String },
+}
+
+impl Refused {
+    /// A change that brings up units on an environment that is down.
+    pub fn environment_down() -> Refused {
+        Refused::NotUp {
+            problem: "the environment is down: `tay up` brings it up".to_string(),
+        }
+    }
+}
+
+impl fmt::Display for Refused {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Refused::AnotherChange { change, since } => write!(
+                f,
+                "another change is running: `{change}`, since {}",
+                crate::clock::utc(*since)
+            ),
+            Refused::NotUp { problem } => f.write_str(problem),
+        }
+    }
 }
 
 /// Each unit's state, in the order units start in.

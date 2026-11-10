@@ -1,21 +1,22 @@
 //! `tay restart UNIT...`: stops each unit named and starts it again, with a
 //! new first attempt, bringing up what it needs as `tay up` would; units
 //! that need it are left as they run. The daemon makes it, from the plan it
-//! holds, and is started if none runs; it prints each change of state, and
-//! returns when the units named are ready or one can no longer become
-//! ready.
+//! holds, and is started if none runs and the environment is meant to be
+//! up; on one that is down there is nothing to restart. It prints each
+//! change of state, and returns when the units named are ready or one can
+//! no longer become ready.
 
 use crate::cli::Exit;
 use crate::cli::args::{Args, Takes, Words};
 use crate::cli::output::change::Printer;
 use crate::cli::stack;
-use crate::control::client::Client;
-use crate::control::protocol::Restart;
+use crate::control::client::ClientError;
+use crate::control::protocol::{Refused, Restart};
 use crate::disk::{Environment, Identity, Layout};
 use crate::syntax::names;
 
 use super::plan::no_stack;
-use super::{block_on, client_problem, disk_problem, machine, problem};
+use super::{block_on, client_problem, daemon_for_up, disk_problem, machine, problem};
 
 pub const TAKES: Takes = Takes {
     command: "tay restart",
@@ -45,19 +46,16 @@ pub fn run(args: Args) -> Exit {
     let environment = match Environment::identify(&Layout::of(&root), &machine) {
         Ok(Identity::Own(environment)) => environment,
         Ok(Identity::New | Identity::CopyOf { .. }) => {
-            return problem(
-                COMMAND,
-                Exit::Errors,
-                "this environment has never been brought up: `tay up` brings it up",
-            );
+            let refused = ClientError::Refused(Refused::environment_down());
+            return client_problem(COMMAND, &refused);
         }
         Err(error) => return disk_problem(COMMAND, &error),
     };
     let restart = Restart { units: args.words };
     let ended = block_on(COMMAND, async {
-        let client = match Client::ensure(&environment).await {
+        let client = match daemon_for_up(COMMAND, &environment).await {
             Ok(client) => client,
-            Err(error) => return client_problem(COMMAND, &error),
+            Err(exit) => return exit,
         };
         let mut printer = Printer::new(COMMAND, args.json);
         if let Err(error) = client

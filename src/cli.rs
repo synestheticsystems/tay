@@ -28,11 +28,13 @@ pub enum Exit {
     Done = 0,
     /// A unit failed, or something was left that could not be stopped.
     Failed = 1,
-    /// The definitions, or the command line, have errors.
+    /// The definitions have errors, or what was asked does not fit the
+    /// stack.
     Errors = 2,
     /// This tay is too old for the definitions.
     TooOld = 3,
-    /// Refused: another change is running.
+    /// Refused as things stand: another change is running, or what was
+    /// asked needs something that is not up.
     Refused = 4,
     /// The daemon could not be started or reached.
     Unreachable = 5,
@@ -95,7 +97,7 @@ marks with * the one it is run in.
 tay restart stops each unit named and starts it again, with a new first
 attempt, bringing up what it needs as tay up would, and leaving the units that
 need it as they run; a command is run again from its check. A unit that is
-made has nothing to restart.
+made has nothing to restart, and neither has an environment that is down.
 
 tay set changes what the environment remembers being asked for, in the places
 --set takes, and touches no unit until the next tay up: tay up --set is the
@@ -123,9 +125,11 @@ Options:
 
 Exit codes: 0 done: the plan is sound, everything asked for is ready, or
 nothing is left running; 1 a unit failed, or something was left that could
-not be stopped; 2 the definitions or the command line have errors; 3 this tay
-is too old for the definitions; 4 refused: another change is running; 5 the
-daemon could not be started or reached.
+not be stopped; 2 the definitions or the command line have errors, or what
+was asked does not fit the stack; 3 this tay is too old for the definitions;
+4 refused as things stand: another change is running, or what was asked
+needs something that is not up; 5 the daemon could not be started or
+reached.
 ";
 
 /// What `tay daemon` takes: the stack's root, which a command gives it.

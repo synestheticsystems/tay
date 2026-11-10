@@ -13,8 +13,9 @@ pub mod up;
 use std::future::Future;
 
 use crate::cli::Exit;
-use crate::control::client::ClientError;
-use crate::disk::{DiskError, Id, List, Machine};
+use crate::control::client::{Client, ClientError};
+use crate::control::protocol::Refused;
+use crate::disk::{DiskError, Environment, Id, Intent, List, Machine};
 use crate::module;
 use crate::print::err;
 
@@ -56,6 +57,30 @@ async fn forget_what_is_gone(machine: &Machine) -> Result<Vec<(Id, String)>, Dis
     Ok(untold)
 }
 
+/// The daemon of `environment`, for a change that brings units up: the one
+/// that answers, or one started when the environment is meant to be up.
+/// With none running and the environment down, the change is refused as
+/// the daemon would refuse it, and no daemon is started for it.
+async fn daemon_for_up(command: &str, environment: &Environment) -> Result<Client, Exit> {
+    let none = match Client::find(environment).await {
+        Ok(found) => found.is_none(),
+        Err(error) => return Err(client_problem(command, &error)),
+    };
+    if none {
+        match Intent::read(&environment.layout) {
+            Ok(Intent::Up) => {}
+            Ok(Intent::Down) => {
+                let refused = ClientError::Refused(Refused::environment_down());
+                return Err(client_problem(command, &refused));
+            }
+            Err(error) => return Err(disk_problem(command, &error)),
+        }
+    }
+    Client::ensure(environment)
+        .await
+        .map_err(|error| client_problem(command, &error))
+}
+
 /// Says why `command` ends as `exit` says, on standard error.
 fn problem(command: &str, exit: Exit, message: &str) -> Exit {
     err(&format!("{command}: {message}\n"));
@@ -67,12 +92,13 @@ fn disk_problem(command: &str, error: &DiskError) -> Exit {
     problem(command, Exit::Unreachable, &error.to_string())
 }
 
-/// The daemon could not do what was asked: another change is under way,
-/// or it could not be started or reached.
+/// The daemon could not do what was asked: it was refused as things
+/// stand, it does not fit the stack, or the daemon could not be started or
+/// reached.
 fn client_problem(command: &str, error: &ClientError) -> Exit {
     let exit = match error {
         ClientError::Refused(_) => Exit::Refused,
-        ClientError::Cannot(_) => Exit::Errors,
+        ClientError::DoesNotFit(_) => Exit::Errors,
         _ => Exit::Unreachable,
     };
     problem(command, exit, &error.to_string())
