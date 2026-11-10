@@ -16,7 +16,9 @@ use hyper::{Method, StatusCode};
 use rustix::io::Errno;
 use serde::de::DeserializeOwned;
 
-use crate::control::protocol::{self, Event, Problem, Refused, Remember, Status, UpRequest};
+use crate::control::protocol::{
+    self, Event, Problem, Refused, Remember, Restart, Status, UpRequest,
+};
 use crate::definition::read::{THIS_TAY, parse_version};
 use crate::disk::{DiskError, Environment, Lock, socket_fits};
 
@@ -38,6 +40,9 @@ pub enum ClientError {
     /// Another change is under way.
     #[error("another change is running: `{}`, since {}", .0.change, crate::clock::utc(.0.since))]
     Refused(Refused),
+    /// The change asked for cannot be made, as the daemon says.
+    #[error("{0}")]
+    Cannot(String),
     #[error("the daemon cannot be started: {0}")]
     NotStarted(#[from] NotStarted),
     #[error("the daemon cannot be reached: {0}")]
@@ -215,6 +220,17 @@ impl Client {
         self.change(protocol::UP, body, event).await
     }
 
+    /// Stops the units `restart` names and starts them again, giving each
+    /// event to `event` as the daemon says it.
+    pub async fn restart(
+        &self,
+        restart: &Restart,
+        event: &mut dyn FnMut(Event),
+    ) -> Result<(), ClientError> {
+        let body = serde_json::to_vec(restart).expect("a request serializes");
+        self.change(protocol::RESTART, body, event).await
+    }
+
     /// Takes the environment down, giving each event to `event`, and waits
     /// for the daemon to exit.
     pub async fn down(&self, event: &mut dyn FnMut(Event)) -> Result<(), ClientError> {
@@ -268,6 +284,9 @@ impl Client {
                 .to_bytes();
             return Err(match status {
                 StatusCode::CONFLICT => ClientError::Refused(parse(StatusCode::OK, &body)?),
+                StatusCode::UNPROCESSABLE_ENTITY => {
+                    ClientError::Cannot(parse::<Problem>(StatusCode::OK, &body)?.problem)
+                }
                 _ => parse::<serde_json::Value>(status, &body)
                     .err()
                     .unwrap_or_else(|| ClientError::Garbled(status.to_string())),

@@ -104,16 +104,28 @@ impl Daemon {
                 });
             }
         }
+        self.settle(&change, &units, &plan.up).await;
+    }
+
+    /// Brings up `units`, in their order, until each has settled, telling
+    /// `change`'s followers each change of state and, once it is decided,
+    /// whether everything in `asked` is ready; then the change is over.
+    pub(super) async fn settle(
+        &self,
+        change: &Arc<Change>,
+        units: &[Arc<PlannedUnit>],
+        asked: &[String],
+    ) {
         let mut decided = |decision: Decision| {
             log(&format!("{}: {}", change.describe(), words(&decision)));
-            change.say(Event::Up(decision));
+            change.say(Event::Decided(decision));
             change.close();
         };
         let mut noticed = |notice: String| change.say(Event::Notice { notice });
         let decided = engine::bring_up(
             &self.supervisor,
-            &units,
-            &plan.up,
+            units,
+            asked,
             &mut decided,
             &mut noticed,
             change.cancelled(),
@@ -128,16 +140,16 @@ impl Daemon {
                 // Every unit settles or is cancelled, so this is a fault in
                 // tay, which is said rather than left to hang the change.
                 None => {
-                    self.fail(&change, "tay ended the change before it was decided");
+                    self.fail(change, "tay ended the change before it was decided");
                     return;
                 }
             }
         }
-        self.finish(&change);
+        self.finish(change);
     }
 
     /// A change that could not be made: its followers are told why.
-    fn fail(&self, change: &Arc<Change>, reason: &str) {
+    pub(super) fn fail(&self, change: &Arc<Change>, reason: &str) {
         log(&format!("{}: {reason}", change.describe()));
         change.say(Event::Problem {
             problem: reason.to_string(),

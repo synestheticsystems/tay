@@ -2,6 +2,7 @@
 //! planned, its state, and the values it gives once it is made; and each
 //! that runs and that the plan does not have, until it is stopped.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::SystemTime;
 
@@ -170,6 +171,30 @@ impl Units {
             Some(known) => Some(known.since),
             None => self.unplanned(unit).map(|unplanned| unplanned.since),
         }
+    }
+
+    /// The units `named` and every unit they need in turn, or wait for
+    /// with an `after` that comes up, in the order units start in: what
+    /// bringing up `named` brings up.
+    pub fn with_needs(&self, named: &[String]) -> Vec<Arc<PlannedUnit>> {
+        let mut wanted: HashSet<&str> = named.iter().map(String::as_str).collect();
+        // A unit starts after what it needs, so going from the last finds
+        // each user before what it needs.
+        for known in self.known.iter().rev() {
+            let planned = &known.planned;
+            if wanted.contains(planned.name.as_str()) {
+                let needs = planned.needs.iter().map(|need| need.unit.as_str());
+                let after = (planned.after.iter())
+                    .filter(|after| after.comes_up)
+                    .map(|after| after.unit.as_str());
+                wanted.extend(needs.chain(after));
+            }
+        }
+        self.known
+            .iter()
+            .filter(|known| wanted.contains(known.planned.name.as_str()))
+            .map(|known| Arc::clone(&known.planned))
+            .collect()
     }
 
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = &Known> {

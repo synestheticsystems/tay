@@ -21,7 +21,7 @@ Four rules run through all of it.
 | `tay status [UNIT]` | Each unit's state, from a check | yes |
 | `tay logs [UNIT...] [--since 10m] [--follow]` | What the units wrote, with the time of each line. With several units, or none, each line also names its unit | yes |
 | `tay ls` | The environments on this machine | yes |
-| `tay restart UNIT...` | Stops the units and starts them again | no |
+| `tay restart UNIT...` | Stops the units and starts them again | yes |
 | `tay run ACTION [NAME=VALUE...]` | Runs an action, with its arguments | no |
 | `tay set PLACE=VALUE...`, `tay unset PLACE...` | Changes what the environment remembers being asked for | yes |
 | `tay wipe UNIT... --yes`, `tay wipe --all --yes` | Removes what the units keep, or everything the environment keeps | no |

@@ -1,6 +1,6 @@
 //! The command line: `tay plan`, `tay up`, `tay down`, `tay status`,
-//! `tay logs`, `tay ls`, `tay set`, `tay unset`, `tay --version` and
-//! `tay --help`; `tay daemon`,
+//! `tay logs`, `tay ls`, `tay restart`, `tay set`, `tay unset`,
+//! `tay --version` and `tay --help`; `tay daemon`,
 //! which a command runs to start an environment's daemon; and `tay keep`,
 //! which the daemon runs to keep one program of a unit.
 
@@ -18,7 +18,7 @@ use crate::keeper;
 use crate::print::{err, out};
 
 use args::{Takes, Words};
-use commands::{down, logs, ls, plan, set, status, unset, up};
+use commands::{down, logs, ls, plan, restart, set, status, unset, up};
 
 /// How a command ends, as its exit code says it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -58,6 +58,7 @@ Usage:
   tay status [UNIT] [--root FOLDER] [--json]
   tay logs [UNIT...] [--root FOLDER] [--since TIME] [--follow]
   tay ls [--root FOLDER] [--json]
+  tay restart UNIT... [--root FOLDER] [--json]
   tay set [PLACE=VALUE...] [--root FOLDER] [--json]
   tay unset PLACE... [--root FOLDER] [--json]
   tay --version
@@ -91,6 +92,11 @@ written anything, it prints the lines of all in the order of their times, each
 naming its unit. tay ls prints the environments tay knows on this machine, and
 marks with * the one it is run in.
 
+tay restart stops each unit named and starts it again, with a new first
+attempt, bringing up what it needs as tay up would, and leaving the units that
+need it as they run; a command is run again from its check. A unit that is
+made has nothing to restart.
+
 tay set changes what the environment remembers being asked for, in the places
 --set takes, and touches no unit until the next tay up: tay up --set is the
 same thing followed by up. Each is checked as tay up --set checks it, and
@@ -108,9 +114,9 @@ Options:
                       run.units.UNIT, settings.NAME or label; a list is
                       written with commas
   --json              print for programs, in schema 1: the plan, each event of
-                      up and down as a JSON object on a line, the units of
-                      status, the environments of ls, and what set and unset
-                      list
+                      up, down and restart as a JSON object on a line, the
+                      units of status, the environments of ls, and what set
+                      and unset list
   --since TIME        of logs: only what was written in the last TIME, a
                       whole number followed by s, m or h, such as 10m
   --follow            of logs: go on printing what the units write
@@ -153,6 +159,7 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> ExitCode {
         Some("ls") => (&ls::TAKES, ls::run),
         Some("daemon") => (&DAEMON, run_daemon),
         Some("logs") => (&logs::TAKES, logs::run),
+        Some("restart") => (&restart::TAKES, restart::run),
         Some("set") => (&set::TAKES, set::run),
         Some("unset") => (&unset::TAKES, unset::run),
         Some("keep") => return keeper::keep(args),

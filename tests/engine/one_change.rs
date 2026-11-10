@@ -280,3 +280,22 @@ fn set_and_unset_are_refused_while_another_change_runs() {
     let listed = machine.at(&root, "set", &[]);
     assert_eq!(listed.stdout, "set      label=first\n");
 }
+
+#[test]
+fn restart_is_refused_while_another_change_runs() {
+    let machine = Machine::new();
+    let root = up_once(&machine);
+    let list = hold_the_list(&machine);
+    let up = starting_port(&root, &machine);
+    let refused = machine.at(&root, "restart", &["config"]);
+    assert_eq!(refused.code, 4, "{}{}", refused.stdout, refused.stderr);
+    assert!(
+        refused
+            .stderr
+            .starts_with("tay restart: another change is running: `tay up`, since 2"),
+        "{}",
+        refused.stderr
+    );
+    drop(list);
+    assert_eq!(up.finish().code, 0);
+}

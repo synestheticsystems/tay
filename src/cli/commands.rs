@@ -4,6 +4,7 @@ pub mod down;
 pub mod logs;
 pub mod ls;
 pub mod plan;
+pub mod restart;
 pub mod set;
 pub mod status;
 pub mod unset;
@@ -71,6 +72,7 @@ fn disk_problem(command: &str, error: &DiskError) -> Exit {
 fn client_problem(command: &str, error: &ClientError) -> Exit {
     let exit = match error {
         ClientError::Refused(_) => Exit::Refused,
+        ClientError::Cannot(_) => Exit::Errors,
         _ => Exit::Unreachable,
     };
     problem(command, exit, &error.to_string())

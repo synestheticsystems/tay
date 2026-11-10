@@ -18,6 +18,6 @@ mod unplanned;
 pub use bring_up::{Decision, bring_up};
 pub use check::{check_now, find_again};
 pub use state::{State, UnitState};
-pub use supervisor::{Supervisor, Told};
+pub use supervisor::{Supervisor, Told, runs};
 pub use take_down::{Left, take_down};
 pub use unplanned::{check_unplanned, find_unplanned, stop_unplanned};

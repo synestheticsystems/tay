@@ -6,6 +6,7 @@
 //! place of the change under way, so that none begins meanwhile.
 
 use std::convert::Infallible;
+use std::future::Future;
 use std::sync::Arc;
 
 use http_body_util::channel::Channel;
@@ -20,7 +21,9 @@ use super::change::{Change, Kind};
 use super::down::Down;
 use super::{Daemon, log};
 use crate::clock;
-use crate::control::protocol::{self, Problem, Refused, Remember, Status, UnitStatus, UpRequest};
+use crate::control::protocol::{
+    self, Problem, Refused, Remember, Restart, Status, UnitStatus, UpRequest,
+};
 use crate::engine;
 
 type Body = BoxBody<Bytes, Infallible>;
@@ -51,6 +54,13 @@ pub async fn route(
             Ok(asked) => up(&daemon, asked),
             Err(problem) => json(StatusCode::BAD_REQUEST, &problem),
         },
+        (Method::POST, protocol::RESTART) => match asked::<Restart>(request, "tay restart").await {
+            Ok(restart) => begin(&daemon, Kind::Restart(restart.clone()), |change| {
+                let restarting = daemon.restarting(&restart)?;
+                Ok(Arc::clone(&daemon).restart(change, restarting))
+            }),
+            Err(problem) => json(StatusCode::BAD_REQUEST, &problem),
+        },
         (Method::POST, protocol::REMEMBER) => {
             match asked::<Remember>(request, "tay set or tay unset").await {
                 Ok(remember) => remembered(&daemon, &remember),
@@ -69,7 +79,8 @@ pub async fn route(
             | protocol::UP
             | protocol::DOWN
             | protocol::EXIT
-            | protocol::REMEMBER,
+            | protocol::REMEMBER
+            | protocol::RESTART,
         ) => json(
             StatusCode::METHOD_NOT_ALLOWED,
             &Problem {
@@ -127,6 +138,41 @@ fn up(daemon: &Arc<Daemon>, asked: UpRequest) -> Response<Body> {
         }
     };
     drop(under_way);
+    follow(change)
+}
+
+/// Begins the change `kind`, which `make` makes, unless another change is
+/// under way; `make` says why it cannot be made, when it cannot, and the
+/// change then never begins.
+fn begin<F>(
+    daemon: &Arc<Daemon>,
+    kind: Kind,
+    make: impl FnOnce(Arc<Change>) -> Result<F, String>,
+) -> Response<Body>
+where
+    F: Future<Output = ()> + Send + 'static,
+{
+    let mut under_way = daemon
+        .change
+        .lock()
+        .expect("the change under way is not poisoned");
+    if let Some(change) = under_way.as_ref() {
+        return json(
+            StatusCode::CONFLICT,
+            &Refused {
+                change: change.describe(),
+                since: change.since,
+            },
+        );
+    }
+    let change = Change::new(kind);
+    let made = match make(Arc::clone(&change)) {
+        Ok(made) => made,
+        Err(problem) => return json(StatusCode::UNPROCESSABLE_ENTITY, &Problem { problem }),
+    };
+    *under_way = Some(Arc::clone(&change));
+    drop(under_way);
+    tokio::spawn(made);
     follow(change)
 }
 

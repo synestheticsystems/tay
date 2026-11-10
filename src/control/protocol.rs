@@ -26,6 +26,9 @@ pub const EXIT: &str = "/v1/exit";
 /// `POST` a [`Remember`]: changes what the environment remembers being
 /// asked for, and touches no unit. It answers `{}`.
 pub const REMEMBER: &str = "/v1/remember";
+/// `POST` a [`Restart`]: stops units and starts them again, answering with
+/// [`Event`]s.
+pub const RESTART: &str = "/v1/restart";
 
 /// Who a daemon is.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -104,6 +107,12 @@ impl Remember {
     }
 }
 
+/// What `tay restart` asks for: the units to stop and start again.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Restart {
+    pub units: Vec<String>,
+}
+
 /// One thing that happens during a change, as one line of its answer.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
@@ -122,8 +131,9 @@ pub enum Event {
     /// The definitions, planned again by the daemon, have errors: each as
     /// `tay plan` prints it.
     Errors { lines: Vec<String>, too_old: bool },
-    /// What `tay up` came to.
-    Up(Decision),
+    /// What a change that brings units up came to: `tay up`, or another
+    /// that ends by bringing up what it stopped.
+    Decided(Decision),
     /// `tay up` was stopped before it came to anything, by what is
     /// said, as a person reads it.
     Cancelled { by: String },
@@ -140,7 +150,7 @@ impl Event {
         match self {
             Event::Units { .. } | Event::State { .. } | Event::Notice { .. } => false,
             Event::Errors { .. }
-            | Event::Up(_)
+            | Event::Decided(_)
             | Event::Cancelled { .. }
             | Event::Down { .. }
             | Event::Problem { .. } => true,

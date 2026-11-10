@@ -75,6 +75,7 @@ fn the_help_says_the_environment_remembers_what_up_was_asked() {
         "tay status [UNIT] [--root FOLDER] [--json]",
         "tay logs [UNIT...] [--root FOLDER] [--since TIME] [--follow]",
         "tay ls [--root FOLDER] [--json]",
+        "tay restart UNIT... [--root FOLDER] [--json]",
         "tay set [PLACE=VALUE...] [--root FOLDER] [--json]",
         "tay unset PLACE... [--root FOLDER] [--json]",
     ] {

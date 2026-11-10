@@ -11,6 +11,7 @@
 
 mod change;
 mod down;
+mod restart;
 mod routes;
 mod serve;
 mod up;

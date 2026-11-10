@@ -47,8 +47,10 @@ impl Printer {
             Event::Units { .. } | Event::State { .. } | Event::Notice { .. } => self.exit,
             Event::Errors { too_old: true, .. } => Some(Exit::TooOld),
             Event::Errors { .. } => Some(Exit::Errors),
-            Event::Up(Decision::Ready) => Some(Exit::Done),
-            Event::Up(_) | Event::Cancelled { .. } | Event::Problem { .. } => Some(Exit::Failed),
+            Event::Decided(Decision::Ready) => Some(Exit::Done),
+            Event::Decided(_) | Event::Cancelled { .. } | Event::Problem { .. } => {
+                Some(Exit::Failed)
+            }
             Event::Down { left } if left.is_empty() => Some(Exit::Done),
             Event::Down { .. } => Some(Exit::Failed),
         };
@@ -86,10 +88,10 @@ impl Printer {
                     ));
                 }
             }
-            Event::Up(Decision::Ready) => {
+            Event::Decided(Decision::Ready) => {
                 out(&format!("{command}: everything asked for is ready.\n"));
             }
-            Event::Up(Decision::Failed { failed }) => {
+            Event::Decided(Decision::Failed { failed }) => {
                 for failed in failed {
                     out(&format!(
                         "{command}: `{}` failed: {}\n",
@@ -146,7 +148,7 @@ impl Printer {
                 "too_old": too_old,
                 "errors": lines,
             }),
-            Event::Up(decision) => decision_json(decision),
+            Event::Decided(decision) => self.decision_json(decision),
             Event::Cancelled { by } => json!({ "event": "cancelled", "by": by }),
             Event::Down { left } => json!({
                 "event": "down",
@@ -162,18 +164,23 @@ impl Printer {
     }
 }
 
-fn decision_json(decision: &Decision) -> Value {
-    match decision {
-        Decision::Ready => json!({ "event": "up", "decision": "ready", "failed": [] }),
-        Decision::Failed { failed } => json!({
-            "event": "up",
-            "decision": "failed",
-            "failed": failed.iter().map(|failed| json!({
-                "unit": failed.unit,
-                "reason": failed.reason,
-                "lines": failed.lines,
-                "waiting": failed.waiting,
-            })).collect::<Vec<_>>(),
-        }),
+impl Printer {
+    /// What a change came to, as an event named after its command: `up`
+    /// for `tay up`.
+    fn decision_json(&self, decision: &Decision) -> Value {
+        let event = self.command.strip_prefix("tay ").unwrap_or(self.command);
+        match decision {
+            Decision::Ready => json!({ "event": event, "decision": "ready", "failed": [] }),
+            Decision::Failed { failed } => json!({
+                "event": event,
+                "decision": "failed",
+                "failed": failed.iter().map(|failed| json!({
+                    "unit": failed.unit,
+                    "reason": failed.reason,
+                    "lines": failed.lines,
+                    "waiting": failed.waiting,
+                })).collect::<Vec<_>>(),
+            }),
+        }
     }
 }

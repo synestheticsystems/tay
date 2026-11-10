@@ -10,7 +10,7 @@ use hyper::body::{Bytes, Frame};
 use tokio::sync::watch;
 
 use crate::clock;
-use crate::control::protocol::{Event, UpRequest};
+use crate::control::protocol::{Event, Restart, UpRequest};
 
 /// What a change does. It has no `Debug`, since a `--set` it carries may
 /// hold a secret setting's value.
@@ -18,6 +18,7 @@ use crate::control::protocol::{Event, UpRequest};
 pub enum Kind {
     Up(UpRequest),
     Down,
+    Restart(Restart),
 }
 
 pub struct Change {
@@ -62,6 +63,10 @@ impl Change {
                 .collect::<Vec<_>>()
                 .join(" "),
             Kind::Down => "tay down".to_string(),
+            Kind::Restart(restart) => std::iter::once("tay restart")
+                .chain(restart.units.iter().map(String::as_str))
+                .collect::<Vec<_>>()
+                .join(" "),
         }
     }
 
