@@ -21,7 +21,7 @@ pub struct UnitShape {
     /// The values the module gives, used as `${unit.name}`.
     pub gives: Vec<Given>,
     /// The files the unit builds, used as `${unit.outputs.name}`.
-    pub outputs: Vec<Given>,
+    pub outputs: Vec<Output>,
     /// The named volumes the unit owns.
     pub volumes: Vec<NameAt>,
     /// The volumes of other units it mounts.
@@ -150,6 +150,13 @@ pub enum Place {
     Readable(&'static str),
 }
 
+/// A file a unit builds, and its path on the host.
+#[derive(Clone, Debug)]
+pub struct Output {
+    pub name: NameAt,
+    pub path: Expr,
+}
+
 /// A value a module gives.
 #[derive(Clone, Debug)]
 pub struct Given {
@@ -169,8 +176,6 @@ pub enum GivenValue {
     Generated { secret: bool },
     /// Written out by the unit when it runs.
     Produced { secret: bool },
-    /// A file the unit builds when it runs.
-    Output,
 }
 
 /// Something a production profile refuses.

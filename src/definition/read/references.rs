@@ -190,7 +190,7 @@ fn reference_target(
                 && !owner
                     .ways
                     .iter()
-                    .any(|v| v.outputs.iter().any(|o| o.name == *name))
+                    .any(|way| way.outputs().iter().any(|output| output.name.name == *name))
             {
                 d.error(
                     reference.loc,

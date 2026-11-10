@@ -9,7 +9,7 @@ use super::common::{self, argv, environment};
 use crate::module::shape::{
     Concern, Place, Published, RestartDefault, Runs, Slot, UnitKind, UnitShape,
 };
-use crate::module::want::Want;
+use crate::module::want::{PathUse, Want};
 use crate::module::{Cx, Module};
 
 pub struct Container;
@@ -153,7 +153,7 @@ fn build_settings(node: &Node, d: &mut Diagnostics) -> Vec<Slot> {
     slots.extend(
         build
             .require("context", d)
-            .and_then(|n| Slot::read(n, Want::Text, BUILD, d)),
+            .and_then(|n| Slot::read(n, Want::Path(PathUse::Named), BUILD, d)),
     );
     slots.extend(
         build
@@ -271,7 +271,7 @@ fn label_key_problem(key: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use crate::module::testing::check;
-    use crate::module::{Runs, UnitKind, Want};
+    use crate::module::{PathUse, Runs, UnitKind, Want};
 
     #[test]
     fn exactly_one_of_image_and_build() {
@@ -358,6 +358,9 @@ mod tests {
         assert!(shape.is_none());
         let (shape, errors) = check("container", "build: { context: . }\n");
         assert!(errors.is_empty(), "{errors:?}");
-        assert_eq!(shape.unwrap().production.len(), 1);
+        let shape = shape.unwrap();
+        assert_eq!(shape.production.len(), 1);
+        // The build's context is a host path.
+        assert_eq!(shape.slots[0].want, Want::Path(PathUse::Named));
     }
 }

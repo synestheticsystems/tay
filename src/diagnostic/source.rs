@@ -1,6 +1,6 @@
 //! Where a piece of a definition came from, so that every error can point at it.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Identifies one entry in [`Sources`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -9,8 +9,9 @@ pub struct SourceId(u32);
 /// A place definitions are read from: a file, or one `--set` argument.
 #[derive(Debug)]
 pub enum Source {
-    /// A file, kept as it is shown: relative to the stack's root when it is inside it.
-    File { shown: String },
+    /// A file, kept as it is shown (relative to the stack's root when it is
+    /// inside it) and as it is on disk.
+    File { shown: String, path: PathBuf },
     /// A command-line argument, kept as it is shown in errors: a `--set` is
     /// shown by its key only, since its value may be a secret.
     Argument { shown: String },
@@ -30,7 +31,10 @@ impl Sources {
             Ok(relative) => relative.display().to_string(),
             Err(_) => path.display().to_string(),
         };
-        self.push(Source::File { shown })
+        self.push(Source::File {
+            shown,
+            path: path.to_path_buf(),
+        })
     }
 
     pub fn add_argument(&mut self, shown: &str) -> SourceId {
@@ -47,6 +51,24 @@ impl Sources {
 
     pub fn get(&self, id: SourceId) -> &Source {
         &self.list[id.0 as usize]
+    }
+
+    /// The folder each source's file is in, by source; `None` for a
+    /// command-line argument.
+    pub fn folders(&self) -> Vec<Option<PathBuf>> {
+        self.list
+            .iter()
+            .map(|source| match source {
+                Source::File { path, .. } => path.parent().map(Path::to_path_buf),
+                Source::Argument { .. } => None,
+            })
+            .collect()
+    }
+}
+
+impl SourceId {
+    pub fn index(self) -> usize {
+        self.0 as usize
     }
 }
 

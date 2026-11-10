@@ -2,7 +2,7 @@ format: 1
 stack: production
 default_profile: dev
 settings:
-  certs: { default: /etc/example/certs }
+  certs: { default: /tmp }
 units:
   site:
     uses: process
@@ -21,7 +21,7 @@ units:
     uses: container
     with:
       image: example/outside
-      mounts: [{ from: /etc/example, to: /config }]
+      mounts: [{ from: /tmp, to: /config }]
   inside:
     uses: container
     with:

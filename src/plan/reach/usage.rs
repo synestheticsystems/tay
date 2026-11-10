@@ -2,10 +2,11 @@
 //! checked against what the place wants and whether a secret may go there.
 
 use std::fs;
+use std::path::Path;
 
 use crate::diagnostic::Diagnostic;
 use crate::diagnostic::source::Loc;
-use crate::module::{Place, Want};
+use crate::module::{PathUse, Place, Want};
 use crate::syntax::expr::{self, Expr};
 
 use super::visit::NeedEdge;
@@ -71,6 +72,7 @@ impl Planner<'_> {
             asker: user.asker,
         };
         let value = match self.resolver.resolve(expr, scope) {
+            Ok(value) if matches!(want, Want::Path(_)) => self.resolver.host_path(value, expr.loc),
             Ok(value) => value,
             Err(Fail::Reported) => return None,
             Err(Fail::View(problem)) => {
@@ -123,9 +125,20 @@ impl Planner<'_> {
             return None;
         }
         self.check_place(&value, place, expr.loc);
-        if let Want::TemplateFile(content) = want {
-            let path = value.exact_text()?;
-            self.use_template_file(user, &path, expr.loc, content, uses)?;
+        match want {
+            Want::Path(PathUse::Read(content)) => {
+                if !value.producers.is_empty() {
+                    self.resolver.d.error(
+                        expr.loc,
+                        "this must be known before start, because tay reads the file then; this is built from a value produced by running",
+                    );
+                    return None;
+                }
+                let path = value.exact_text()?;
+                self.use_template_file(user, &path, expr.loc, content, uses)?;
+            }
+            Want::Path(PathUse::Mounted) => self.check_mount_source(&value, expr.loc),
+            _ => {}
         }
         Some(value)
     }
@@ -155,6 +168,27 @@ impl Planner<'_> {
         }
     }
 
+    /// A mount's source must exist when tay plans, unless tay makes it (in
+    /// the state or shared folder) or running makes it (a produced value).
+    /// A path not known before start cannot be looked at.
+    fn check_mount_source(&mut self, value: &Resolved, at: Loc) {
+        if !value.producers.is_empty() {
+            return;
+        }
+        let Some(path) = value.exact_text() else {
+            return;
+        };
+        if self.resolver.in_own_folders(Path::new(&path)) || Path::new(&path).exists() {
+            return;
+        }
+        self.resolver.d.error(
+            at,
+            format!(
+                "the mount's source `{path}` does not exist; outside the state and shared folders it must exist when tay plans"
+            ),
+        );
+    }
+
     /// Reads a file whose text has references in it, before start, and
     /// resolves those references for `user`.
     fn use_template_file(
@@ -165,8 +199,8 @@ impl Planner<'_> {
         content: Place,
         uses: &mut Uses,
     ) -> Option<()> {
-        let file = self.root.join(path);
-        let text = match fs::read_to_string(&file) {
+        let file = Path::new(path);
+        let text = match fs::read_to_string(file) {
             Ok(text) => text,
             Err(error) => {
                 self.resolver.d.error(
@@ -176,7 +210,7 @@ impl Planner<'_> {
                 return None;
             }
         };
-        let source = self.sources.add_file(&file, &self.root);
+        let source = self.sources.add_file(file, &self.root);
         let pieces = match expr::parse_document(&text, source) {
             Ok(pieces) => pieces,
             Err(error) => {

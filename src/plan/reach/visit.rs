@@ -3,7 +3,7 @@
 
 use crate::definition::{Check, Way};
 use crate::diagnostic::source::Loc;
-use crate::module::{Place, RestartDefault, Runs, UnitKind, Want};
+use crate::module::{PathUse, Place, RestartDefault, Runs, UnitKind, Want};
 
 use super::usage::{Opening, User, Uses};
 use crate::plan::Planner;
@@ -14,7 +14,7 @@ use crate::plan::resolve::Asker;
 use crate::plan::resolve::value::Resolved;
 
 const READINESS: Place = Place::Readable("a readiness check");
-const WATCHED: Place = Place::Readable("a watched folder");
+const WATCHED: Place = Place::Readable("a watched file or folder");
 
 /// What `restart.on` may be.
 const RESTART_ON: &[&str] = &["failure", "always", "never"];
@@ -223,16 +223,17 @@ impl Planner<'_> {
     fn watch(&mut self, user: User<'_>, way: &Way, uses: &mut Uses) -> Vec<Option<Shown>> {
         way.watch
             .iter()
-            .map(|folder| {
-                let value = self.use_value(user, folder, Want::Text, WATCHED, uses)?;
+            .map(|watched| {
+                let want = Want::Path(PathUse::Named);
+                let value = self.use_value(user, watched, want, WATCHED, uses)?;
                 // A production profile refuses any watch, so where it points does not matter there.
                 if !self.production
                     && let Some(path) = value.exact_text()
-                    && !self.root.join(&path).is_dir()
+                    && !std::path::Path::new(&path).exists()
                 {
                     self.resolver.d.error(
-                        folder.loc,
-                        format!("the folder `{path}` to watch does not exist"),
+                        watched.loc,
+                        format!("`{path}`, which this unit watches, does not exist"),
                     );
                     return None;
                 }

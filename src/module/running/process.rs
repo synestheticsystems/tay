@@ -6,7 +6,7 @@ use crate::syntax::yaml::Node;
 
 use super::common::{argv, argv_list, environment};
 use crate::module::shape::{Place, RestartDefault, Runs, Slot, UnitKind, UnitShape};
-use crate::module::want::Want;
+use crate::module::want::{PathUse, Want};
 use crate::module::{Cx, Module};
 
 pub struct Process;
@@ -51,7 +51,7 @@ impl Module for Process {
         if let Some(workdir) = settings.get("workdir") {
             slots.extend(Slot::read(
                 workdir,
-                Want::Text,
+                Want::Path(PathUse::Named),
                 Place::Readable("a working folder"),
                 cx.d,
             ));
@@ -117,5 +117,16 @@ mod tests {
             crate::module::UnitKind::Runs(crate::module::Runs::OnHost)
         ));
         assert_eq!(shape.slots.len(), 3);
+    }
+
+    #[test]
+    fn the_working_folder_is_a_host_path() {
+        let shape = check("process", "command: [a]\nworkdir: ./app\n")
+            .0
+            .unwrap();
+        assert_eq!(
+            shape.slots[1].want,
+            crate::module::Want::Path(crate::module::PathUse::Named)
+        );
     }
 }

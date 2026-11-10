@@ -21,9 +21,24 @@ pub enum Want {
     FileMode,
     /// A file's name, with no folder in it.
     FileName,
-    /// A path to a file whose text is read before start and has its
-    /// references filled in; the text goes to `Place`.
-    TemplateFile(Place),
+    /// A path on the host. One that begins `./` is relative to the folder of
+    /// the file it is written in, any other relative one to the stack's
+    /// root, and the value used is the whole path.
+    Path(PathUse),
+}
+
+/// What tay does with a path before start.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum PathUse {
+    /// Nothing: it is for whatever runs the unit.
+    Named,
+    /// A mount's source, which must exist when tay plans unless it lies in
+    /// the state or shared folder, where tay makes it, or is built from a
+    /// value produced by running.
+    Mounted,
+    /// A file whose text is read before start and has its references filled
+    /// in; the text goes to the place given.
+    Read(Place),
 }
 
 /// What is known of a value when it is checked against a [`Want`]: its type,
@@ -73,11 +88,12 @@ impl Want {
     pub fn problem(&self, form: &Form) -> Option<String> {
         let wrong = |wanted: &str| Some(format!("must be {wanted}; this is {}", form.describe()));
         match (self, form) {
-            (Want::TemplateFile(_), Form::Unknown) => Some(
+            (Want::Path(PathUse::Read(_)), Form::Unknown) => Some(
                 "must be known before start, because tay reads the file then; this is produced by running"
                     .to_string(),
             ),
             (_, Form::Unknown) | (Want::Scalar, _) => None,
+            (Want::Path(PathUse::Named | PathUse::Mounted), Form::Text(_)) => None,
             (Want::Text, Form::Text(_)) | (Want::Bool, Form::Bool) => None,
             (Want::Number, Form::Number(_)) => None,
             (Want::Text, _) => wrong("text"),
@@ -127,7 +143,7 @@ impl Want {
             Want::Duration => "a whole number followed by s, m or h, such as `2m`".to_string(),
             Want::FileMode => "permissions in octal, such as `\"0600\"`".to_string(),
             Want::FileName => "a file name with no folder in it".to_string(),
-            Want::TemplateFile(_) => "the path of a file".to_string(),
+            Want::Path(_) => "the path of a file".to_string(),
             _ => "text".to_string(),
         }
     }
@@ -191,7 +207,7 @@ mod tests {
     fn a_produced_value_passes_type_checks_but_not_a_file_read_before_start() {
         assert_eq!(Want::Number.problem(&Form::Unknown), None);
         assert!(
-            Want::TemplateFile(Place::FileContent)
+            Want::Path(PathUse::Read(Place::FileContent))
                 .problem(&Form::Unknown)
                 .is_some()
         );

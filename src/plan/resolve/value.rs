@@ -24,11 +24,6 @@ pub enum Hole {
         unit: String,
         name: String,
     },
-    /// A file a unit builds when it runs.
-    Output {
-        unit: String,
-        name: String,
-    },
     HostListen,
     EnvironmentId,
     EnvironmentNetwork,
@@ -41,7 +36,6 @@ impl Hole {
             Hole::Secret => "<secret>".to_string(),
             Hole::Generated { unit, name } => format!("<generated: {unit}.{name}>"),
             Hole::Produced { unit, name } => format!("<produced: {unit}.{name}>"),
-            Hole::Output { unit, name } => format!("<output: {unit}.{name}>"),
             Hole::HostListen => "<host.listen>".to_string(),
             Hole::EnvironmentId => "<environment.id>".to_string(),
             Hole::EnvironmentNetwork => "<environment.network>".to_string(),

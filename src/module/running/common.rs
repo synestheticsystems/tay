@@ -8,7 +8,7 @@ use crate::syntax::names::{self, NameAt};
 use crate::syntax::yaml::Node;
 
 use crate::module::shape::{Concern, Place, Slot, UnitShape, VolumeMount};
-use crate::module::want::Want;
+use crate::module::want::{PathUse, Want};
 
 pub const COMMAND_LINE: Place = Place::Readable("a command line");
 const ENV: Place =
@@ -123,7 +123,7 @@ pub fn mounts(node: &Node, shape: &mut UnitShape, d: &mut Diagnostics) {
         };
         match (mount.entry("from"), mount.entry("volume")) {
             (Some((_, from)), None) => {
-                if let Some(from) = Slot::read(from, Want::Text, MOUNT, d) {
+                if let Some(from) = Slot::read(from, Want::Path(PathUse::Mounted), MOUNT, d) {
                     shape
                         .production
                         .push(Concern::MountsHostPath(from.expr.clone()));

@@ -1,0 +1,23 @@
+format: 1
+stack: paths
+up: [web, box, conf]
+settings:
+  port: { default: 8080 }
+units:
+  build:
+    uses: command
+    with: { run: [build], outputs: { server: target/debug/server } }
+  box:
+    uses: container
+    with:
+      image: example/box
+      mounts:
+        - { from: config, to: /config }
+        - { from: "${environment.state}/box", to: /state }
+        - { from: "${environment.shared}/cache", to: /cache }
+        - { from: "${build.outputs.server}", to: /server }
+  lost:
+    uses: container
+    with:
+      image: example/lost
+      mounts: [{ from: ./missing, to: /missing }]

@@ -8,9 +8,9 @@ use crate::syntax::yaml::Node;
 
 use super::common::{self, environment, run_form};
 use crate::module::shape::{
-    Given, GivenValue, Place, RestartDefault, Runs, Slot, UnitKind, UnitShape,
+    Given, GivenValue, Output, Place, RestartDefault, Runs, Slot, UnitKind, UnitShape,
 };
-use crate::module::want::Want;
+use crate::module::want::{PathUse, Want};
 use crate::module::{Cx, Module};
 
 pub struct Command;
@@ -115,9 +115,14 @@ impl Module for Command {
             None => {}
         }
         if let Some(workdir) = settings.get("workdir") {
+            // In a container, the working folder is one of the container's.
+            let want = match in_container {
+                true => Want::Text,
+                false => Want::Path(PathUse::Named),
+            };
             shape.slots.extend(Slot::read(
                 workdir,
-                Want::Text,
+                want,
                 Place::Readable("a working folder"),
                 d,
             ));
@@ -126,20 +131,21 @@ impl Module for Command {
         if let Some(stdin) = settings.get("stdin") {
             shape
                 .slots
-                .extend(Slot::read(stdin, Want::Text, FILE_PATH, d));
+                .extend(Slot::read(stdin, Want::Path(PathUse::Named), FILE_PATH, d));
         }
         if let Some(produces) = settings.get("produces") {
             shape.gives.extend(produced(produces, d));
         }
         if let Some(node) = settings.get("outputs") {
             for (name, path) in fields::keyed(node, "an output", names::value_name_problem, d) {
-                shape
-                    .slots
-                    .extend(Slot::read(path, Want::Text, FILE_PATH, d));
-                shape.outputs.push(Given {
+                let Some(path) = Slot::read(path, Want::Path(PathUse::Named), FILE_PATH, d) else {
+                    continue;
+                };
+                shape.outputs.push(Output {
                     name,
-                    value: GivenValue::Output,
+                    path: path.expr.clone(),
                 });
+                shape.slots.push(path);
             }
         }
         (cx.d.len() == errors_before).then_some(shape)
@@ -205,7 +211,7 @@ fn produced(node: &Node, d: &mut Diagnostics) -> Vec<Given> {
 #[cfg(test)]
 mod tests {
     use crate::module::testing::check;
-    use crate::module::{GivenValue, Runs, UnitKind};
+    use crate::module::{GivenValue, PathUse, Runs, UnitKind, Want};
 
     #[test]
     fn where_a_command_runs() {
@@ -245,6 +251,23 @@ mod tests {
         assert_eq!(
             errors,
             ["3:1: a `command` unit runs in at most one of `in` and `image`; this one has both"]
+        );
+    }
+
+    #[test]
+    fn the_working_folder_is_a_host_path_only_for_a_command_on_the_host_and_stdin_always() {
+        let wants = |with: &str| -> Vec<Want> {
+            let shape = check("command", with).0.unwrap();
+            shape.slots.iter().skip(1).map(|slot| slot.want).collect()
+        };
+        let path = Want::Path(PathUse::Named);
+        assert_eq!(
+            wants("run: [x]\nworkdir: app\nstdin: input\n"),
+            [path, path]
+        );
+        assert_eq!(
+            wants("run: [x]\nin: db\nworkdir: /app\nstdin: input\n"),
+            [Want::Text, path]
         );
     }
 

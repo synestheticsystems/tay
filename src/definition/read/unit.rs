@@ -140,7 +140,6 @@ fn group(fields: &Fields<'_>, d: &mut Diagnostics) -> Option<Vec<Way>> {
         needs: WayFields::read(fields, d).needs,
         after: Vec::new(),
         gives: Vec::new(),
-        outputs: Vec::new(),
         ready: None,
         restart: None,
         watch: Vec::new(),
@@ -247,11 +246,6 @@ fn way(
     }
     Some(Way {
         name: way_name,
-        outputs: shape
-            .outputs
-            .iter()
-            .map(|given| given.name.clone())
-            .collect(),
         module: Some(ModuleUse {
             module,
             uses: uses_key.loc,
@@ -299,9 +293,9 @@ pub fn joined(first: &[NameAt], more: Vec<NameAt>) -> Vec<NameAt> {
 /// does not break when the unit is switched to another way of running.
 fn same_value_names(unit: &NameAt, ways: &[Way], d: &mut Diagnostics) {
     let given = |way: &Way| -> Vec<NameAt> {
-        let outputs = way.outputs.iter().map(|output| NameAt {
-            name: format!("outputs.{}", output.name),
-            loc: output.loc,
+        let outputs = way.outputs().iter().map(|output| NameAt {
+            name: format!("outputs.{}", output.name.name),
+            loc: output.name.loc,
         });
         way.gives
             .iter()

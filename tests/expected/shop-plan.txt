@@ -24,7 +24,7 @@ Plan for stack `shop`, profile `dev`, in <root>
 5. build: uses `command`, runs on the host
    ready: when it exits with 0
    restart: never
-   gives outputs.server = <output: build.server> (produced by running build)
+   gives outputs.server = <root>/target/debug/server (produced by running build)
 
 6. database: uses `container`, runs in its own container
    needs db-password, because it uses db-password.value

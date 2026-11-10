@@ -9,7 +9,7 @@ use crate::syntax::yaml::Node;
 use crate::module::shape::{
     Claim, Given, GivenValue, Place, RestartDefault, Slot, UnitKind, UnitShape,
 };
-use crate::module::want::Want;
+use crate::module::want::{PathUse, Want};
 use crate::module::{Cx, Module};
 
 pub struct File;
@@ -51,7 +51,7 @@ impl Module for File {
             (None, Some((_, template))) => {
                 shape.slots.extend(Slot::read(
                     template,
-                    Want::TemplateFile(Place::FileContent),
+                    Want::Path(PathUse::Read(Place::FileContent)),
                     Place::Readable("a file path"),
                     d,
                 ));

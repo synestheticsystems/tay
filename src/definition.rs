@@ -5,7 +5,7 @@ pub mod read;
 use std::path::PathBuf;
 
 use crate::diagnostic::source::Loc;
-use crate::module::{GivenValue, Module, UnitShape};
+use crate::module::{GivenValue, Module, Output, UnitShape};
 use crate::syntax::expr::{Expr, Type};
 use crate::syntax::names::NameAt;
 
@@ -82,7 +82,6 @@ pub struct Way {
     pub needs: Vec<NameAt>,
     pub after: Vec<NameAt>,
     pub gives: Vec<Give>,
-    pub outputs: Vec<NameAt>,
     pub ready: Option<Ready>,
     pub restart: Option<Restart>,
     pub watch: Vec<Expr>,
@@ -91,6 +90,13 @@ pub struct Way {
 impl Way {
     pub fn give(&self, name: &str) -> Option<&Give> {
         self.gives.iter().find(|give| give.name.name == name)
+    }
+
+    /// The files the way builds; a group builds none.
+    pub fn outputs(&self) -> &[Output] {
+        self.module
+            .as_ref()
+            .map_or(&[], |module| &module.shape.outputs)
     }
 }
 

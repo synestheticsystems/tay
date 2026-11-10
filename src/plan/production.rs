@@ -1,7 +1,7 @@
 //! What a production profile refuses, checked after every choice is applied,
 //! so that switching a unit with `--set` cannot slip past it.
 
-use std::path::{Component, Path, PathBuf};
+use std::path::Path;
 
 use crate::diagnostic::Diagnostic;
 use crate::diagnostic::source::Loc;
@@ -10,6 +10,7 @@ use crate::syntax::expr::{Expr, ExprKind, Piece, Target};
 use crate::syntax::names::NameAt;
 
 use super::Planner;
+use super::resolve::paths::normalized;
 use super::resolve::{Asker, Scope};
 
 /// A unit in the plan, with the way it runs and where that was chosen.
@@ -86,41 +87,13 @@ impl Planner<'_> {
         // The source is also one of the unit's slots, so a failure to resolve
         // it has been reported where the unit's values were used.
         let value = self.resolver.resolve(from, scope).ok()?;
+        let value = self.resolver.host_path(value, from.loc);
         let Some(text) = value.exact_text() else {
             return Some("it mounts a source that is not known before start".to_string());
         };
-        let path = normalized(&self.root.join(&text));
+        let path = normalized(Path::new(&text));
         (!path.starts_with(&self.root)).then(|| {
             format!("it mounts `{text}`, which is outside the stack's own folders and not named by a setting")
         })
-    }
-}
-
-/// `path` with `.` and `..` worked out, without asking the file system.
-fn normalized(path: &Path) -> PathBuf {
-    let mut out = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::ParentDir => {
-                out.pop();
-            }
-            Component::CurDir => {}
-            other => out.push(other),
-        }
-    }
-    out
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn dots_are_worked_out_lexically() {
-        assert_eq!(
-            normalized(Path::new("/s/root/./a/../b")),
-            PathBuf::from("/s/root/b")
-        );
-        assert!(!normalized(Path::new("/s/root/../etc")).starts_with("/s/root"));
     }
 }

@@ -12,9 +12,10 @@ use crate::diagnostic::source::Loc;
 use crate::syntax::yaml::Node;
 
 pub use shape::{
-    Concern, GivenValue, Place, Published, RestartDefault, Runs, UnitKind, UnitShape, VolumeMount,
+    Concern, GivenValue, Output, Place, Published, RestartDefault, Runs, UnitKind, UnitShape,
+    VolumeMount,
 };
-pub use want::{Form, Want};
+pub use want::{Form, PathUse, Want};
 
 /// One mechanism a unit can use.
 pub trait Module: Sync {

@@ -181,12 +181,12 @@
           {
             "endpoint": false,
             "from_containers": {
-              "text": "<output: build.server>",
-              "value": null
+              "text": "<root>/target/debug/server",
+              "value": "<root>/target/debug/server"
             },
             "from_host": {
-              "text": "<output: build.server>",
-              "value": null
+              "text": "<root>/target/debug/server",
+              "value": "<root>/target/debug/server"
             },
             "known_before_start": false,
             "name": "outputs.server",

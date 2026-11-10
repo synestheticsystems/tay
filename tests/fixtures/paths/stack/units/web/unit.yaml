@@ -1,0 +1,7 @@
+uses: process
+with:
+  command: ["${build.outputs.server}", ./not-a-path]
+  workdir: ./
+watch: [./unit.yaml, src]
+gives:
+  server: "${build.outputs.server}"

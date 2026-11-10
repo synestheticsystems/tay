@@ -117,8 +117,9 @@ pub fn plan(root: &Path, options: &Options, sources: &mut Sources, d: &mut Diagn
     else {
         return Outcome::Errors;
     };
+    let folders = sources.folders();
     let mut planner = Planner {
-        resolver: Resolver::new(&stack, &layered, environment),
+        resolver: Resolver::new(&stack, &layered, environment, folders),
         sources,
         root: root.to_path_buf(),
         production: production.is_some(),

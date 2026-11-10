@@ -1,0 +1,2 @@
+uses: file
+with: { template: ./site.conf.tmpl }

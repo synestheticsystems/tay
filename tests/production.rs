@@ -9,7 +9,14 @@ use support::{plan, plan_json, unit};
 fn the_same_stack_plans_in_a_profile_that_is_not_production() {
     let plan = plan_json("production", &[]);
     assert_eq!(plan["production"], false);
-    assert_eq!(unit(&plan, "watcher")["watch"][0]["text"], "src");
+    let src = support::fixture("production")
+        .canonicalize()
+        .unwrap()
+        .join("src");
+    assert_eq!(
+        unit(&plan, "watcher")["watch"][0]["text"],
+        src.display().to_string()
+    );
 }
 
 #[test]
@@ -34,7 +41,7 @@ fn each_thing_the_format_lists_is_refused_naming_its_unit() {
             // A mount from outside the stack's folders, not named by a setting.
             // `inside` mounts from the stack, from a setting and from the state
             // folder, and `setup` runs inside a container: neither is refused.
-            "tay.yaml:24:24: the production profile `deploy` refuses unit `outside`: it mounts `/etc/example`, which is outside the stack's own folders and not named by a setting",
+            "tay.yaml:24:24: the production profile `deploy` refuses unit `outside`: it mounts `/tmp`, which is outside the stack's own folders and not named by a setting",
             marked,
         ]
     );

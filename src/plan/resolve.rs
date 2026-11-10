@@ -9,6 +9,7 @@
 
 mod endpoint;
 mod environment;
+pub mod paths;
 mod settings;
 mod unit_values;
 pub mod value;
@@ -16,6 +17,7 @@ pub mod value;
 pub use environment::Environment;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::path::PathBuf;
 
 use crate::definition::Stack;
 use crate::diagnostic::source::Loc;
@@ -101,6 +103,9 @@ pub struct Resolver<'s> {
     circles: HashSet<BTreeSet<Key>>,
     /// Each setting with no value and no default that the plan uses, and where.
     unset: BTreeMap<String, Vec<Loc>>,
+    /// The folder of each source's file, by source, which a path beginning
+    /// `./` is relative to.
+    folders: Vec<Option<PathBuf>>,
     /// Once every unit that comes up has used its values: the published
     /// ports something in the plan opens, by container unit and container
     /// port. Until then a use from the host opens the port it reaches.
@@ -108,11 +113,17 @@ pub struct Resolver<'s> {
 }
 
 impl<'s> Resolver<'s> {
-    pub fn new(stack: &'s Stack, layered: &'s Layered, environment: Environment) -> Resolver<'s> {
+    pub fn new(
+        stack: &'s Stack,
+        layered: &'s Layered,
+        environment: Environment,
+        folders: Vec<Option<PathBuf>>,
+    ) -> Resolver<'s> {
         Resolver {
             stack,
             layered,
             environment,
+            folders,
             d: Diagnostics::default(),
             units: stack
                 .units

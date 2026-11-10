@@ -26,15 +26,15 @@ impl Planner<'_> {
             };
             lines.push(self.given_line(give.name.name.clone(), give.name.loc, target, endpoint));
         }
-        for output in &way.outputs {
+        for output in way.outputs() {
             let target = Target::Output {
                 unit: UnitRef::Named(unit_name.clone()),
-                name: output.name.clone(),
+                name: output.name.name.clone(),
                 view: None,
             };
             lines.push(self.given_line(
-                format!("outputs.{}", output.name),
-                output.loc,
+                format!("outputs.{}", output.name.name),
+                output.name.loc,
                 target,
                 false,
             ));

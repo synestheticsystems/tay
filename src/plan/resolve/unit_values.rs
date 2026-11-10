@@ -122,9 +122,6 @@ impl Resolver<'_> {
                 value.producers.insert(unit.name.name.clone(), used);
                 Ok(value)
             }
-            GiveValue::Module(GivenValue::Output) => {
-                unreachable!("outputs are not among the values a unit gives")
-            }
         }?;
         if let Some(UnitKind::Made) = self.kind(owner) {
             value
@@ -135,16 +132,18 @@ impl Resolver<'_> {
         Ok(value)
     }
 
-    /// `${unit.outputs.name}`: a file the unit builds when it runs.
+    /// `${unit.outputs.name}`: the whole path of a file the unit builds when
+    /// it runs. The path is known before start; the file is not there until
+    /// the unit has run, so using it is a need for the unit.
     pub(super) fn output(&mut self, owner: usize, name: &str, reference: &Reference) -> Res {
         let stack = self.stack;
         let (way, _) = self.way(owner).ok_or(Fail::Reported)?;
         let unit_name = &stack.units[owner].name.name;
-        if !stack.units[owner].ways[way]
-            .outputs
+        let Some(output) = stack.units[owner].ways[way]
+            .outputs()
             .iter()
-            .any(|output| output.name == name)
-        {
+            .find(|output| output.name.name == name)
+        else {
             return self.fail(
                 reference.loc,
                 format!(
@@ -152,14 +151,20 @@ impl Resolver<'_> {
                     reference.written()
                 ),
             );
-        }
-        let mut value = Resolved::known(Shape::Opaque {
-            ty: Some(Type::Text),
-            hole: Hole::Output {
-                unit: unit_name.clone(),
-                name: name.to_string(),
-            },
-        });
+        };
+        let key = Key {
+            unit: owner,
+            name: format!("outputs.{name}"),
+        };
+        // An output is a path on the host, whoever uses it.
+        let scope = Scope {
+            unit: Some(owner),
+            asker: Asker::Host,
+        };
+        let path = self.keyed(key, None, reference.loc, Asker::Host, |this| {
+            this.resolve(&output.path, scope)
+        })?;
+        let mut value = self.host_path(path, output.path.loc);
         value
             .producers
             .insert(unit_name.clone(), format!("{unit_name}.outputs.{name}"));
