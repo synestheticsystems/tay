@@ -17,7 +17,7 @@ use crate::syntax::fields::{self, Fields};
 use crate::syntax::names::{self, NameAt};
 use crate::syntax::yaml::{Kind, Node, Scalar};
 
-use super::{self as unit, UNIT_FIELDS};
+use crate::definition::read::unit::{self, UNIT_FIELDS};
 
 mod substitute;
 
