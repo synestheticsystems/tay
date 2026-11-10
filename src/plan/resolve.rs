@@ -14,7 +14,7 @@ pub mod resolved;
 mod settings;
 mod unit_values;
 
-pub use environment::Environment;
+pub use environment::EnvironmentFacts;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
@@ -130,7 +130,7 @@ struct Key {
 pub struct Resolver<'s> {
     pub stack: &'s Stack,
     pub layered: &'s Layered,
-    pub environment: Environment,
+    pub environment: EnvironmentFacts,
     pub d: Diagnostics,
     units: HashMap<&'s str, usize>,
     chosen: HashMap<usize, Option<Chosen<'s>>>,
@@ -149,7 +149,7 @@ impl<'s> Resolver<'s> {
     pub fn new(
         stack: &'s Stack,
         layered: &'s Layered,
-        environment: Environment,
+        environment: EnvironmentFacts,
         sources: &'s mut Sources,
     ) -> Resolver<'s> {
         Resolver {

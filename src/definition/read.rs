@@ -14,6 +14,7 @@ use std::path::Path;
 use crate::definition::{Places, Profile, Stack, Unit};
 use crate::diagnostic::source::{Loc, Sources};
 use crate::diagnostic::{Diagnostic, Diagnostics, quoted_list};
+use crate::disk::Layout;
 use crate::syntax::fields::{self, Fields};
 use crate::syntax::names::{self, NameAt, RESERVED_UNIT_NAMES};
 
@@ -23,9 +24,6 @@ use choices::assignment;
 pub use choices::choices_file;
 pub use files::discover::{STACK_FILE, find_root};
 pub use version::THIS_TAY;
-
-/// The folder inside a stack's root that holds its environment's own choices and state.
-pub const ENVIRONMENT_FOLDER: &str = ".tay";
 
 pub enum Outcome {
     /// The definitions, as far as they could be read. Errors are in the
@@ -130,8 +128,7 @@ pub fn places<'s>(
         }
         _ => None,
     };
-    let environment =
-        reader.choices_file(&stack.root.join(ENVIRONMENT_FOLDER).join("choices.yaml"));
+    let environment = reader.choices_file(&Layout::of(&stack.root).choices());
     let every_file_parsed = reader.every_file_parsed;
     let sets = sets
         .iter()

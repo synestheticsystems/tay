@@ -166,6 +166,7 @@ impl PlanArgs {
             profile: self.profile.clone(),
             sets: self.sets.clone(),
             home: std::env::var_os("HOME").map(PathBuf::from),
+            shared_folders: crate::disk::shared_folders(),
         };
         let mut sources = Sources::default();
         let mut d = Diagnostics::default();

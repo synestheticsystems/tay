@@ -2,9 +2,9 @@
 
 use std::path::Path;
 
-use crate::definition::read::ENVIRONMENT_FOLDER;
 use crate::definition::{Profile, Stack};
 use crate::diagnostic::{Diagnostic, Diagnostics};
+use crate::disk::{self, Layout};
 use crate::plan::choices::Layered;
 use crate::plan::resolve::resolved::Resolved;
 use crate::syntax::expr::{EnvField, Reference};
@@ -13,7 +13,7 @@ use crate::value::{Placeholder, Value};
 use super::{Res, Resolver};
 
 #[derive(Debug)]
-pub struct Environment {
+pub struct EnvironmentFacts {
     /// The name of the folder the stack's root is: in development the
     /// folder is the environment.
     pub name: String,
@@ -21,12 +21,12 @@ pub struct Environment {
     pub root: String,
     pub state: String,
     pub logs: String,
-    /// `None` when the home folder is not known.
+    /// `None` when the folder that holds it is not known.
     pub shared: Option<String>,
     pub profile: Option<String>,
 }
 
-impl Environment {
+impl EnvironmentFacts {
     /// The environment of `stack`'s folder under `profile` and the choices
     /// in force. Its paths are values, so the folder's path must be UTF-8.
     pub fn of(
@@ -34,9 +34,9 @@ impl Environment {
         stack_name: &str,
         profile: Option<&Profile>,
         layered: &Layered,
-        home: Option<&Path>,
+        shared_folders: Option<&Path>,
         d: &mut Diagnostics,
-    ) -> Option<Environment> {
+    ) -> Option<EnvironmentFacts> {
         let Some(root) = stack.root.to_str() else {
             d.error(
                 stack.loc,
@@ -54,22 +54,17 @@ impl Environment {
             Some(chosen) => chosen.clone(),
             None => folder_label(&name, stack_name),
         };
-        let own = |folder: &str| {
-            Path::new(root)
-                .join(ENVIRONMENT_FOLDER)
-                .join(folder)
-                .display()
-                .to_string()
-        };
-        Some(Environment {
+        let layout = Layout::of(&stack.root);
+        // The root's path is UTF-8, and so is every path under it.
+        let text = |path: &Path| path.display().to_string();
+        Some(EnvironmentFacts {
             label,
             name,
             root: root.to_string(),
-            state: own("state"),
-            logs: own("logs"),
-            shared: home.and_then(|home| {
-                home.join(".local/share/tay")
-                    .join(stack_name)
+            state: text(&layout.state()),
+            logs: text(&layout.logs()),
+            shared: shared_folders.and_then(|folders| {
+                disk::shared_folder(folders, stack_name)
                     .to_str()
                     .map(str::to_string)
             }),

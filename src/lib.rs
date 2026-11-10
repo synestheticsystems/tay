@@ -7,6 +7,7 @@
 pub mod cli;
 mod definition;
 mod diagnostic;
+mod disk;
 mod module;
 mod plan;
 mod syntax;

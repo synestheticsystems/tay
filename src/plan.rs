@@ -25,7 +25,7 @@ pub use model::{
     Unreachable,
 };
 
-use resolve::{Environment, Resolver};
+use resolve::{EnvironmentFacts, Resolver};
 
 /// What `tay plan` is asked for.
 pub struct Options {
@@ -34,6 +34,8 @@ pub struct Options {
     pub sets: Vec<String>,
     /// The home folder, where this person's own file of choices is.
     pub home: Option<PathBuf>,
+    /// The folder that holds each stack's shared folder, when it is known.
+    pub shared_folders: Option<PathBuf>,
 }
 
 pub enum Outcome {
@@ -95,8 +97,15 @@ pub fn plan(root: &Path, options: &Options, sources: &mut Sources, d: &mut Diagn
     let Some(stack_name) = &stack.name else {
         return Outcome::Errors;
     };
-    let Some(environment) = Environment::of(&stack, &stack_name.name, profile, &layered, home, d)
-    else {
+    let shared_folders = options.shared_folders.as_deref();
+    let Some(environment) = EnvironmentFacts::of(
+        &stack,
+        &stack_name.name,
+        profile,
+        &layered,
+        shared_folders,
+        d,
+    ) else {
         return Outcome::Errors;
     };
     let mut planner = Planner {
@@ -161,6 +170,7 @@ mod tests {
             profile: None,
             sets: sets.iter().map(|set| set.to_string()).collect(),
             home: Some(fixtures.join("homes/none")),
+            shared_folders: Some(fixtures.join("homes/none/.local/share/tay")),
         };
         let mut sources = Sources::default();
         let mut d = Diagnostics::default();
