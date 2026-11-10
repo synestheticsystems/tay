@@ -36,6 +36,10 @@ impl Module for Command {
         "command"
     }
 
+    fn joined_by_entry(&self) -> &'static [&'static str] {
+        &["env", "secret_env"]
+    }
+
     fn check(&self, with: Option<&Node>, cx: &mut Cx<'_>) -> Option<UnitShape> {
         let Some(with) = with else {
             cx.d.error(cx.uses, "a `command` unit needs `with` and in it a `run`");

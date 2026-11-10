@@ -39,6 +39,10 @@ impl Module for Container {
         "container"
     }
 
+    fn joined_by_entry(&self) -> &'static [&'static str] {
+        &["env", "secret_env", "labels", "volumes", "publish"]
+    }
+
     fn check(&self, with: Option<&Node>, cx: &mut Cx<'_>) -> Option<UnitShape> {
         let Some(with) = with else {
             cx.d.error(

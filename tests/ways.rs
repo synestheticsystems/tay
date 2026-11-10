@@ -52,3 +52,50 @@ fn every_way_gives_the_same_value_names_and_a_missing_one_is_reported_once() {
         ]
     );
 }
+
+#[test]
+fn a_way_writing_no_ready_or_restart_has_its_units() {
+    let plan = plan_json("ways-shared", &[]);
+    let server = unit(&plan, "server");
+    assert_eq!(server["ready"]["check"], "log");
+    assert_eq!(server["ready"]["within"]["value"], "1m");
+    assert_eq!(server["restart"]["on"]["value"], "always");
+    assert_eq!(server["restart"]["attempts"]["value"], 2);
+    let plan = plan_json("ways-shared", &["--set", "run.units.server=image"]);
+    let server = unit(&plan, "server");
+    assert_eq!(server["ready"]["within"]["value"], "2m");
+    assert_eq!(server["restart"]["on"]["value"], "never");
+}
+
+#[test]
+fn a_units_with_is_joined_into_each_way_setting_by_setting_and_env_entry_by_entry() {
+    // The ways replace `REPLACED`, which is not a value, and keep `KEPT`,
+    // which is not one either; `source` replaces `workdir` and `image` does
+    // not; and `held`, a port, has neither setting.
+    let run = plan("ways-joined", &[]);
+    assert_eq!(run.code, 2);
+    assert_eq!(
+        run.errors(),
+        [
+            "tay.yaml:7:7: `env` is not a field of the settings of a `port` unit; its fields are prefer, fixed",
+            "tay.yaml:7:47: a value is text, a whole number or true or false; this is a list",
+            "tay.yaml:8:7: `workdir` is not a field of the settings of a `port` unit; its fields are prefer, fixed",
+            "tay.yaml:8:16: this must be text; this is a whole number",
+        ]
+    );
+}
+
+#[test]
+fn names_a_way_produces_count_among_the_values_it_gives() {
+    // `issued` produces `value` and `generated` gives it known before start:
+    // those two agree, and only `missing` is reported.
+    let run = plan("ways-produced", &[]);
+    assert_eq!(run.code, 2);
+    assert_eq!(
+        run.errors(),
+        [
+            "tay.yaml:13:7: way `missing` of `token` does not give `value`, which way `issued` gives; every way gives the same values",
+            "  tay.yaml:9:42: `issued` gives it here",
+        ]
+    );
+}

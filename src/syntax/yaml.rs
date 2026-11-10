@@ -91,6 +91,40 @@ impl Node {
         }
     }
 
+    /// `over` laid on this mapping: each of its entries replaces the entry
+    /// with the same key, or is added after the rest. An entry whose key
+    /// `by_entry` names is itself joined entry by entry when its value is a
+    /// mapping on both sides. When either side is not a mapping, the result
+    /// is `over`.
+    pub fn joined(&self, over: &Node, by_entry: &[&str]) -> Node {
+        let (Some(base), Some(top)) = (self.as_map(), over.as_map()) else {
+            return over.clone();
+        };
+        let mut entries = base.to_vec();
+        for entry in top {
+            let key = entry.key.key_text();
+            let existing = entries
+                .iter_mut()
+                .find(|existing| key.is_some() && existing.key.key_text() == key);
+            match existing {
+                Some(existing) => {
+                    let deep = key.as_deref().is_some_and(|key| by_entry.contains(&key));
+                    existing.value = if deep {
+                        existing.value.joined(&entry.value, &[])
+                    } else {
+                        entry.value.clone()
+                    };
+                    existing.key = entry.key.clone();
+                }
+                None => entries.push(entry.clone()),
+            }
+        }
+        Node {
+            loc: over.loc,
+            kind: Kind::Map(entries),
+        }
+    }
+
     /// The text a key is compared by when looking for duplicates.
     fn key_text(&self) -> Option<String> {
         match &self.kind {

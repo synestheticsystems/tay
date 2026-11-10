@@ -19,6 +19,12 @@ pub trait Module: Sync {
     /// The name a unit's `uses` gives.
     fn name(&self) -> &'static str;
 
+    /// The settings that map names to values, which a way's `with` joins
+    /// with its unit's entry by entry rather than replacing.
+    fn joined_by_entry(&self) -> &'static [&'static str] {
+        &[]
+    }
+
     /// Reads the unit's `with` strictly against this module's settings and
     /// describes the unit. `None` when the settings have errors, which are
     /// reported through `cx`.

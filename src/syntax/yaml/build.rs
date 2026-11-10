@@ -354,6 +354,37 @@ mod tests {
     }
 
     #[test]
+    fn a_mapping_laid_over_another_replaces_by_key_and_joins_named_entries_one_by_one() {
+        let (base, _) =
+            read("env: { A: 1, B: 2 }\nbuild: { context: a, args: { X: 1 } }\nkeep: 1\n");
+        let (over, _) = read("env: { B: 3, C: 4 }\nbuild: { context: b }\nnew: 5\n");
+        let joined = base.unwrap().joined(&over.unwrap(), &["env"]);
+        let entries = joined.as_map().unwrap();
+        let keys: Vec<_> = entries
+            .iter()
+            .map(|e| e.key.as_str().unwrap().text.as_str())
+            .collect();
+        assert_eq!(keys, ["env", "build", "keep", "new"]);
+        let env: Vec<_> = entries[0]
+            .value
+            .as_map()
+            .unwrap()
+            .iter()
+            .map(|e| (e.key.as_str().unwrap().text.clone(), e.value.kind.clone()))
+            .collect();
+        assert_eq!(
+            env,
+            [
+                ("A".to_string(), Kind::Scalar(Scalar::Int(1))),
+                ("B".to_string(), Kind::Scalar(Scalar::Int(3))),
+                ("C".to_string(), Kind::Scalar(Scalar::Int(4))),
+            ]
+        );
+        // `build` is not joined entry by entry: the later one replaces it whole.
+        assert_eq!(entries[1].value.as_map().unwrap().len(), 1);
+    }
+
+    #[test]
     fn a_second_document_is_an_error() {
         let (_, errors) = read("a: 1\n---\nb: 2\n");
         assert_eq!(errors.len(), 1);

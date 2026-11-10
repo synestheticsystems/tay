@@ -1,0 +1,19 @@
+format: 1
+stack: ways-shared
+up: [server]
+run: { default: source }
+units:
+  server:
+    with:
+      env: { MODE: shared }
+    ready: { log: listening, within: 1m }
+    restart: { on: always, attempts: 2 }
+    run:
+      source:
+        uses: process
+        with: { command: [serve] }
+      image:
+        uses: container
+        with: { image: example/server }
+        ready: { log: ready, within: 2m }
+        restart: { on: never }

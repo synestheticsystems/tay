@@ -1,0 +1,15 @@
+format: 1
+stack: ways-produced
+up: []
+units:
+  token:
+    run:
+      issued:
+        uses: command
+        with: { run: [issue], produces: [value] }
+      generated:
+        uses: secret
+        with: { kind: password }
+      missing:
+        uses: process
+        with: { command: [serve] }

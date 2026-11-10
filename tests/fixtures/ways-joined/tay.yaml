@@ -1,0 +1,17 @@
+format: 1
+stack: ways-joined
+up: []
+units:
+  server:
+    with:
+      env: { REPLACED: [not, a, value], KEPT: [not, a, value] }
+      workdir: 5
+    run:
+      source:
+        uses: process
+        with: { command: [serve], env: { REPLACED: fixed }, workdir: app }
+      image:
+        uses: container
+        with: { image: example/server, env: { REPLACED: fixed } }
+      held:
+        uses: port

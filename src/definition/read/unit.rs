@@ -1,9 +1,12 @@
 //! Reading one unit: its form (one module, ways under `run`, a template, or a
 //! group), and the ways the planner chooses between.
 
-use crate::definition::{Give, GiveValue, ModuleUse, Unit, Way};
+use std::borrow::Cow;
+
+use crate::definition::{Give, GiveValue, ModuleUse, Ready, Restart, Unit, Way};
 use crate::diagnostic::{Diagnostic, Diagnostics};
-use crate::module::{self, Cx};
+use crate::module::{self, Cx, Module};
+use crate::syntax::expr::Expr;
 use crate::syntax::fields::{self, Fields};
 use crate::syntax::names::{self, NameAt};
 use crate::syntax::yaml::Node;
@@ -42,29 +45,40 @@ pub fn unreadable(name: NameAt) -> Unit {
     }
 }
 
-/// Needs, waits and values written on the unit itself, joined into each of its ways.
+/// What a way is built from, as a unit writes it for all its ways or as one
+/// way writes it for itself.
 #[derive(Default)]
-struct Shared {
+struct WayFields<'n> {
+    with: Option<&'n Node>,
     needs: Vec<NameAt>,
     after: Vec<NameAt>,
     gives: Vec<Give>,
+    ready: Option<Ready>,
+    restart: Option<Restart>,
+    watch: Option<Vec<Expr>>,
 }
 
-impl Shared {
-    fn read(fields: &Fields<'_>, d: &mut Diagnostics) -> Shared {
+impl<'n> WayFields<'n> {
+    fn read(fields: &Fields<'n>, d: &mut Diagnostics) -> WayFields<'n> {
         let names = |key: &str, d: &mut Diagnostics| {
             fields
                 .get(key)
                 .map(|node| fields::name_list(node, &format!("`{key}`"), names::name_problem, d))
                 .unwrap_or_default()
         };
-        Shared {
+        WayFields {
+            with: fields.get("with"),
             needs: names("needs", d),
             after: names("after", d),
             gives: fields
                 .get("gives")
                 .map(|node| parts::gives(node, d))
                 .unwrap_or_default(),
+            ready: fields.get("ready").and_then(|node| parts::ready(node, d)),
+            restart: fields
+                .get("restart")
+                .and_then(|node| parts::restart(node, d)),
+            watch: fields.get("watch").map(|node| parts::watch(node, d)),
         }
     }
 }
@@ -83,7 +97,6 @@ pub fn read_fields(name: NameAt, fields: &Fields<'_>, d: &mut Diagnostics) -> Un
     if let Some((key, _)) = fields.entry("params") {
         d.error(key.loc, "`params` goes with `from`: they fill a template");
     }
-    let shared = Shared::read(fields, d);
     let ways = match (fields.entry("uses"), fields.entry("run")) {
         (Some(_), Some((run, _))) => {
             d.error(
@@ -93,10 +106,11 @@ pub fn read_fields(name: NameAt, fields: &Fields<'_>, d: &mut Diagnostics) -> Un
             None
         }
         (Some(_), None) => {
-            way(&name.name, None, fields, Shared::default(), &shared, d).map(|way| vec![way])
+            let own = WayFields::read(fields, d);
+            way(&name.name, None, fields, own, &WayFields::default(), d).map(|way| vec![way])
         }
-        (None, Some((_, run))) => ways(&name, fields, run, &shared, d),
-        (None, None) => group(fields, shared, d),
+        (None, Some((_, run))) => ways(&name, fields, run, d),
+        (None, None) => group(fields, d),
     };
     match ways {
         Some(ways) if d.len() == errors_before => Unit {
@@ -109,7 +123,7 @@ pub fn read_fields(name: NameAt, fields: &Fields<'_>, d: &mut Diagnostics) -> Un
     }
 }
 
-fn group(fields: &Fields<'_>, shared: Shared, d: &mut Diagnostics) -> Option<Vec<Way>> {
+fn group(fields: &Fields<'_>, d: &mut Diagnostics) -> Option<Vec<Way>> {
     for (field, key) in fields.present() {
         if !matches!(field, "doc" | "needs") {
             d.error(
@@ -123,7 +137,7 @@ fn group(fields: &Fields<'_>, shared: Shared, d: &mut Diagnostics) -> Option<Vec
     Some(vec![Way {
         name: None,
         module: None,
-        needs: shared.needs,
+        needs: WayFields::read(fields, d).needs,
         after: Vec::new(),
         gives: Vec::new(),
         outputs: Vec::new(),
@@ -133,20 +147,18 @@ fn group(fields: &Fields<'_>, shared: Shared, d: &mut Diagnostics) -> Option<Vec
     }])
 }
 
-fn ways(
-    name: &NameAt,
-    fields: &Fields<'_>,
-    run: &Node,
-    shared: &Shared,
-    d: &mut Diagnostics,
-) -> Option<Vec<Way>> {
-    for field in ["with", "ready", "restart", "watch"] {
-        if let Some((key, _)) = fields.entry(field) {
-            d.error(
-                key.loc,
-                format!("`{field}` goes in each way under `run`, not on the unit"),
-            );
-        }
+fn ways(name: &NameAt, fields: &Fields<'_>, run: &Node, d: &mut Diagnostics) -> Option<Vec<Way>> {
+    let shared = WayFields::read(fields, d);
+    if let Some(with) = shared.with
+        && with.as_map().is_none()
+    {
+        d.error(
+            with.loc,
+            format!(
+                "`with` written for all of a unit's ways is a mapping of settings; this is {}",
+                with.describe()
+            ),
+        );
     }
     let listed = fields::keyed(run, "a way", names::name_problem, d);
     if listed.is_empty() && run.as_map().is_some() {
@@ -156,9 +168,9 @@ fn ways(
     let ways: Vec<Option<Way>> = listed
         .into_iter()
         .map(|(way_name, node)| {
-            let own = Fields::of(node, "a way", WAY_FIELDS, d)?;
-            let own_shared = Shared::read(&own, d);
-            way(&name.name, Some(way_name), &own, own_shared, shared, d)
+            let fields = Fields::of(node, "a way", WAY_FIELDS, d)?;
+            let own = WayFields::read(&fields, d);
+            way(&name.name, Some(way_name), &fields, own, &shared, d)
         })
         .collect();
     let ways: Vec<Way> = ways.into_iter().collect::<Option<_>>()?;
@@ -167,13 +179,14 @@ fn ways(
 }
 
 /// One way to run: a module and its settings, with what the unit writes for
-/// all its ways joined to what this one writes.
+/// all its ways joined to what this one writes. `fields` holds the way's
+/// `uses`.
 fn way(
     unit: &str,
     way_name: Option<NameAt>,
     fields: &Fields<'_>,
-    own: Shared,
-    shared: &Shared,
+    own: WayFields<'_>,
+    shared: &WayFields<'_>,
     d: &mut Diagnostics,
 ) -> Option<Way> {
     let (uses_key, uses) = fields.entry("uses").or_else(|| {
@@ -194,12 +207,13 @@ fn way(
         );
         return None;
     };
+    let with = joined_with(module, shared.with, own.with);
     let mut cx = Cx {
         unit,
         uses: uses_key.loc,
         d,
     };
-    let shape = module.check(fields.get("with"), &mut cx)?;
+    let shape = module.check(with.as_deref(), &mut cx)?;
     let mut gives = shared.gives.clone();
     let module_gives = shape.gives.iter().map(|given| Give {
         name: given.name.clone(),
@@ -232,15 +246,28 @@ fn way(
         needs: joined(&shared.needs, own.needs),
         after: joined(&shared.after, own.after),
         gives,
-        ready: fields.get("ready").and_then(|node| parts::ready(node, d)),
-        restart: fields
-            .get("restart")
-            .and_then(|node| parts::restart(node, d)),
-        watch: fields
-            .get("watch")
-            .map(|node| parts::watch(node, d))
+        ready: own.ready.or_else(|| shared.ready.clone()),
+        restart: own.restart.or_else(|| shared.restart.clone()),
+        watch: own
+            .watch
+            .or_else(|| shared.watch.clone())
             .unwrap_or_default(),
     })
+}
+
+/// The settings a way's module reads: the way's own `with` laid over the
+/// one its unit writes for all its ways, setting by setting, and entry by
+/// entry for the settings the module says map names to values.
+fn joined_with<'n>(
+    module: &dyn Module,
+    shared: Option<&'n Node>,
+    own: Option<&'n Node>,
+) -> Option<Cow<'n, Node>> {
+    match (shared, own) {
+        (Some(shared), Some(own)) => Some(Cow::Owned(shared.joined(own, module.joined_by_entry()))),
+        (Some(only), None) | (None, Some(only)) => Some(Cow::Borrowed(only)),
+        (None, None) => None,
+    }
 }
 
 /// `first` and then those of `more` not already in it.
