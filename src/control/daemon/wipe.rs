@@ -155,8 +155,8 @@ impl Daemon {
 
     /// Takes the environment down and removes everything it keeps, telling
     /// `change`'s followers each change of state and what was removed; then
-    /// the daemon exits. What could not be stopped keeps everything as it
-    /// is.
+    /// the daemon exits, as after `tay down`. While anything could not be
+    /// stopped, nothing is removed.
     pub async fn wipe_all(self: Arc<Self>, change: Arc<Change>) {
         log(&format!("change: {}", change.describe()));
         let environment = &self.environment;

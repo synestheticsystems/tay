@@ -39,7 +39,7 @@ impl Down {
         match self {
             Down::Asked => "taken down by `tay down`",
             Down::Gone => "the environment's folder has gone",
-            Down::Wiped => "everything the environment kept was removed by `tay wipe --all`",
+            Down::Wiped => "taken down by `tay wipe --all`",
         }
     }
 }

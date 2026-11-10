@@ -9,7 +9,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use super::change::{Change, NotBegun};
+use super::change::Change;
 use super::{Daemon, log, options};
 use crate::control::protocol::{Event, Produced, RunRequest};
 use crate::disk::unit_log::{Following, UnitLog, Writer};
@@ -21,12 +21,6 @@ use crate::plan::PlannedUnit;
 const FOLLOW: Duration = Duration::from_millis(250);
 
 impl Daemon {
-    /// Whether an action may be run now: only on an environment that is
-    /// meant to be up, so that nothing is started against its intent.
-    pub fn runs_actions(&self) -> Result<(), NotBegun> {
-        self.meant_to_be_up()
-    }
-
     /// Runs the action `request` asks for, after bringing up what it needs,
     /// telling `change`'s followers each change of state, each line it
     /// writes, and what it came to.
