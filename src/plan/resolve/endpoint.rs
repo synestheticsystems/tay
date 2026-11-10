@@ -9,7 +9,7 @@
 //! and that port.
 
 use crate::definition::Endpoint;
-use crate::module::{Form, Runs, UnitKind};
+use crate::module::{Form, Published, Runs, UnitKind};
 use crate::syntax::expr::{Part, Reference};
 
 use super::{Asker, Fail, Res, Resolver, Scope, ViewProblem};
@@ -24,7 +24,7 @@ const HOST_SEEN_FROM_CONTAINERS: &str = "host.docker.internal";
 /// scheme has one.
 const USUAL_PORTS: [(&str, i64); 2] = [("http", 80), ("https", 443)];
 
-impl Resolver<'_> {
+impl<'s> Resolver<'s> {
     pub(super) fn endpoint(
         &mut self,
         owner: usize,
@@ -149,10 +149,29 @@ impl Resolver<'_> {
                     }
                     _ => owner,
                 };
-                match self.published(container, &port)? {
-                    Some(host_port) => (LOOPBACK.to_string(), host_port),
-                    None => return not_published(&port),
+                let Form::Number(Some(number)) = port.form() else {
+                    return not_published(&port);
+                };
+                let Some(entry) = self.published(container, number) else {
+                    return not_published(&port);
+                };
+                let container_name = self.stack.units[container].name.name.clone();
+                if let Some(opened) = &self.opened
+                    && !entry.always
+                    && !opened.contains(&(container_name.clone(), number))
+                {
+                    return Err(Fail::View(ViewProblem::NotOpened {
+                        owner: owner_name.clone(),
+                        port: port.shown(),
+                    }));
                 }
+                let scope = Scope {
+                    unit: Some(container),
+                    asker: Asker::Container,
+                };
+                let mut host_port = self.resolve(&entry.host_port.expr, scope)?;
+                host_port.published_uses.insert((container_name, number));
+                (LOOPBACK.to_string(), host_port)
             }
             (Asker::Container, Runs::OnHost) => (HOST_SEEN_FROM_CONTAINERS.to_string(), port),
             (Asker::Container, Runs::OwnContainer { .. } | Runs::OneOffContainer) => {
@@ -163,22 +182,12 @@ impl Resolver<'_> {
         Ok((Resolved::text(host), port))
     }
 
-    /// The host port published for `port` of the container `unit` runs in, if any.
-    fn published(&mut self, unit: usize, port: &Resolved) -> Result<Option<Resolved>, Fail> {
+    /// The `publish` entry of the container `unit` for its port `port`, if any.
+    fn published(&mut self, unit: usize, port: i64) -> Option<&'s Published> {
         let Some(UnitKind::Runs(Runs::OwnContainer { published })) = self.kind(unit) else {
-            return Ok(None);
+            return None;
         };
-        let Form::Number(Some(port)) = port.form() else {
-            return Ok(None);
-        };
-        let Some(entry) = published.iter().find(|p| p.container_port == port) else {
-            return Ok(None);
-        };
-        let scope = Scope {
-            unit: Some(unit),
-            asker: Asker::Container,
-        };
-        Ok(Some(self.resolve(&entry.host_port, scope)?))
+        published.iter().find(|entry| entry.container_port == port)
     }
 }
 

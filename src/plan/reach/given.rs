@@ -65,6 +65,12 @@ impl Planner<'_> {
                     Seen::Unreachable(format!("its port {port} is not published to the host")),
                     None,
                 )),
+                Err(Fail::View(ViewProblem::NotOpened { port, .. })) => Some((
+                    Seen::Unreachable(format!(
+                        "its port {port} is published, but nothing in the plan opens it on the host"
+                    )),
+                    None,
+                )),
                 Err(Fail::View(ViewProblem::NeedsView { .. })) | Err(Fail::Reported) => None,
             }
         };

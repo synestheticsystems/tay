@@ -10,7 +10,7 @@ use crate::syntax::expr::{self, Expr};
 
 use super::visit::NeedEdge;
 use crate::plan::Planner;
-use crate::plan::model::Because;
+use crate::plan::model::{Because, OpenedBy, Opener};
 use crate::plan::resolve::value::Resolved;
 use crate::plan::resolve::{Asker, Fail, Scope, ViewProblem};
 
@@ -38,17 +38,33 @@ impl User<'_> {
     }
 }
 
+/// What using values adds to the plan: the needs it makes, and the
+/// published ports it opens.
+#[derive(Default)]
+pub struct Uses {
+    pub needs: Vec<NeedEdge>,
+    pub opens: Vec<Opening>,
+}
+
+/// A published port that a use from the host opens.
+pub struct Opening {
+    pub container: String,
+    pub port: i64,
+    pub opener: Opener,
+}
+
 impl Planner<'_> {
     /// Resolves `expr` for `user` and checks it at its place. Each unit that
-    /// makes or produces a value it is built from is a need, added to
-    /// `needs`. `None` when it cannot be used; the reason is reported.
+    /// makes or produces a value it is built from is a need, and each
+    /// published port it reaches from the host is opened; both go into
+    /// `uses`. `None` when it cannot be used; the reason is reported.
     pub fn use_value(
         &mut self,
         user: User<'_>,
         expr: &Expr,
         want: Want,
         place: Place,
-        needs: &mut Vec<NeedEdge>,
+        uses: &mut Uses,
     ) -> Option<Resolved> {
         let scope = Scope {
             unit: Some(user.unit),
@@ -74,12 +90,29 @@ impl Planner<'_> {
             );
         for (unit, because) in built_from {
             if let Some(unit) = self.resolver.unit_index(unit) {
-                needs.push(NeedEdge {
+                uses.needs.push(NeedEdge {
                     unit,
                     loc: expr.loc,
                     because,
                 });
             }
+        }
+        // Only a view can make a unit that does not run on the host reach a
+        // published port from the host.
+        let how = match (user.readiness, user.asker) {
+            (true, _) => OpenedBy::ReadinessCheck,
+            (false, Asker::Host) => OpenedBy::UnitOnHost,
+            (false, _) => OpenedBy::View,
+        };
+        for (container, port) in &value.published_uses {
+            uses.opens.push(Opening {
+                container: container.clone(),
+                port: *port,
+                opener: Opener {
+                    unit: user.name.to_string(),
+                    how,
+                },
+            });
         }
         if let Some(problem) = want.problem(&value.form()) {
             let what = match &expr.kind {
@@ -92,7 +125,7 @@ impl Planner<'_> {
         self.check_place(&value, place, expr.loc);
         if let Want::TemplateFile(content) = want {
             let path = value.exact_text()?;
-            self.use_template_file(user, &path, expr.loc, content, needs)?;
+            self.use_template_file(user, &path, expr.loc, content, uses)?;
         }
         Some(value)
     }
@@ -130,7 +163,7 @@ impl Planner<'_> {
         path: &str,
         at: Loc,
         content: Place,
-        needs: &mut Vec<NeedEdge>,
+        uses: &mut Uses,
     ) -> Option<()> {
         let file = self.root.join(path);
         let text = match fs::read_to_string(&file) {
@@ -155,7 +188,7 @@ impl Planner<'_> {
             loc: Loc::new(source, 1, 1),
             kind: expr::ExprKind::Text(pieces),
         };
-        self.use_value(user, &content_expr, Want::Scalar, content, needs)
+        self.use_value(user, &content_expr, Want::Scalar, content, uses)
             .map(|_| ())
     }
 }
@@ -184,5 +217,11 @@ fn view_error(user: User<'_>, at: Loc, problem: ViewProblem) -> Diagnostic {
             ),
         )
         .with(endpoint, "the endpoint is defined here"),
+        ViewProblem::NotOpened { owner, port } => Diagnostic::new(
+            at,
+            format!(
+                "{who}, and uses here an address of unit `{owner}` as the host sees it, but nothing in the plan opens its port {port} on the host"
+            ),
+        ),
     }
 }

@@ -7,7 +7,8 @@ use crate::definition::read::THIS_TAY;
 use crate::diagnostic::Diagnostic;
 use crate::diagnostic::source::{Loc, Source, Sources};
 use crate::plan::{
-    Because, Exact, GivenLine, Mechanism, Plan, PlannedUnit, Readiness, Running, Seen, Shown,
+    Because, Exact, GivenLine, Mechanism, OpenedBy, Plan, PlannedUnit, PublishedPort, Readiness,
+    Running, Seen, Shown,
 };
 
 pub const SCHEMA: u32 = 1;
@@ -108,7 +109,29 @@ fn unit(unit: &PlannedUnit) -> Value {
             "attempts": restart.attempts.as_ref().map(shown),
         })),
         "watch": unit.watch.iter().map(shown).collect::<Vec<_>>(),
+        "publishes": unit.publishes.iter().map(published).collect::<Vec<_>>(),
         "gives": unit.gives.iter().map(given).collect::<Vec<_>>(),
+    })
+}
+
+fn published(published: &PublishedPort) -> Value {
+    let Some(opened) = &published.opened else {
+        return json!({ "container_port": published.container_port, "opened": false });
+    };
+    json!({
+        "container_port": published.container_port,
+        "opened": true,
+        "address": shown(&opened.address),
+        "host_port": shown(&opened.host_port),
+        "always": opened.always,
+        "opened_by": opened.by.iter().map(|opener| json!({
+            "unit": opener.unit,
+            "how": match opener.how {
+                OpenedBy::UnitOnHost => "unit_on_host",
+                OpenedBy::ReadinessCheck => "readiness_check",
+                OpenedBy::View => "view",
+            },
+        })).collect::<Vec<_>>(),
     })
 }
 

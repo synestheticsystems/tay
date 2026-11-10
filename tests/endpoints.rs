@@ -3,7 +3,8 @@
 
 mod support;
 
-use support::{given, plan, plan_json, unit};
+use serde_json::json;
+use support::{given, plan, plan_json, unit, unit_names};
 
 /// The words of a unit's readiness command, as resolved for that unit.
 fn probe(plan: &serde_json::Value, name: &str) -> Vec<String> {
@@ -140,5 +141,61 @@ fn a_view_must_name_a_unit_that_runs_a_url_needs_a_scheme_and_a_made_unit_writes
             "tay.yaml:15:74: `${wiki.raw.url}`: the endpoint has no `scheme`, so it has no URL",
             "tay.yaml:19:12: unit `held` is made and runs nothing that listens, so an endpoint it gives must write its `host`",
         ]
+    );
+}
+
+#[test]
+fn a_published_port_is_opened_only_for_a_use_from_the_host_or_always_and_otherwise_uses_nothing() {
+    let plan = plan_json("published", &[]);
+    // Nothing opens 9090, so the port unit named only there stays out.
+    let names = unit_names(&plan);
+    assert!(!names.contains(&"quiet-port"), "{names:?}");
+    assert!(names.contains(&"always-port"), "{names:?}");
+    let box_unit = unit(&plan, "box");
+    assert_eq!(
+        box_unit["publishes"],
+        json!([
+            {
+                "container_port": 8080,
+                "opened": true,
+                "address": { "text": "127.0.0.1", "value": "127.0.0.1" },
+                "host_port": { "text": "<port: box-port>", "value": null },
+                "always": false,
+                "opened_by": [
+                    { "unit": "box", "how": "readiness_check" },
+                    { "unit": "web", "how": "unit_on_host" },
+                ],
+            },
+            { "container_port": 9090, "opened": false },
+            {
+                "container_port": 7070,
+                "opened": true,
+                "address": { "text": "0.0.0.0", "value": "0.0.0.0" },
+                "host_port": { "text": "<port: always-port>", "value": null },
+                "always": true,
+                "opened_by": [],
+            },
+        ])
+    );
+    assert_eq!(
+        given(box_unit, "quiet")["from_host"],
+        json!({ "unreachable": "its port 9090 is published, but nothing in the plan opens it on the host" })
+    );
+    let text = support::plan("published", &[]).stdout;
+    assert!(text.contains(
+        "   publishes 8080 at 127.0.0.1:<port: box-port>, opened for box (its readiness check), web (on the host)\n"
+    ));
+    assert!(text.contains(
+        "   publishes 9090: not opened, since nothing in the plan uses it from the host\n"
+    ));
+    assert!(text.contains("   publishes 7070 at 0.0.0.0:<port: always-port>, opened for always\n"));
+}
+
+#[test]
+fn a_view_of_the_host_opens_a_published_port_for_a_unit_in_a_container() {
+    let plan = plan_json("published", &["--set", "up_add=viewer"]);
+    assert_eq!(
+        unit(&plan, "box")["publishes"][0]["opened_by"][1],
+        json!({ "unit": "viewer", "how": "view" })
     );
 }

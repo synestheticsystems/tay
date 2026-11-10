@@ -11,7 +11,7 @@ use crate::diagnostic::Diagnostics;
 use crate::diagnostic::source::Loc;
 use crate::syntax::yaml::Node;
 
-pub use shape::{Concern, GivenValue, Place, RestartDefault, Runs, UnitKind, UnitShape};
+pub use shape::{Concern, GivenValue, Place, Published, RestartDefault, Runs, UnitKind, UnitShape};
 pub use want::{Form, Want};
 
 /// One mechanism a unit can use.

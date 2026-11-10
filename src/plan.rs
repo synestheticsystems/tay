@@ -18,7 +18,8 @@ use crate::diagnostic::source::{Loc, Sources};
 use crate::diagnostic::{Diagnostic, Diagnostics};
 
 pub use model::{
-    Because, GivenLine, Mechanism, Plan, PlannedUnit, Readiness, Running, Seen, Shown,
+    Because, GivenLine, Mechanism, OpenedBy, Plan, PlannedUnit, PublishedPort, Readiness, Running,
+    Seen, Shown,
 };
 pub use resolve::value::Exact;
 
@@ -126,8 +127,8 @@ pub fn plan(root: &Path, options: &Options, sources: &mut Sources, d: &mut Diagn
     if let (Some(profile), Some(marked_at)) = (profile, production) {
         planner.refuse_for_production(&profile.name, marked_at, &reached.chosen);
     }
-    planner.resolver.report_unset_settings();
     let plan = planner.finish(reached, &stack, &stack_name.name, profile);
+    planner.resolver.report_unset_settings();
     d.extend(planner.resolver.d);
     match plan {
         Some(plan) if d.is_empty() => Outcome::Plan(plan),

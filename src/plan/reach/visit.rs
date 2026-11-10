@@ -5,7 +5,7 @@ use crate::definition::{Check, Way};
 use crate::diagnostic::source::Loc;
 use crate::module::{Place, RestartDefault, Runs, UnitKind, Want};
 
-use super::usage::User;
+use super::usage::{Opening, User, Uses};
 use crate::plan::Planner;
 use crate::plan::model::{
     Because, Mechanism, PlannedUnit, Readiness, RestartPolicy, Running, Shown,
@@ -32,25 +32,30 @@ pub struct NeedEdge {
 
 /// What visiting one unit adds to the plan.
 pub struct Visit {
+    pub way: usize,
     /// `None` when one of its values could not be resolved; that is reported.
     pub planned: Option<PlannedUnit>,
     pub needs: Vec<NeedEdge>,
     pub after: Vec<(usize, Loc)>,
+    /// The published ports of other units, or its own, that its uses open.
+    pub opens: Vec<Opening>,
+    /// For each of its own published ports, the address and host port it is
+    /// opened at, once something opens it and its values are used; an
+    /// error in them has been reported.
+    pub published: Vec<Option<(Option<Shown>, Option<Shown>)>>,
 }
 
 impl Planner<'_> {
-    pub fn visit(&mut self, unit: usize, way: usize) -> Visit {
+    pub fn visit(&mut self, unit: usize, way_index: usize) -> Visit {
         let stack = self.resolver.stack;
         let definition = &stack.units[unit];
-        let way = &definition.ways[way];
-        // The needs that using values makes, in the order they are found.
-        let mut uses = Vec::new();
-        let (mechanism, ready, restart, watch, gives) = match &way.module {
+        let way = &definition.ways[way_index];
+        let mut uses = Uses::default();
+        let (mechanism, ready, restart, watch) = match &way.module {
             None => (
                 Mechanism::Group,
                 Some(Readiness::Group),
                 Some(None),
-                Vec::new(),
                 Vec::new(),
             ),
             Some(module) => {
@@ -68,16 +73,19 @@ impl Planner<'_> {
                 let ready = self.readiness(user, way, module.shape.ready_without_check, &mut uses);
                 let restart = self.restart(user, way, module.shape.restart_by_default, &mut uses);
                 let watch = self.watch(user, way, &mut uses);
-                let gives = self.gives(unit, way);
                 let mechanism = Mechanism::Module {
                     module: module.module.name(),
                     way: way.name.as_ref().map(|name| name.name.clone()),
                     runs,
                 };
-                (mechanism, ready, restart.map(Some), watch, gives)
+                (mechanism, ready, restart.map(Some), watch)
             }
         };
-        let needs = self.needs(unit, way, uses);
+        let published = match way.module.as_ref().map(|module| &module.shape.kind) {
+            Some(UnitKind::Runs(Runs::OwnContainer { published })) => vec![None; published.len()],
+            _ => Vec::new(),
+        };
+        let needs = self.needs(unit, way, uses.needs);
         let after = way
             .after
             .iter()
@@ -93,13 +101,17 @@ impl Planner<'_> {
                 ready: ready?,
                 restart: restart?,
                 watch: watch.into_iter().collect::<Option<_>>()?,
-                gives: gives.into_iter().collect::<Option<_>>()?,
+                publishes: Vec::new(),
+                gives: Vec::new(),
             })
         })();
         Visit {
+            way: way_index,
             planned,
             needs,
             after,
+            opens: uses.opens,
+            published,
         }
     }
 
@@ -139,7 +151,7 @@ impl Planner<'_> {
         user: User<'_>,
         way: &Way,
         without_check: &'static str,
-        uses: &mut Vec<NeedEdge>,
+        uses: &mut Uses,
     ) -> Option<Readiness> {
         let Some(ready) = &way.ready else {
             return Some(Readiness::Default(without_check));
@@ -185,7 +197,7 @@ impl Planner<'_> {
         user: User<'_>,
         way: &Way,
         default: RestartDefault,
-        uses: &mut Vec<NeedEdge>,
+        uses: &mut Uses,
     ) -> Option<RestartPolicy> {
         const RESTART: Place = Place::Readable("a restart policy");
         let written = way.restart.as_ref();
@@ -208,7 +220,7 @@ impl Planner<'_> {
         Some(RestartPolicy { on, attempts })
     }
 
-    fn watch(&mut self, user: User<'_>, way: &Way, uses: &mut Vec<NeedEdge>) -> Vec<Option<Shown>> {
+    fn watch(&mut self, user: User<'_>, way: &Way, uses: &mut Uses) -> Vec<Option<Shown>> {
         way.watch
             .iter()
             .map(|folder| {
@@ -230,8 +242,7 @@ impl Planner<'_> {
     }
 
     /// The needs as written, then the container a command runs inside, then
-    /// each unit whose value is used, each unit once. Using a value of its
-    /// own is no need for a unit that is made.
+    /// each unit whose value is used, each unit once.
     fn needs(&mut self, unit: usize, way: &Way, uses: Vec<NeedEdge>) -> Vec<NeedEdge> {
         let mut needs: Vec<NeedEdge> = way
             .needs
@@ -254,13 +265,23 @@ impl Planner<'_> {
                 because: Because::In,
             });
         }
-        for used in uses {
-            let own_made = used.unit == unit && matches!(used.because, Because::UsesMade(_));
-            if own_made || needs.iter().any(|need| need.unit == used.unit) {
-                continue;
-            }
-            needs.push(used);
-        }
+        add_needs(&mut needs, unit, uses);
         needs
     }
+}
+
+/// Adds to `unit`'s needs those its uses make, each unit once. Using a value
+/// of its own is no need for a unit that is made. Gives the units newly
+/// needed.
+pub fn add_needs(needs: &mut Vec<NeedEdge>, unit: usize, uses: Vec<NeedEdge>) -> Vec<usize> {
+    let mut added = Vec::new();
+    for used in uses {
+        let own_made = used.unit == unit && matches!(used.because, Because::UsesMade(_));
+        if own_made || needs.iter().any(|need| need.unit == used.unit) {
+            continue;
+        }
+        added.push(used.unit);
+        needs.push(used);
+    }
+    added
 }

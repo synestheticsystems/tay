@@ -72,6 +72,9 @@ pub struct Resolved {
     /// The units that are made whose values it is built from, each with the
     /// value used.
     pub made: BTreeMap<String, String>,
+    /// The published ports it reaches from the host, by container unit and
+    /// container port: using it opens them.
+    pub published_uses: BTreeSet<(String, i64)>,
 }
 
 /// A value exactly, when all of it is known before start and none of it is secret.
@@ -89,6 +92,7 @@ impl Resolved {
             secrets: BTreeSet::new(),
             producers: BTreeMap::new(),
             made: BTreeMap::new(),
+            published_uses: BTreeSet::new(),
         }
     }
 
@@ -100,10 +104,12 @@ impl Resolved {
         !self.secrets.is_empty()
     }
 
-    /// Takes in what `other` is built from: its secrets, its producers and
-    /// the units that are made it uses.
+    /// Takes in what `other` is built from: its secrets, its producers, the
+    /// units that are made it uses and the published ports it reaches.
     pub fn absorb(&mut self, other: &Resolved) {
         self.secrets.extend(other.secrets.iter().cloned());
+        self.published_uses
+            .extend(other.published_uses.iter().cloned());
         for (unit, value) in &other.producers {
             self.producers
                 .entry(unit.clone())

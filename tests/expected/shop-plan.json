@@ -31,6 +31,7 @@
         "module": "port",
         "name": "api-port",
         "needs": [],
+        "publishes": [],
         "ready": {
           "check": null,
           "without_check": "when it is held"
@@ -72,6 +73,7 @@
         "module": "secret",
         "name": "db-password",
         "needs": [],
+        "publishes": [],
         "ready": {
           "check": null,
           "without_check": "when it has been generated"
@@ -113,6 +115,7 @@
         "module": "port",
         "name": "db-port",
         "needs": [],
+        "publishes": [],
         "ready": {
           "check": null,
           "without_check": "when it is held"
@@ -154,6 +157,7 @@
         "module": "port",
         "name": "web-port",
         "needs": [],
+        "publishes": [],
         "ready": {
           "check": null,
           "without_check": "when it is held"
@@ -197,6 +201,7 @@
         "module": "command",
         "name": "build",
         "needs": [],
+        "publishes": [],
         "ready": {
           "check": null,
           "without_check": "when it exits with 0"
@@ -247,6 +252,27 @@
             "because": "uses_made_value",
             "unit": "db-port",
             "value": "db-port.number"
+          }
+        ],
+        "publishes": [
+          {
+            "address": {
+              "text": "127.0.0.1",
+              "value": "127.0.0.1"
+            },
+            "always": false,
+            "container_port": 5432,
+            "host_port": {
+              "text": "<port: db-port>",
+              "value": null
+            },
+            "opened": true,
+            "opened_by": [
+              {
+                "how": "unit_on_host",
+                "unit": "api"
+              }
+            ]
           }
         ],
         "ready": {
@@ -321,6 +347,7 @@
             "value": "db-port.number"
           }
         ],
+        "publishes": [],
         "ready": {
           "check": null,
           "without_check": "when it has started"
@@ -354,6 +381,7 @@
             "unit": "database"
           }
         ],
+        "publishes": [],
         "ready": {
           "check": null,
           "without_check": "when it exits with 0"
@@ -409,6 +437,7 @@
             "value": "api-port.number"
           }
         ],
+        "publishes": [],
         "ready": {
           "check": "http",
           "target": [
@@ -455,6 +484,7 @@
             "unit": "app-db"
           }
         ],
+        "publishes": [],
         "ready": null,
         "restart": null,
         "runs": null,

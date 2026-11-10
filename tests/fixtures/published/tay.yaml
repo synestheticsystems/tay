@@ -1,0 +1,25 @@
+format: 1
+stack: published
+up: [web, box]
+units:
+  box-port: { uses: port }
+  quiet-port: { uses: port }
+  always-port: { uses: port }
+  box:
+    uses: container
+    with:
+      image: example/box
+      publish:
+        8080: "${box-port.number}"
+        9090: "${quiet-port.number}"
+        7070: { port: "${always-port.number}", address: 0.0.0.0, always: true }
+    gives:
+      api: { port: 8080, scheme: http }
+      quiet: { port: 9090 }
+    ready: { http: "${self.api.url}/health", within: 1m }
+  web:
+    uses: process
+    with: { command: [web, "${box.api.url}"] }
+  viewer:
+    uses: container
+    with: { image: example/viewer, env: { BOX: "${box.api.url@host}" } }

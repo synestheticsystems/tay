@@ -46,6 +46,12 @@ fn exprs(way: &Way) -> Vec<&Expr> {
     let mut all: Vec<&Expr> = Vec::new();
     if let Some(module) = &way.module {
         all.extend(module.shape.slots.iter().map(|slot| &slot.expr));
+        if let UnitKind::Runs(Runs::OwnContainer { published }) = &module.shape.kind {
+            for entry in published {
+                all.push(&entry.host_port.expr);
+                all.extend(entry.address.iter().map(|slot| &slot.expr));
+            }
+        }
     }
     for give in &way.gives {
         match &give.value {

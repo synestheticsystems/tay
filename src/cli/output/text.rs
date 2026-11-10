@@ -1,6 +1,9 @@
 //! The plan as a person reads it.
 
-use crate::plan::{Because, GivenLine, Mechanism, Plan, PlannedUnit, Readiness, Running, Seen};
+use crate::plan::{
+    Because, GivenLine, Mechanism, OpenedBy, Plan, PlannedUnit, PublishedPort, Readiness, Running,
+    Seen,
+};
 
 pub fn plan(plan: &Plan) -> String {
     let profile = match (&plan.profile, plan.production) {
@@ -93,9 +96,39 @@ fn unit_lines(lines: &mut Vec<String>, number: usize, unit: &PlannedUnit) {
     for folder in &unit.watch {
         lines.push(format!("   watches {}", folder.text));
     }
+    for published in &unit.publishes {
+        lines.push(published_line(published));
+    }
     for given in &unit.gives {
         given_lines(lines, given);
     }
+}
+
+fn published_line(published: &PublishedPort) -> String {
+    let port = published.container_port;
+    let Some(opened) = &published.opened else {
+        return format!(
+            "   publishes {port}: not opened, since nothing in the plan uses it from the host"
+        );
+    };
+    let mut by: Vec<String> = opened
+        .by
+        .iter()
+        .map(|opener| match opener.how {
+            OpenedBy::UnitOnHost => format!("{} (on the host)", opener.unit),
+            OpenedBy::ReadinessCheck => format!("{} (its readiness check)", opener.unit),
+            OpenedBy::View => format!("{} (through a view)", opener.unit),
+        })
+        .collect();
+    if opened.always {
+        by.insert(0, "always".to_string());
+    }
+    format!(
+        "   publishes {port} at {}:{}, opened for {}",
+        opened.address.text,
+        opened.host_port.text,
+        by.join(", ")
+    )
 }
 
 fn running(runs: &Running) -> String {

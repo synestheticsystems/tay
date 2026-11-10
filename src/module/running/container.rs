@@ -96,7 +96,7 @@ impl Module for Container {
         }
         let published = settings
             .get("publish")
-            .map(|node| publish_settings(node, &mut slots, d))
+            .map(|node| publish_settings(node, d))
             .unwrap_or_default();
         if let Some(aliases) = settings.get("aliases") {
             fields::name_list(aliases, "an alias", names::name_problem, d);
@@ -193,8 +193,10 @@ fn volume_settings(node: &Node, d: &mut Diagnostics) -> Vec<Slot> {
     slots
 }
 
-/// `publish`: container ports, as keys, each made reachable at a host port.
-fn publish_settings(node: &Node, slots: &mut Vec<Slot>, d: &mut Diagnostics) -> Vec<Published> {
+/// `publish`: container ports, as keys, each made reachable at a host port
+/// when it is opened. Its values are not among the unit's slots: an entry
+/// that is not opened uses nothing.
+fn publish_settings(node: &Node, d: &mut Diagnostics) -> Vec<Published> {
     const PUBLISHED: Place = Place::Readable("a published port");
     let Some(map) = node.as_map() else {
         d.error(
@@ -221,18 +223,25 @@ fn publish_settings(node: &Node, slots: &mut Vec<Slot>, d: &mut Diagnostics) -> 
                 continue;
             }
         };
-        let host_port = if entry.value.as_map().is_some() {
-            let Some(long) = Fields::of(&entry.value, "a published port", &["port", "address"], d)
-            else {
+        let (host_port, address, always) = if entry.value.as_map().is_some() {
+            let Some(long) = Fields::of(
+                &entry.value,
+                "a published port",
+                &["port", "address", "always"],
+                d,
+            ) else {
                 continue;
             };
-            slots.extend(
-                long.get("address")
-                    .and_then(|n| Slot::read(n, Want::Text, PUBLISHED, d)),
-            );
-            long.require("port", d)
+            let address = long
+                .get("address")
+                .and_then(|n| Slot::read(n, Want::Text, PUBLISHED, d));
+            let always = long
+                .get("always")
+                .and_then(|n| fields::boolean(n, "`always`", d))
+                .unwrap_or(false);
+            (long.require("port", d), address, always)
         } else {
-            Some(&entry.value)
+            (Some(&entry.value), None, false)
         };
         let Some(host_port) = host_port.and_then(|n| Slot::read(n, Want::PortNumber, PUBLISHED, d))
         else {
@@ -240,9 +249,10 @@ fn publish_settings(node: &Node, slots: &mut Vec<Slot>, d: &mut Diagnostics) -> 
         };
         published.push(Published {
             container_port,
-            host_port: host_port.expr.clone(),
+            host_port,
+            address,
+            always,
         });
-        slots.push(host_port);
     }
     published
 }
@@ -255,7 +265,7 @@ fn label_key_problem(key: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use crate::module::testing::check;
-    use crate::module::{Runs, UnitKind};
+    use crate::module::{Runs, UnitKind, Want};
 
     #[test]
     fn exactly_one_of_image_and_build() {
@@ -275,18 +285,21 @@ mod tests {
     fn publish_keys_are_container_ports_and_values_host_ports() {
         let (shape, errors) = check(
             "container",
-            "image: db\npublish:\n  5432: \"${db-port.number}\"\n  8080: { port: 18080, address: 0.0.0.0 }\n",
+            "image: db\npublish:\n  5432: \"${db-port.number}\"\n  8080: { port: 18080, address: 0.0.0.0, always: true }\n",
         );
         assert!(errors.is_empty(), "{errors:?}");
-        let UnitKind::Runs(Runs::OwnContainer { published }) = shape.unwrap().kind else {
+        let shape = shape.unwrap();
+        // A published port's values are used only once it is opened.
+        assert!(shape.slots.iter().all(|slot| slot.want != Want::PortNumber));
+        let UnitKind::Runs(Runs::OwnContainer { published }) = shape.kind else {
             panic!("a container runs in its own container");
         };
         assert_eq!(
             published
                 .iter()
-                .map(|p| p.container_port)
+                .map(|p| (p.container_port, p.address.is_some(), p.always))
                 .collect::<Vec<_>>(),
-            [5432, 8080]
+            [(5432, false, false), (8080, true, true)]
         );
         let (_, errors) = check("container", "image: db\npublish: { web: 80, 99999: 1 }\n");
         assert_eq!(errors.len(), 2);

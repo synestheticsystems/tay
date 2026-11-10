@@ -31,6 +31,7 @@ Plan for stack `shop`, profile `dev`, in <root>
    needs db-port, because it uses db-port.number
    ready: command check of db ready, within 2m
    restart: on failure, up to 5 attempts
+   publishes 5432 at 127.0.0.1:<port: db-port>, opened for api (on the host)
    gives sql
      from the host: 127.0.0.1:<port: db-port>
      from a container: database:5432

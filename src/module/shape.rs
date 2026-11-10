@@ -60,11 +60,16 @@ pub enum Runs {
     OneOffContainer,
 }
 
-/// A container port made reachable from the host.
+/// A container port that may be made reachable from the host. It is opened
+/// only when something in the plan uses it from the host, or when `always`
+/// says so; until then nothing uses its values.
 #[derive(Clone, Debug)]
 pub struct Published {
     pub container_port: i64,
-    pub host_port: Expr,
+    pub host_port: Slot,
+    /// The host address it is opened on; `None` for 127.0.0.1.
+    pub address: Option<Slot>,
+    pub always: bool,
 }
 
 /// One value a unit's settings use.
