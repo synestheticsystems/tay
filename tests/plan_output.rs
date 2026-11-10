@@ -46,7 +46,7 @@ fn errors_in_json_have_a_place_a_message_and_the_places_involved() {
     assert_eq!(json["schema"], 1);
     assert_eq!(json["outcome"], "errors");
     assert_eq!(
-        json["errors"][5],
+        json["errors"][6],
         serde_json::json!({
             "at": { "file": "stack/units/more.yaml", "line": 1, "column": 1 },
             "message": "there is already a unit called `web`",

@@ -77,11 +77,12 @@ pub struct Scope {
     pub asker: Asker,
 }
 
-/// What a value is, for finding circles and remembering results.
+/// A value a unit gives, by the unit's index and the value's name: what
+/// circles are found among and results are remembered by.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-enum Key {
-    Give(usize, String),
-    Setting(String),
+struct Key {
+    unit: usize,
+    name: String,
 }
 
 pub struct Resolver<'s> {
@@ -192,7 +193,7 @@ impl<'s> Resolver<'s> {
 
     fn reference(&mut self, reference: &Reference, scope: Scope) -> Res {
         match &reference.target {
-            Target::Setting(name) => self.setting(name, reference.loc, scope.asker),
+            Target::Setting(name) => self.setting(name, reference.loc),
             Target::Environment(field) => self.environment_field(*field, reference),
             Target::HostListen => Ok(Resolved::known(Shape::Opaque {
                 ty: Some(Type::Text),
@@ -273,10 +274,7 @@ impl<'s> Resolver<'s> {
     }
 
     fn key_name(&self, key: &Key) -> String {
-        match key {
-            Key::Give(unit, name) => format!("{}.{name}", self.stack.units[*unit].name.name),
-            Key::Setting(name) => format!("settings.{name}"),
-        }
+        format!("{}.{}", self.stack.units[key.unit].name.name, key.name)
     }
 
     fn fail<T>(&mut self, loc: Loc, message: String) -> Result<T, Fail> {

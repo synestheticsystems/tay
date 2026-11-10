@@ -1,8 +1,8 @@
 //! The settings a stack declares in `tay.yaml`.
 
-use crate::definition::SettingDecl;
+use crate::definition::{SettingDecl, Written};
 use crate::diagnostic::Diagnostics;
-use crate::syntax::expr::{self, Type};
+use crate::syntax::expr::Type;
 use crate::syntax::fields::{self, Fields};
 use crate::syntax::names;
 use crate::syntax::yaml::Node;
@@ -20,9 +20,12 @@ pub fn declarations(node: &Node, d: &mut Diagnostics) -> Vec<SettingDecl> {
             if let Some(doc) = decl.get("doc") {
                 fields::text(doc, "`doc`", d);
             }
-            let default = decl
-                .get("default")
-                .and_then(|node| expr::from_node(node, d));
+            let default = decl.get("default").and_then(|node| {
+                Some(Written {
+                    value: fields::literal(node, "a setting's value", d)?,
+                    loc: node.loc,
+                })
+            });
             let written =
                 decl.get("type")
                     .and_then(|node| match fields::text(node, "`type`", d)? {
@@ -39,27 +42,23 @@ pub fn declarations(node: &Node, d: &mut Diagnostics) -> Vec<SettingDecl> {
                             None
                         }
                     });
-            let of_default = default.as_ref().and_then(|default| default.written_type());
-            if let (Some(written), Some(of_default), Some(default)) =
-                (written, of_default, default.as_ref())
-                && written != of_default
+            if let (Some(written), Some(default)) = (written, &default)
+                && written != default.value.ty()
             {
                 d.error(
                     default.loc,
                     format!(
                         "the default is {}, but `type` says the setting is {}",
-                        of_default.describe(),
+                        default.value.ty().describe(),
                         written.describe()
                     ),
                 );
             }
             // With neither a default nor a `type`, as in `images.server: {}`,
             // the setting is text.
-            let ty = match (&default, written.or(of_default)) {
-                (_, Some(ty)) => Some(ty),
-                (Some(_), None) => None,
-                (None, None) => Some(Type::Text),
-            };
+            let ty = written
+                .or(default.as_ref().map(|default| default.value.ty()))
+                .unwrap_or(Type::Text);
             let secret = decl
                 .get("secret")
                 .and_then(|node| fields::boolean(node, "`secret`", d))

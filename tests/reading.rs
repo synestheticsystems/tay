@@ -20,8 +20,9 @@ fn every_error_in_a_stack_is_reported_in_one_run_at_its_place() {
             // A bad name, and a name references use.
             "tay.yaml:10:3: a unit's name: `Bad_Name` must start with a lower-case letter",
             "tay.yaml:11:3: `settings` cannot be a unit's name: references use it",
+            "tay.yaml:12:3: `net` cannot be a unit's name: references use it",
             // A need on a unit that does not exist.
-            "tay.yaml:12:30: there is no unit `nobody`",
+            "tay.yaml:13:30: there is no unit `nobody`",
             // A duplicate name, with the first definition.
             "stack/units/more.yaml:1:1: there is already a unit called `web`",
             "  tay.yaml:4:3: the first one is defined here",
@@ -31,7 +32,7 @@ fn every_error_in_a_stack_is_reported_in_one_run_at_its_place() {
     );
     assert!(
         run.stderr
-            .ends_with("tay plan: 7 errors in the definitions; there is no plan.\n")
+            .ends_with("tay plan: 8 errors in the definitions; there is no plan.\n")
     );
 }
 

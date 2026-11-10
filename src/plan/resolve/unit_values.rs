@@ -65,7 +65,10 @@ impl Resolver<'_> {
                 ),
             );
         }
-        let key = Key::Give(owner, name.to_string());
+        let key = Key {
+            unit: owner,
+            name: name.to_string(),
+        };
         let scope = Scope {
             unit: Some(owner),
             asker,

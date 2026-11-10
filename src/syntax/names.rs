@@ -10,10 +10,19 @@ pub struct NameAt {
 }
 
 /// Names references use for themselves, so no unit may have them.
-pub const RESERVED_UNIT_NAMES: [&str; 5] = ["settings", "environment", "host", "self", "params"];
+pub const RESERVED_UNIT_NAMES: [&str; 7] = [
+    "settings",
+    "environment",
+    "host",
+    "net",
+    "self",
+    "params",
+    "args",
+];
 
-/// The rule for unit, template, profile and way names: lower-case
-/// letters, digits and hyphens, starting with a letter, at most 40 characters.
+/// The rule for unit, template, profile, way, volume and folder names:
+/// lower-case letters, digits and hyphens, starting with a letter, at most
+/// 40 characters.
 pub fn name_problem(name: &str) -> Option<String> {
     if name.is_empty() {
         return Some("a name cannot be empty".to_string());
@@ -40,10 +49,10 @@ pub fn name_problem(name: &str) -> Option<String> {
     None
 }
 
-/// The rule for the names of values: what a unit gives, produces or builds, a
-/// template's parameters. The format does not state one; references need
-/// the name to be one dotted part, so it is a lower-case letter followed by
-/// lower-case letters, digits, hyphens and underscores.
+/// The rule for the names of values (in `gives`, `produces`, `outputs`,
+/// `params` and `args`): lower-case letters, digits and underscores,
+/// starting with a letter. `outputs` is not one, because
+/// `${unit.outputs.name}` names a file a unit builds.
 pub fn value_name_problem(name: &str) -> Option<String> {
     if name.contains("${") {
         return Some(format!(
@@ -53,16 +62,21 @@ pub fn value_name_problem(name: &str) -> Option<String> {
     if !name.starts_with(|c: char| c.is_ascii_lowercase()) {
         return Some(format!("`{name}` must start with a lower-case letter"));
     }
-    if let Some(bad) = name.chars().find(|c| !is_value_char(*c)) {
+    if let Some(bad) = name
+        .chars()
+        .find(|c| !(c.is_ascii_lowercase() || c.is_ascii_digit() || *c == '_'))
+    {
         return Some(format!(
-            "`{name}` may hold only lower-case letters, digits, hyphens and underscores, not `{bad}`"
+            "`{name}` may hold only lower-case letters, digits and underscores, not `{bad}`"
         ));
     }
+    if name == "outputs" {
+        return Some(
+            "`outputs` cannot be a value's name: `${unit.outputs.name}` names a file a unit builds"
+                .to_string(),
+        );
+    }
     None
-}
-
-fn is_value_char(c: char) -> bool {
-    c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_'
 }
 
 /// The rule for setting names: dotted, each part lower-case letters, digits,
@@ -71,7 +85,10 @@ pub fn setting_name_problem(name: &str) -> Option<String> {
     if name.split('.').any(str::is_empty) {
         return Some(format!("`{name}` has an empty part between dots"));
     }
-    if let Some(bad) = name.chars().find(|c| !(is_value_char(*c) || *c == '.')) {
+    if let Some(bad) = name
+        .chars()
+        .find(|c| !(c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '-' | '_' | '.')))
+    {
         return Some(format!(
             "`{name}` may hold only lower-case letters, digits, hyphens, underscores and dots, not `{bad}`"
         ));
@@ -112,6 +129,9 @@ mod tests {
     fn value_and_setting_names() {
         assert_eq!(value_name_problem("api_url"), None);
         assert!(value_name_problem("Api").is_some());
+        assert!(value_name_problem("api-url").is_some());
+        assert!(value_name_problem("outputs").is_some());
+        assert_eq!(setting_name_problem("log-level.web_v2"), None);
         assert_eq!(setting_name_problem("log.web"), None);
         assert_eq!(setting_name_problem("images.server_v2"), None);
         assert!(setting_name_problem("log..web").is_some());

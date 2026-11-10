@@ -1,13 +1,12 @@
 //! Settings: the value in force, typed as declared, and kept secret when
-//! declared so.
+//! declared so. A setting's value is literal, so it is built from nothing.
 
-use crate::definition::SettingValue;
+use crate::definition::{Literal, SettingValue};
+use crate::diagnostic::Diagnostic;
 use crate::diagnostic::source::Loc;
-use crate::diagnostic::{Diagnostic, Diagnostics};
 use crate::plan::resolve::value::{Hole, Resolved, Shape};
-use crate::syntax::expr::Type;
 
-use super::{Asker, Fail, Key, Res, Resolver, Scope};
+use super::{Fail, Res, Resolver};
 
 impl Resolver<'_> {
     /// One error for each setting with no value and no default that the plan
@@ -31,7 +30,7 @@ impl Resolver<'_> {
         }
     }
 
-    pub(super) fn setting(&mut self, name: &str, at: Loc, asker: Asker) -> Res {
+    pub(super) fn setting(&mut self, name: &str, at: Loc) -> Res {
         let Some(decl) = self.stack.setting(name) else {
             return self.fail(at, format!("no setting `{name}` is declared in tay.yaml"));
         };
@@ -43,75 +42,20 @@ impl Resolver<'_> {
                 return Err(Fail::Reported);
             }
         };
-        let scope = Scope { unit: None, asker };
-        let resolved = self.keyed(Key::Setting(name.to_string()), None, at, asker, |this| {
-            this.resolve(value.expr(), scope)
-        })?;
-        let ty = match decl.ty {
-            Some(ty) => Some(ty),
-            None => match &decl.default {
-                Some(default) => self.resolve(default, scope)?.ty(),
-                None => None,
-            },
+        // A value of the wrong type was reported where it is written.
+        let literal = value.typed(decl.ty).ok_or(Fail::Reported)?;
+        let mut resolved = match literal {
+            Literal::Text(text) => Resolved::text(text),
+            Literal::Number(n) => Resolved::known(Shape::Number(n)),
+            Literal::Bool(b) => Resolved::known(Shape::Bool(b)),
         };
-        let mut resolved = match (&value, ty) {
-            (SettingValue::Argument(expr), Some(ty)) => {
-                argument(resolved, ty, name, expr.loc, &mut self.d)?
-            }
-            _ => resolved,
-        };
-        if let (Some(ty), Some(got)) = (ty, resolved.ty())
-            && ty != got
-        {
-            return self.fail(
-                value.expr().loc,
-                format!(
-                    "setting `{name}` is {}; this value is {}",
-                    ty.describe(),
-                    got.describe()
-                ),
-            );
-        }
         if decl.secret {
             resolved.shape = Shape::Opaque {
-                ty: resolved.ty(),
+                ty: Some(decl.ty),
                 hole: Hole::Secret,
             };
             resolved.secrets.insert(format!("settings.{name}"));
         }
         Ok(resolved)
-    }
-}
-
-/// The text of a `--set`, typed as its setting is.
-fn argument(resolved: Resolved, ty: Type, name: &str, loc: Loc, d: &mut Diagnostics) -> Res {
-    let Some(text) = resolved
-        .exact_text()
-        .filter(|_| resolved.producers.is_empty())
-    else {
-        return Ok(resolved);
-    };
-    let shape = match ty {
-        Type::Text => return Ok(resolved),
-        Type::Number => text.parse().ok().map(Shape::Number),
-        Type::Bool => match text.as_str() {
-            "true" => Some(Shape::Bool(true)),
-            "false" => Some(Shape::Bool(false)),
-            _ => None,
-        },
-    };
-    match shape {
-        Some(shape) => Ok(Resolved { shape, ..resolved }),
-        // The message does not quote the value: it may be a secret.
-        None => {
-            d.error(
-                loc,
-                format!(
-                    "setting `{name}` is {}, and this value is not",
-                    ty.describe()
-                ),
-            );
-            Err(Fail::Reported)
-        }
     }
 }

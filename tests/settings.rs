@@ -67,7 +67,9 @@ fn a_set_value_that_does_not_fit_its_type_is_an_error_that_does_not_quote_it() {
         run.errors(),
         [
             "--set settings.count: setting `count` is a whole number, and this value is not",
+            "  tay.yaml:6:3: the setting is declared here",
             "--set settings.pin: setting `pin` is a whole number, and this value is not",
+            "  tay.yaml:7:3: the setting is declared here",
         ]
     );
     assert!(!run.stderr.contains("hunter2"));

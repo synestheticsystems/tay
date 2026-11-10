@@ -12,13 +12,6 @@ pub fn gives(node: &Node, d: &mut Diagnostics) -> Vec<Give> {
     fields::keyed(node, "a value's name", names::value_name_problem, d)
         .into_iter()
         .filter_map(|(name, value)| {
-            if name.name == "outputs" {
-                d.error(
-                    name.loc,
-                    "`outputs` cannot be a value's name: `${unit.outputs.name}` names a file a unit builds",
-                );
-                return None;
-            }
             let value = if value.as_map().is_some() {
                 GiveValue::Endpoint(Box::new(endpoint(value, d)?))
             } else {

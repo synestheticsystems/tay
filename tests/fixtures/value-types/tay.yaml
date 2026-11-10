@@ -3,6 +3,7 @@ stack: value-types
 settings:
   port: { default: 8080 }
   verbose: { default: true }
+  pattern: { default: "${not.a.reference} and $${this}" }
 units:
   fixed-port:
     uses: port
@@ -18,3 +19,4 @@ units:
       state: "${environment.state}"
       id: "${environment.id}"
       listen: "${host.listen}"
+      pattern: "${settings.pattern}"

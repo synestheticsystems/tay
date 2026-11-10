@@ -1,6 +1,7 @@
 //! Reading a mapping strictly: each field taken by name, and any key that is
 //! not a field of the thing being read reported as an error.
 
+use crate::definition::Literal;
 use crate::diagnostic::Diagnostics;
 use crate::diagnostic::source::Loc;
 use crate::syntax::expr::{self, Expr};
@@ -106,6 +107,26 @@ pub fn text<'n>(node: &'n Node, what: &str, d: &mut Diagnostics) -> Option<&'n s
             d.error(
                 node.loc,
                 format!("{what} must be text; this is {}", node.describe()),
+            );
+            None
+        }
+    }
+}
+
+/// A value written out in full: text, a whole number or true or false, with
+/// nothing in it read as a reference.
+pub fn literal(node: &Node, what: &str, d: &mut Diagnostics) -> Option<Literal> {
+    match &node.kind {
+        Kind::Scalar(Scalar::Str(s)) => Some(Literal::Text(s.text.clone())),
+        Kind::Scalar(Scalar::Int(n)) => Some(Literal::Number(*n)),
+        Kind::Scalar(Scalar::Bool(b)) => Some(Literal::Bool(*b)),
+        _ => {
+            d.error(
+                node.loc,
+                format!(
+                    "{what} is text, a whole number or true or false; this is {}",
+                    node.describe()
+                ),
             );
             None
         }

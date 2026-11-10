@@ -29,6 +29,19 @@ fn a_doubled_dollar_writes_a_literal_reference_opening() {
 }
 
 #[test]
+fn a_setting_is_literal_so_a_reference_opening_in_its_value_stays_as_written() {
+    let plan = plan_json("value-types", &[]);
+    let pattern = given(unit(&plan, "fixed-port"), "pattern");
+    assert_eq!(
+        pattern["from_host"]["value"],
+        json!("${not.a.reference} and $${this}")
+    );
+    let plan = plan_json("value-types", &["--set", "settings.pattern=${set.too}"]);
+    let pattern = given(unit(&plan, "fixed-port"), "pattern");
+    assert_eq!(pattern["from_host"]["value"], json!("${set.too}"));
+}
+
+#[test]
 fn references_to_the_environment_and_the_host() {
     let plan = plan_json("value-types", &[]);
     let port = unit(&plan, "fixed-port");

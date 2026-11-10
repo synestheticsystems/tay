@@ -24,11 +24,6 @@ pub fn check(stack: &Stack, places: &[&Choices], d: &mut Diagnostics) {
             }
         }
     }
-    for setting in &stack.settings {
-        if let Some(default) = &setting.default {
-            references(stack, default, None, d);
-        }
-    }
     for place in places {
         choices(stack, place, d);
     }
@@ -232,24 +227,26 @@ fn choices(stack: &Stack, place: &Choices, d: &mut Diagnostics) {
             );
             continue;
         };
-        references(stack, value.expr(), None, d);
-        // A `--set` is text until its setting's type is applied, when it is resolved.
-        if let (SettingValue::Written(expr), Some(ty)) = (value, decl.ty)
-            && let Some(written) = expr.written_type()
-            && written != ty
-        {
-            d.push(
-                Diagnostic::new(
-                    expr.loc,
-                    format!(
-                        "setting `{}` is {}; this value is {}",
-                        name.name,
-                        ty.describe(),
-                        written.describe()
-                    ),
-                )
-                .with(decl.name.loc, "the setting is declared here"),
-            );
+        if value.typed(decl.ty).is_some() {
+            continue;
         }
+        // The message does not quote the value: it may be a secret.
+        let message = match value {
+            SettingValue::Written(written) => format!(
+                "setting `{}` is {}; this value is {}",
+                name.name,
+                decl.ty.describe(),
+                written.value.ty().describe()
+            ),
+            SettingValue::Argument { .. } => format!(
+                "setting `{}` is {}, and this value is not",
+                name.name,
+                decl.ty.describe()
+            ),
+        };
+        d.push(
+            Diagnostic::new(value.loc(), message)
+                .with(decl.name.loc, "the setting is declared here"),
+        );
     }
 }

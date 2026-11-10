@@ -68,16 +68,6 @@ impl Expr {
         }
     }
 
-    /// The type of a value whose type does not wait on a reference.
-    pub fn written_type(&self) -> Option<Type> {
-        match &self.kind {
-            ExprKind::Number(_) => Some(Type::Number),
-            ExprKind::Bool(_) => Some(Type::Bool),
-            ExprKind::Text(_) => Some(Type::Text),
-            ExprKind::Ref(_) => None,
-        }
-    }
-
     /// The text of a value with no references in it.
     pub fn literal_text(&self) -> Option<String> {
         match &self.kind {

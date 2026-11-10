@@ -114,15 +114,6 @@ impl Resolved {
         }
     }
 
-    pub fn ty(&self) -> Option<Type> {
-        match &self.shape {
-            Shape::Text(_) => Some(Type::Text),
-            Shape::Number(_) => Some(Type::Number),
-            Shape::Bool(_) => Some(Type::Bool),
-            Shape::Opaque { ty, .. } => *ty,
-        }
-    }
-
     /// What a [`crate::module::Want`] is checked against.
     pub fn form(&self) -> Form {
         match &self.shape {

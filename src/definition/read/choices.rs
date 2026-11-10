@@ -1,10 +1,9 @@
 //! Choices, written in the same shape in each place: a profile, the personal
 //! file, the environment's `.tay/choices.yaml`, and `--set`.
 
-use crate::definition::{Choices, Profile, SettingValue};
+use crate::definition::{Choices, Profile, SettingValue, Written};
 use crate::diagnostic::Diagnostics;
 use crate::diagnostic::source::{Loc, Sources};
-use crate::syntax::expr::{self, Expr};
 use crate::syntax::fields::{self, Fields};
 use crate::syntax::names::{self, NameAt};
 use crate::syntax::yaml::Node;
@@ -59,8 +58,14 @@ fn choices(file: &Fields<'_>, d: &mut Diagnostics) -> Choices {
     }
     if let Some(settings) = file.get("settings") {
         for (name, value) in fields::keyed(settings, "a setting", names::setting_name_problem, d) {
-            if let Some(value) = expr::from_node(value, d) {
-                choices.settings.push((name, SettingValue::Written(value)));
+            if let Some(literal) = fields::literal(value, "a setting's value", d) {
+                let written = Written {
+                    value: literal,
+                    loc: value.loc,
+                };
+                choices
+                    .settings
+                    .push((name, SettingValue::Written(written)));
             }
         }
     }
@@ -110,18 +115,11 @@ pub fn assignment(argument: &str, sources: &mut Sources, d: &mut Diagnostics) ->
                 ));
             } else if let Some(setting) = key.strip_prefix("settings.") {
                 let setting = name(setting, names::setting_name_problem, d)?;
-                // The error does not quote the value: it may be a secret.
-                let Ok(kind) = expr::parse_string(value, loc, None) else {
-                    d.error(
-                        loc,
-                        "the value holds a `${` that is not a reference tay can read (write `$${` for a literal `${`)",
-                    );
-                    return None;
+                let value = SettingValue::Argument {
+                    text: value.to_string(),
+                    loc,
                 };
-                let value = Expr { loc, kind };
-                choices
-                    .settings
-                    .push((setting, SettingValue::Argument(value)));
+                choices.settings.push((setting, value));
             } else {
                 d.error(
                     loc,
@@ -181,8 +179,15 @@ mod tests {
             ]
         );
         assert_eq!(set("up").1, ["--set up: `--set` is written KEY=VALUE"]);
-        let (_, errors) = set("settings.key=${unclosed");
-        assert_eq!(errors.len(), 1);
-        assert!(!errors[0].contains("unclosed"), "{errors:?}");
+    }
+
+    #[test]
+    fn a_set_value_is_literal_text_even_with_a_reference_in_it() {
+        let (choices, errors) = set("settings.key=${unclosed");
+        assert!(errors.is_empty(), "{errors:?}");
+        let settings = choices.unwrap().settings;
+        assert!(
+            matches!(&settings[0].1, SettingValue::Argument { text, .. } if text == "${unclosed")
+        );
     }
 }
