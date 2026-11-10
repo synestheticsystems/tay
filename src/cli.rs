@@ -55,7 +55,7 @@ Usage:
   tay up [UNIT...] [--root FOLDER] [--profile NAME] [--set PLACE=VALUE]... [--json]
   tay down [--root FOLDER] [--json]
   tay status [UNIT] [--root FOLDER] [--json]
-  tay logs UNIT [--root FOLDER] [--since TIME] [--follow]
+  tay logs [UNIT...] [--root FOLDER] [--since TIME] [--follow]
   tay ls [--root FOLDER] [--json]
   tay --version
   tay --help
@@ -83,7 +83,9 @@ and says so; its daemon exits. tay status prints each unit's state, from a
 check made now, each unit that runs and is not in the plan any more, and what
 the environment remembers being asked for. tay logs prints what a unit wrote,
 each line with its time, and tay's notes of where each attempt starts and how
-it ended. tay ls prints the environments tay knows on this machine, and marks
+it ended; with several units named, or none, which is every unit that has
+written anything, it prints the lines of all in the order of their times, each
+naming its unit. tay ls prints the environments tay knows on this machine, and marks
 with * the one it is run in.
 
 Options:
@@ -99,7 +101,7 @@ Options:
                       status, and the environments of ls
   --since TIME        of logs: only what was written in the last TIME, a
                       whole number followed by s, m or h, such as 10m
-  --follow            of logs: go on printing what the unit writes
+  --follow            of logs: go on printing what the units write
 
 Exit codes: 0 done: the plan is sound, everything asked for is ready, or
 nothing is left running; 1 a unit failed, or something was left that could

@@ -19,7 +19,7 @@ Four rules run through all of it.
 | `tay up [UNIT...]` | Brings the units up, in order, and returns when all are ready or one has failed | yes |
 | `tay down` | Stops everything the environment runs, checks that nothing is left, and says so | yes |
 | `tay status [UNIT]` | Each unit's state, from a check | yes |
-| `tay logs [UNIT...] [--since 10m] [--follow]` | What the units wrote, with the time of each line. With several units, or none, each line also names its unit | one unit |
+| `tay logs [UNIT...] [--since 10m] [--follow]` | What the units wrote, with the time of each line. With several units, or none, each line also names its unit | yes |
 | `tay ls` | The environments on this machine | yes |
 | `tay restart UNIT...` | Stops the units and starts them again | no |
 | `tay run ACTION [NAME=VALUE...]` | Runs an action, with its arguments | no |

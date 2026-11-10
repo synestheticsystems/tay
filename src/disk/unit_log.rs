@@ -40,7 +40,8 @@ pub enum Writer {
 }
 
 impl Writer {
-    fn marker(self) -> char {
+    /// What a line's writer is written as, between its time and its text.
+    pub fn marker(self) -> char {
         match self {
             Writer::Unit => '|',
             Writer::Tay => '#',
@@ -148,6 +149,36 @@ impl UnitLog {
         let keep = lines.len().saturating_sub(count);
         Ok(lines.split_off(keep))
     }
+
+    /// Whether the log has a file: the one being written, or one set aside.
+    fn has_files(&self) -> bool {
+        std::iter::once(self.current())
+            .chain((1..=SET_ASIDE).map(|number| self.set_aside(number)))
+            .any(|path| path.exists())
+    }
+}
+
+/// The units that have a log in `logs`, an environment's folder of logs,
+/// by name: each folder there that holds a unit's log files, which the
+/// daemon's own folder does not.
+pub fn units_with_logs(logs: &Path) -> Result<Vec<String>, DiskError> {
+    let entries = match fs::read_dir(logs) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(DiskError::io(logs, "read")(error)),
+    };
+    let mut units = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(DiskError::io(logs, "read"))?;
+        let Some(unit) = entry.file_name().to_str().map(str::to_string) else {
+            continue;
+        };
+        if UnitLog::at(entry.path()).has_files() {
+            units.push(unit);
+        }
+    }
+    units.sort();
+    Ok(units)
 }
 
 /// A unit's log open to be added to, set aside when it grows too long.
@@ -362,5 +393,22 @@ mod tests {
         following.read("", &mut none).unwrap();
         assert!(none.is_empty());
         assert_eq!(log.last(2).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn the_units_with_logs_are_the_folders_that_hold_a_units_log_files() {
+        let folder = tempfile::tempdir().unwrap();
+        let logs = folder.path().join("logs");
+        assert!(units_with_logs(&logs).unwrap().is_empty());
+        for unit in ["web", "api"] {
+            UnitLog::at(logs.join(unit)).open().unwrap();
+        }
+        // A log whose file being written was set aside, and the daemon's
+        // own folder, which holds no unit's log.
+        fs::create_dir_all(logs.join("set-aside")).unwrap();
+        fs::write(logs.join("set-aside").join("output.log.1"), "").unwrap();
+        fs::create_dir_all(logs.join("tay")).unwrap();
+        fs::write(logs.join("tay").join("daemon.log"), "").unwrap();
+        assert_eq!(units_with_logs(&logs).unwrap(), ["api", "set-aside", "web"]);
     }
 }
