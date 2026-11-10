@@ -3,7 +3,7 @@
 
 use crate::definition::{Check, Mechanism};
 use crate::diagnostic::source::Loc;
-use crate::module::{PathUse, Place, RestartDefault, Runs, UnitKind, Want};
+use crate::module::{Destination, PathUse, RestartDefault, Runs, UnitKind, Want};
 
 use super::usage::{Opening, User, Uses};
 use crate::plan::Planner;
@@ -14,8 +14,8 @@ use crate::plan::resolve::value::Resolved;
 use crate::plan::resolve::{Asker, Chosen};
 use crate::syntax::names::NameAt;
 
-const READINESS: Place = Place::Readable("a readiness check");
-const WATCHED: Place = Place::Readable("a watched file or folder");
+const READINESS: Destination = Destination::Readable("a readiness check");
+const WATCHED: Destination = Destination::Readable("a watched file or folder");
 
 /// What `restart.on` may be.
 const RESTART_ON: &[&str] = &["failure", "always", "never"];
@@ -60,48 +60,50 @@ impl<'s> Planner<'s> {
         let mut uses = Uses::default();
         let (mechanism, ready, restart, watch) = match chosen {
             Chosen::Group(_) => (
-                PlannedMechanism::Group,
+                Some(PlannedMechanism::Group),
                 Some(Readiness::Group),
                 Some(None),
                 Vec::new(),
             ),
             Chosen::Mechanism { mechanism, way } => {
-                let kind = &mechanism.shape.kind;
+                let kind = &mechanism.description.kind;
                 let user = User {
                     unit,
                     name: &definition.name.name,
                     asker: Asker::of(kind),
                     readiness: false,
                 };
-                for slot in &mechanism.shape.slots {
-                    self.use_value(user, &slot.expr, slot.want, slot.place, &mut uses);
-                }
+                let settings = mechanism.description.settings.resolve(&mut |slot| {
+                    self.use_value(user, &slot.expr, slot.want, slot.destination, &mut uses)
+                        .map(|resolved| resolved.value)
+                });
                 let runs = self.running(kind);
                 let ready = self.readiness(
                     user,
                     mechanism,
-                    mechanism.shape.ready_without_check,
+                    mechanism.description.ready_without_check,
                     &mut uses,
                 );
                 let restart = self.restart(
                     user,
                     mechanism,
-                    mechanism.shape.restart_by_default,
+                    mechanism.description.restart_by_default,
                     &mut uses,
                 );
                 let watch = self.watch(user, mechanism, &mut uses);
-                let planned = PlannedMechanism::Module {
-                    module: mechanism.module.name(),
+                let planned = settings.map(|settings| PlannedMechanism::Module {
+                    module: mechanism.module,
                     way: way.map(|(name, _)| name.name.clone()),
                     runs,
-                };
+                    settings,
+                });
                 (planned, ready, restart.map(Some), watch)
             }
         };
         let (published, needs, after) = match chosen {
             Chosen::Group(needs) => (Vec::new(), self.written_needs(needs), Vec::new()),
             Chosen::Mechanism { mechanism, .. } => {
-                let published = match &mechanism.shape.kind {
+                let published = match &mechanism.description.kind {
                     UnitKind::Runs(Runs::OwnContainer { published }) => vec![None; published.len()],
                     _ => Vec::new(),
                 };
@@ -118,7 +120,7 @@ impl<'s> Planner<'s> {
             Some(PlannedUnit {
                 name: definition.name.name.clone(),
                 doc: definition.doc.clone(),
-                mechanism,
+                mechanism: mechanism?,
                 needs: Vec::new(),
                 after: Vec::new(),
                 ready: ready?,
@@ -222,7 +224,7 @@ impl<'s> Planner<'s> {
         default: RestartDefault,
         uses: &mut Uses,
     ) -> Option<RestartPolicy> {
-        const RESTART: Place = Place::Readable("a restart policy");
+        const RESTART: Destination = Destination::Readable("a restart policy");
         let written = mechanism.restart.as_ref();
         let mut on = Shown::word(default.word());
         if let Some(expr) = written.and_then(|r| r.on.as_ref()) {
@@ -275,7 +277,7 @@ impl<'s> Planner<'s> {
     /// each unit whose value is used, each unit once.
     fn needs(&mut self, unit: usize, mechanism: &Mechanism, uses: Vec<NeedEdge>) -> Vec<NeedEdge> {
         let mut needs = self.written_needs(&mechanism.needs);
-        if let UnitKind::Runs(Runs::InsideUnit(inner)) = &mechanism.shape.kind
+        if let UnitKind::Runs(Runs::InsideUnit(inner)) = &mechanism.description.kind
             && let Some(container) = self.resolver.unit_index(&inner.name)
         {
             needs.push(NeedEdge {

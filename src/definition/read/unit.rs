@@ -224,8 +224,8 @@ fn mechanism(
         uses: uses_key.loc,
         d,
     };
-    let shape = module.check(with.as_deref(), &mut cx)?;
-    if matches!(shape.kind, UnitKind::Made) {
+    let mut description = module.read(with.as_deref(), &mut cx)?;
+    if matches!(description.kind, UnitKind::Made) {
         for give in shared.gives.iter().chain(&own.gives) {
             if let GiveValue::Endpoint(endpoint) = &give.value
                 && endpoint.host.is_none()
@@ -240,10 +240,12 @@ fn mechanism(
         }
     }
     let mut gives = shared.gives.clone();
-    let module_gives = shape.gives.iter().map(|given| Give {
-        name: given.name.clone(),
-        value: GiveValue::Module(given.value.clone()),
-    });
+    let module_gives = std::mem::take(&mut description.gives)
+        .into_iter()
+        .map(|given| Give {
+            name: given.name,
+            value: GiveValue::Module(given.value),
+        });
     for give in own.gives.into_iter().chain(module_gives) {
         match gives.iter().find(|g| g.name.name == give.name.name) {
             Some(first) => d.push(
@@ -259,7 +261,7 @@ fn mechanism(
     Some(Mechanism {
         module,
         uses: uses_key.loc,
-        shape,
+        description,
         needs: joined(&shared.needs, own.needs),
         after: joined(&shared.after, own.after),
         gives,

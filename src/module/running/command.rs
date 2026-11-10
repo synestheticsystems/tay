@@ -5,11 +5,13 @@ use crate::diagnostic::{Diagnostic, Diagnostics};
 use crate::syntax::fields::{self, Fields};
 use crate::syntax::names::{self, NameAt};
 use crate::syntax::yaml::Node;
+use crate::value::Value;
 
-use super::common::{self, environment, run_form};
-use crate::module::shape::{
-    ModuleGive, ModuleValue, Output, Place, RestartDefault, Runs, Slot, UnitKind, UnitShape,
+use super::common::{Mount, RunForm, Variables, mounts, run_form, variables};
+use crate::module::description::{
+    Description, ModuleGive, ModuleValue, Output, RestartDefault, Runs, UnitKind,
 };
+use crate::module::settings::{Destination, Settings, Slot, WrittenSettings, each_named, maybe};
 use crate::module::want::{PathUse, Want};
 use crate::module::{Cx, Module};
 
@@ -32,7 +34,89 @@ const FIELDS: &[&str] = &[
     "outputs",
 ];
 
-const FILE_PATH: Place = Place::Readable("a file path");
+const FILE_PATH: Destination = Destination::Readable("a file path");
+
+/// A command's settings, each value a [`Slot`] as written or a [`Value`]
+/// once resolved. Where it runs, inside another unit's container (`in`) or
+/// not, is in the unit's description.
+#[derive(Debug)]
+struct CommandSettings<V> {
+    run: RunForm<V>,
+    /// Exit 0: already done. Exit 1: not done. `None`: run every time.
+    check: Option<RunForm<V>>,
+    undo: Option<RunForm<V>>,
+    when_removed: WhenRemoved,
+    /// The image of the container made for the run, with `mounts`.
+    image: Option<V>,
+    mounts: Vec<Mount<V>>,
+    /// The user it runs as in a container.
+    user: Option<V>,
+    /// `None`: the stack's root on the host, the container's own in one.
+    workdir: Option<V>,
+    variables: Variables<V>,
+    /// A file fed to `run` on standard input.
+    stdin: Option<V>,
+    /// The values the command writes out, each with whether it is secret.
+    produces: Vec<(NameAt, bool)>,
+    /// The files the command builds, by name.
+    outputs: Vec<(NameAt, V)>,
+}
+
+/// What wiping a command that leaves the plan does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WhenRemoved {
+    Keep,
+    Undo,
+}
+
+impl<V> CommandSettings<V> {
+    fn map<'a, W>(&'a self, f: &mut dyn FnMut(&'a V) -> Option<W>) -> Option<CommandSettings<W>> {
+        let run = self.run.map(f);
+        let check = maybe(&self.check, &mut |form| form.map(f));
+        let undo = maybe(&self.undo, &mut |form| form.map(f));
+        let image = maybe(&self.image, f);
+        let mounts: Vec<Option<Mount<W>>> = self.mounts.iter().map(|m| m.map(f)).collect();
+        let user = maybe(&self.user, f);
+        let workdir = maybe(&self.workdir, f);
+        let variables = self.variables.map(f);
+        let stdin = maybe(&self.stdin, f);
+        let outputs = each_named(&self.outputs, f);
+        Some(CommandSettings {
+            run: run?,
+            check: check?,
+            undo: undo?,
+            when_removed: self.when_removed,
+            image: image?,
+            mounts: mounts.into_iter().collect::<Option<_>>()?,
+            user: user?,
+            workdir: workdir?,
+            variables: variables?,
+            stdin: stdin?,
+            produces: self.produces.clone(),
+            outputs: outputs?,
+        })
+    }
+}
+
+impl WrittenSettings for CommandSettings<Slot> {
+    fn slots(&self) -> Vec<&Slot> {
+        let mut slots = Vec::new();
+        self.map(&mut |slot| {
+            slots.push(slot);
+            Some(())
+        });
+        slots
+    }
+
+    fn resolve(
+        &self,
+        resolve: &mut dyn FnMut(&Slot) -> Option<Value>,
+    ) -> Option<Box<dyn Settings>> {
+        Some(Box::new(self.map(resolve)?))
+    }
+}
+
+impl Settings for CommandSettings<Value> {}
 
 impl Module for Command {
     fn name(&self) -> &'static str {
@@ -43,113 +127,156 @@ impl Module for Command {
         &["env", "secret_env"]
     }
 
-    fn check(&self, with: Option<&Node>, cx: &mut Cx<'_>) -> Option<UnitShape> {
-        let Some(with) = with else {
-            cx.d.error(cx.uses, "a `command` unit needs `with` and in it a `run`");
-            return None;
-        };
-        let errors_before = cx.d.len();
-        let d = &mut *cx.d;
-        let settings = Fields::of(with, "the settings of a `command` unit", FIELDS, d)?;
-        let runs = runs(&settings, d);
-        let in_container = !matches!(runs, Runs::OnHost);
-        let one_off = matches!(runs, Runs::OneOffContainer);
-        let mut shape = UnitShape::new(
-            UnitKind::Runs(runs),
-            "when it exits with 0",
-            RestartDefault::Never,
-        );
-        if let Some(image) = settings.get("image") {
-            shape.slots.extend(Slot::read(
-                image,
-                Want::Text,
-                Place::Readable("an image name"),
-                d,
-            ));
-        }
-        if let Some(run) = settings.require("run", d) {
-            shape
-                .slots
-                .extend(run_form(run, "`run`", d).unwrap_or_default());
-        }
-        for form in ["check", "undo"] {
-            if let Some(node) = settings.get(form) {
-                shape
-                    .slots
-                    .extend(run_form(node, &format!("`{form}`"), d).unwrap_or_default());
+    fn read(&self, with: Option<&Node>, cx: &mut Cx<'_>) -> Option<Description> {
+        let (settings, runs) = read(with, cx)?;
+        let gives = settings
+            .produces
+            .iter()
+            .map(|(name, secret)| ModuleGive {
+                name: name.clone(),
+                value: ModuleValue::Produced { secret: *secret },
+            })
+            .collect();
+        let outputs = settings
+            .outputs
+            .iter()
+            .map(|(name, path)| Output {
+                name: name.clone(),
+                path: path.expr.clone(),
+            })
+            .collect();
+        Some(Description {
+            gives,
+            outputs,
+            ..Description::new(
+                UnitKind::Runs(runs),
+                Box::new(settings),
+                "when it exits with 0",
+                RestartDefault::Never,
+            )
+        })
+    }
+}
+
+fn read(with: Option<&Node>, cx: &mut Cx<'_>) -> Option<(CommandSettings<Slot>, Runs)> {
+    let Some(with) = with else {
+        cx.d.error(cx.uses, "a `command` unit needs `with` and in it a `run`");
+        return None;
+    };
+    let errors_before = cx.d.len();
+    let d = &mut *cx.d;
+    let settings = Fields::of(with, "the settings of a `command` unit", FIELDS, d)?;
+    let runs = runs(&settings, d);
+    let in_container = !matches!(runs, Runs::OnHost);
+    let one_off = matches!(runs, Runs::OneOffContainer);
+    let image = settings
+        .get("image")
+        .and_then(|image| Slot::read(image, Want::Text, Destination::Readable("an image name"), d));
+    let run = settings
+        .require("run", d)
+        .and_then(|run| run_form(run, "`run`", d));
+    let [check, undo] = ["check", "undo"].map(|form| {
+        settings
+            .get(form)
+            .and_then(|node| run_form(node, &format!("`{form}`"), d))
+    });
+    let when_removed = match settings.get("when_removed") {
+        None => WhenRemoved::Keep,
+        Some(when_removed) => match fields::text(when_removed, "`when_removed`", d) {
+            Some("keep") | None => WhenRemoved::Keep,
+            Some("undo") => {
+                if settings.get("undo").is_none() {
+                    d.error(
+                        when_removed.loc,
+                        "`when_removed: undo` runs `undo`, and this command has none",
+                    );
+                }
+                WhenRemoved::Undo
             }
-        }
-        if let Some(when_removed) = settings.get("when_removed") {
-            match fields::text(when_removed, "`when_removed`", d) {
-                Some("keep") | None => {}
-                Some("undo") if settings.get("undo").is_none() => d.error(
-                    when_removed.loc,
-                    "`when_removed: undo` runs `undo`, and this command has none",
-                ),
-                Some("undo") => {}
-                Some(other) => d.error(
+            Some(other) => {
+                d.error(
                     when_removed.loc,
                     format!("`when_removed` is `keep` or `undo`; this is `{other}`"),
-                ),
+                );
+                WhenRemoved::Keep
             }
-        }
-        match settings.entry("mounts") {
-            Some((_, mounts)) if one_off => common::mounts(mounts, &mut shape, d),
-            Some((key, _)) => d.error(
+        },
+    };
+    let mounts = match settings.entry("mounts") {
+        Some((_, node)) if one_off => mounts(node, d),
+        Some((key, _)) => {
+            d.error(
                 key.loc,
                 "`mounts` goes with `image`: it is for a command run in a container of its own",
-            ),
-            None => {}
+            );
+            Vec::new()
         }
-        match settings.entry("user") {
-            Some((_, user)) if in_container => shape.slots.extend(Slot::read(
-                user,
-                Want::Scalar,
-                Place::Readable("a container's settings"),
-                d,
-            )),
-            Some((key, _)) => d.error(
+        None => Vec::new(),
+    };
+    let user = match settings.entry("user") {
+        Some((_, user)) if in_container => Slot::read(
+            user,
+            Want::Scalar,
+            Destination::Readable("a container's settings"),
+            d,
+        ),
+        Some((key, _)) => {
+            d.error(
                 key.loc,
                 "`user` goes with `in` or `image`: it is the user a command runs as in a container",
-            ),
-            None => {}
+            );
+            None
         }
-        if let Some(workdir) = settings.get("workdir") {
-            // In a container, the working folder is one of the container's.
-            let want = match in_container {
-                true => Want::Text,
-                false => Want::Path(PathUse::Named),
-            };
-            shape.slots.extend(Slot::read(
-                workdir,
-                want,
-                Place::Readable("a working folder"),
-                d,
-            ));
-        }
-        shape.slots.extend(environment(&settings, d));
-        if let Some(stdin) = settings.get("stdin") {
-            shape
-                .slots
-                .extend(Slot::read(stdin, Want::Path(PathUse::Named), FILE_PATH, d));
-        }
-        if let Some(produces) = settings.get("produces") {
-            shape.gives.extend(produced(produces, d));
-        }
-        if let Some(node) = settings.get("outputs") {
-            for (name, path) in fields::keyed(node, "an output", names::value_name_problem, d) {
-                let Some(path) = Slot::read(path, Want::Path(PathUse::Named), FILE_PATH, d) else {
-                    continue;
-                };
-                shape.outputs.push(Output {
-                    name,
-                    path: path.expr.clone(),
-                });
-                shape.slots.push(path);
-            }
-        }
-        (cx.d.len() == errors_before).then_some(shape)
+        None => None,
+    };
+    let workdir = settings.get("workdir").and_then(|workdir| {
+        // In a container, the working folder is one of the container's.
+        let want = match in_container {
+            true => Want::Text,
+            false => Want::Path(PathUse::Named),
+        };
+        Slot::read(workdir, want, Destination::Readable("a working folder"), d)
+    });
+    let variables = variables(&settings, d);
+    let stdin = settings
+        .get("stdin")
+        .and_then(|stdin| Slot::read(stdin, Want::Path(PathUse::Named), FILE_PATH, d));
+    let produces = settings
+        .get("produces")
+        .map(|produces| produced(produces, d))
+        .unwrap_or_default();
+    let outputs = settings
+        .get("outputs")
+        .map(|node| {
+            fields::keyed(node, "an output", names::value_name_problem, d)
+                .into_iter()
+                .filter_map(|(name, path)| {
+                    Some((
+                        name,
+                        Slot::read(path, Want::Path(PathUse::Named), FILE_PATH, d)?,
+                    ))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    if cx.d.len() != errors_before {
+        return None;
     }
+    let settings = CommandSettings {
+        run: run?,
+        check,
+        undo,
+        when_removed,
+        image,
+        mounts,
+        user,
+        workdir,
+        variables,
+        stdin,
+        produces,
+        outputs,
+    };
+    Some((settings, runs))
 }
 
 /// Where the command runs: inside the container `in` names, in a container
@@ -173,8 +300,9 @@ fn runs(settings: &Fields<'_>, d: &mut Diagnostics) -> Runs {
 }
 
 /// `produces`: a list of names, or a mapping from a name to
-/// `{ secret: true }` for a value that is a credential.
-fn produced(node: &Node, d: &mut Diagnostics) -> Vec<ModuleGive> {
+/// `{ secret: true }` for a value that is a credential. Each name comes with
+/// whether it is secret.
+fn produced(node: &Node, d: &mut Diagnostics) -> Vec<(NameAt, bool)> {
     const WHAT: &str = "a produced value";
     let named: Vec<(NameAt, bool)> = match node.as_map() {
         Some(_) => fields::keyed(node, WHAT, names::value_name_problem, d)
@@ -192,26 +320,29 @@ fn produced(node: &Node, d: &mut Diagnostics) -> Vec<ModuleGive> {
             .map(|name| (name, false))
             .collect(),
     };
-    let mut gives: Vec<ModuleGive> = Vec::new();
+    let mut produced: Vec<(NameAt, bool)> = Vec::new();
     for (name, secret) in named {
-        match gives.iter().find(|given| given.name.name == name.name) {
-            Some(first) => d.push(
+        match produced.iter().find(|(first, _)| first.name == name.name) {
+            Some((first, _)) => d.push(
                 Diagnostic::new(name.loc, format!("`{}` is listed twice", name.name))
-                    .with(first.name.loc, "the first one is here"),
+                    .with(first.loc, "the first one is here"),
             ),
-            None => gives.push(ModuleGive {
-                name,
-                value: ModuleValue::Produced { secret },
-            }),
+            None => produced.push((name, secret)),
         }
     }
-    gives
+    produced
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::module::testing::check;
-    use crate::module::{ModuleValue, PathUse, Runs, UnitKind, Want};
+    use super::*;
+    use crate::module::testing::{self, check};
+
+    fn settings(with: &str) -> CommandSettings<Slot> {
+        let (read, errors) = testing::read(with, |node, cx| read(Some(node), cx));
+        assert!(errors.is_empty(), "{errors:?}");
+        read.unwrap().0
+    }
 
     #[test]
     fn where_a_command_runs() {
@@ -231,6 +362,9 @@ mod tests {
 
     #[test]
     fn run_takes_a_list_or_a_shell_and_mounts_need_an_image() {
+        let read = settings("run: { shell: \"a | b\" }\ncheck: [test, -f, x]\n");
+        assert!(matches!(read.run, RunForm::Shell(_)));
+        assert!(matches!(&read.check, Some(RunForm::Argv(words)) if words.len() == 3));
         let (_, errors) = check(
             "command",
             "run: { shell: \"a | b\" }\ncheck: \"test -f x\"\n",
@@ -252,13 +386,15 @@ mod tests {
             errors,
             ["3:1: a `command` unit runs in at most one of `in` and `image`; this one has both"]
         );
+        let read = settings("run: [x]\nimage: alpine\nmounts: [{ from: a, to: /a }]\n");
+        assert_eq!((read.image.is_some(), read.mounts.len()), (true, 1));
     }
 
     #[test]
     fn the_working_folder_is_a_host_path_only_for_a_command_on_the_host_and_stdin_always() {
-        let wants = |with: &str| -> Vec<Want> {
-            let shape = check("command", with).0.unwrap();
-            shape.slots.iter().skip(1).map(|slot| slot.want).collect()
+        let wants = |with: &str| {
+            let read = settings(with);
+            [read.workdir.unwrap().want, read.stdin.unwrap().want]
         };
         let path = Want::Path(PathUse::Named);
         assert_eq!(
@@ -277,8 +413,7 @@ mod tests {
             "run: [x]\nin: db\nuser: \"999\"\n",
             "run: [x]\nimage: a\nuser: app\n",
         ] {
-            let (_, errors) = check("command", with);
-            assert!(errors.is_empty(), "{with}: {errors:?}");
+            assert!(settings(with).user.is_some(), "{with}");
         }
         let (_, errors) = check("command", "run: [x]\nuser: app\n");
         assert_eq!(
@@ -291,8 +426,9 @@ mod tests {
 
     #[test]
     fn when_removed_is_keep_or_undo_and_undo_needs_an_undo() {
-        let (_, errors) = check("command", "run: [x]\nundo: [y]\nwhen_removed: undo\n");
-        assert!(errors.is_empty(), "{errors:?}");
+        let read = settings("run: [x]\nundo: [y]\nwhen_removed: undo\n");
+        assert_eq!(read.when_removed, WhenRemoved::Undo);
+        assert_eq!(settings("run: [x]\n").when_removed, WhenRemoved::Keep);
         let (_, errors) = check("command", "run: [x]\nwhen_removed: undo\n");
         assert_eq!(
             errors,
@@ -307,29 +443,24 @@ mod tests {
 
     #[test]
     fn produced_values_are_a_list_or_a_mapping_that_marks_secrets() {
-        let (shape, errors) = check(
+        let (description, errors) = check(
             "command",
             "run: [build]\nproduces: [token]\noutputs: { server: target/debug/server }\n",
         );
         assert!(errors.is_empty(), "{errors:?}");
-        let shape = shape.unwrap();
+        let description = description.unwrap();
         assert!(matches!(
-            shape.gives[0].value,
+            description.gives[0].value,
             ModuleValue::Produced { secret: false }
         ));
-        assert_eq!(shape.outputs[0].name.name, "server");
-        let (shape, errors) = check(
-            "command",
-            "run: [issue]\nproduces: { token: { secret: true }, id: {} }\n",
-        );
-        assert!(errors.is_empty(), "{errors:?}");
-        let secret: Vec<_> = shape
-            .unwrap()
-            .gives
+        assert_eq!(description.outputs[0].name.name, "server");
+        let read = settings("run: [issue]\nproduces: { token: { secret: true }, id: {} }\n");
+        let secret: Vec<_> = read
+            .produces
             .iter()
-            .map(|given| matches!(given.value, ModuleValue::Produced { secret: true }))
+            .map(|(name, secret)| (name.name.as_str(), *secret))
             .collect();
-        assert_eq!(secret, [true, false]);
+        assert_eq!(secret, [("token", true), ("id", false)]);
         let (_, errors) = check("command", "run: [x]\nproduces: [a, a]\n");
         assert_eq!(errors, ["2:15: `a` is listed twice"]);
     }
@@ -343,10 +474,36 @@ mod tests {
                 "2:22: a value in `secret_env` must have a secret in it, and this one is written out: a secret written into a definition is not a secret"
             ]
         );
-        let (_, errors) = check(
-            "command",
-            "run: [x]\nsecret_env: { DSN: \"db://app:${pw.value}@db\" }\n",
+        let read = settings("run: [x]\nsecret_env: { DSN: \"db://app:${pw.value}@db\" }\n");
+        assert_eq!(
+            read.variables.secret_env[0].1.destination,
+            Destination::SecretEnv
         );
-        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn every_value_is_resolved_in_its_place() {
+        let read = settings(
+            "run: [a, b]\ncheck: { shell: c }\nundo: [d]\nimage: e\nmounts: [{ from: f, to: g }]\nuser: h\nworkdir: i\nenv: { J: j }\nstdin: k\noutputs: { l: m }\n",
+        );
+        let mut resolved = Vec::new();
+        let settings = read
+            .map(&mut |slot| {
+                let text = slot.expr.literal_text()?;
+                resolved.push(text.clone());
+                Some(text)
+            })
+            .unwrap();
+        assert_eq!(
+            resolved,
+            ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "m"]
+        );
+        assert_eq!(
+            (
+                settings.outputs[0].0.name.as_str(),
+                settings.outputs[0].1.as_str()
+            ),
+            ("l", "m")
+        );
     }
 }

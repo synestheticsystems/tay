@@ -109,7 +109,7 @@ impl<'s> Resolver<'s> {
                 }
             }
         }
-        value.value = Value::Text(bits);
+        value.value = Value::from_bits(bits);
         Ok(value)
     }
 

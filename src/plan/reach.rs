@@ -111,7 +111,8 @@ impl<'s> Planner<'s> {
             let Chosen::Mechanism { mechanism, .. } = reached.visits[index].1.chosen else {
                 continue;
             };
-            let UnitKind::Runs(Runs::OwnContainer { published }) = &mechanism.shape.kind else {
+            let UnitKind::Runs(Runs::OwnContainer { published }) = &mechanism.description.kind
+            else {
                 continue;
             };
             let name = &stack.units[unit].name.name;
@@ -131,11 +132,11 @@ impl<'s> Planner<'s> {
                 let mut uses = Uses::default();
                 let slot = &entry.host_port;
                 let host_port = self
-                    .use_value(user, &slot.expr, slot.want, slot.place, &mut uses)
+                    .use_value(user, &slot.expr, slot.want, slot.destination, &mut uses)
                     .map(|value| Shown::of(&value));
                 let address = match &entry.address {
                     Some(slot) => self
-                        .use_value(user, &slot.expr, slot.want, slot.place, &mut uses)
+                        .use_value(user, &slot.expr, slot.want, slot.destination, &mut uses)
                         .map(|value| Shown::of(&value)),
                     None => Some(Shown::word(LOOPBACK)),
                 };

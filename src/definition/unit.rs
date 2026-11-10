@@ -3,7 +3,7 @@
 //! known to be ready and restarted.
 
 use crate::diagnostic::source::Loc;
-use crate::module::{Module, ModuleValue, Output, UnitShape};
+use crate::module::{Description, Module, ModuleValue, Output};
 use crate::syntax::expr::{Expr, Type};
 use crate::syntax::names::NameAt;
 
@@ -87,7 +87,7 @@ pub struct Mechanism {
     pub module: &'static dyn Module,
     /// Where `uses` names the module.
     pub uses: Loc,
-    pub shape: UnitShape,
+    pub description: Description,
     pub needs: Vec<NameAt>,
     pub after: Vec<NameAt>,
     pub gives: Vec<Give>,
@@ -103,7 +103,7 @@ impl Mechanism {
 
     /// The files the mechanism builds.
     pub fn outputs(&self) -> &[Output] {
-        &self.shape.outputs
+        &self.description.outputs
     }
 }
 
@@ -112,7 +112,7 @@ impl std::fmt::Debug for Mechanism {
         f.debug_struct("Mechanism")
             .field("module", &self.module.name())
             .field("uses", &self.uses)
-            .field("shape", &self.shape)
+            .field("description", &self.description)
             .field("needs", &self.needs)
             .field("after", &self.after)
             .field("gives", &self.gives)

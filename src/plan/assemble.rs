@@ -53,7 +53,7 @@ impl Planner<'_> {
             .iter()
             .filter(|(_, visit)| {
                 matches!(visit.chosen, Chosen::Mechanism { mechanism, .. }
-                    if matches!(mechanism.shape.kind, UnitKind::Made))
+                    if matches!(mechanism.description.kind, UnitKind::Made))
             })
             .map(|(unit, _)| *unit)
             .collect();
@@ -84,7 +84,8 @@ impl Planner<'_> {
             let mut unit_plan = visit.planned?;
             unit_plan.gives = gives?;
             if let Some(mechanism) = mechanism
-                && let UnitKind::Runs(Runs::OwnContainer { published }) = &mechanism.shape.kind
+                && let UnitKind::Runs(Runs::OwnContainer { published }) =
+                    &mechanism.description.kind
             {
                 for (entry, used) in published.iter().zip(visit.published) {
                     let opened = match used {

@@ -1,21 +1,26 @@
-//! Modules: the mechanisms units use. Each module reads its own settings and
-//! describes the unit in a [`UnitShape`]; nothing outside a module's own file
-//! and the list below knows which modules exist.
+//! Modules: the mechanisms units use. Each module reads a unit's `with` into
+//! settings of its own type and describes the unit in a [`Description`];
+//! nothing outside a module's own file and the list below knows which
+//! modules exist.
 
+mod description;
 mod made;
 mod running;
-pub mod shape;
+mod settings;
 mod want;
+
+use std::fmt;
 
 use crate::diagnostic::Diagnostics;
 use crate::diagnostic::source::Loc;
 use crate::syntax::yaml::Node;
 
-pub use running::container::HOST_IN_CONTAINERS;
-pub use shape::{
-    Concern, ModuleValue, Output, Place, Published, RestartDefault, Runs, UnitKind, UnitShape,
+pub use description::{
+    Concern, Description, ModuleValue, Output, Published, RestartDefault, Runs, UnitKind,
     VolumeMount,
 };
+pub use running::container::HOST_IN_CONTAINERS;
+pub use settings::{Destination, Settings};
 pub use want::{Form, PathUse, Want};
 
 /// One mechanism a unit can use.
@@ -32,7 +37,13 @@ pub trait Module: Sync {
     /// Reads the unit's `with` strictly against this module's settings and
     /// describes the unit. `None` when the settings have errors, which are
     /// reported through `cx`.
-    fn check(&self, with: Option<&Node>, cx: &mut Cx<'_>) -> Option<UnitShape>;
+    fn read(&self, with: Option<&Node>, cx: &mut Cx<'_>) -> Option<Description>;
+}
+
+impl fmt::Debug for dyn Module {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.name())
+    }
 }
 
 /// What a module is told about the unit whose settings it reads.
@@ -65,13 +76,13 @@ pub fn names() -> impl Iterator<Item = &'static str> {
 pub(crate) mod testing {
     use crate::diagnostic::Diagnostics;
     use crate::diagnostic::source::{Loc, Sources};
-    use crate::syntax::yaml;
+    use crate::syntax::yaml::{self, Node};
 
-    use super::{Cx, UnitShape};
+    use super::{Cx, Description};
 
-    /// Checks `with` (YAML text) for a unit using `module`, and gives the
-    /// shape and each error as `line:column: message`.
-    pub fn check(module: &str, with: &str) -> (Option<UnitShape>, Vec<String>) {
+    /// Reads `with` (YAML text) with `read`, for a unit called `the-unit`,
+    /// and gives what it read and each error as `line:column: message`.
+    pub fn read<T>(with: &str, read: impl FnOnce(&Node, &mut Cx<'_>) -> T) -> (T, Vec<String>) {
         let mut sources = Sources::default();
         let id = sources.add_argument("with");
         let mut d = Diagnostics::default();
@@ -81,12 +92,20 @@ pub(crate) mod testing {
             uses: Loc::new(id, 1, 1),
             d: &mut d,
         };
-        let shape = super::find(module).unwrap().check(Some(&node), &mut cx);
+        let read = read(&node, &mut cx);
         let errors = d
             .into_sorted()
             .iter()
             .map(|e| format!("{}:{}: {}", e.loc.line, e.loc.column, e.message))
             .collect();
-        (shape, errors)
+        (read, errors)
+    }
+
+    /// Reads `with` for a unit using `module`, and gives its description and
+    /// each error.
+    pub fn check(module: &str, with: &str) -> (Option<Description>, Vec<String>) {
+        read(with, |node, cx| {
+            super::find(module).unwrap().read(Some(node), cx)
+        })
     }
 }

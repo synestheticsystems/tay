@@ -163,7 +163,7 @@ fn unique_claims(units: &[Unit], d: &mut Diagnostics) {
         let claims = unit
             .mechanisms()
             .into_iter()
-            .flat_map(|mechanism| &mechanism.shape.claims);
+            .flat_map(|mechanism| &mechanism.description.claims);
         for claim in claims {
             match first.get(claim.what.as_str()) {
                 Some((owner, _)) if *owner == unit.name.name => {}

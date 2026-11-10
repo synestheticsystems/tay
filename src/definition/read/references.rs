@@ -19,10 +19,10 @@ pub fn check(stack: &Stack, places: &[&Choices], d: &mut Diagnostics) {
             for name in mechanism.needs.iter().chain(&mechanism.after) {
                 unit_named(stack, name, d);
             }
-            for mounted in &mechanism.shape.volume_mounts {
+            for mounted in &mechanism.description.volume_mounts {
                 volume_owned(stack, mounted, d);
             }
-            if let UnitKind::Runs(Runs::InsideUnit(inner)) = &mechanism.shape.kind {
+            if let UnitKind::Runs(Runs::InsideUnit(inner)) = &mechanism.description.kind {
                 unit_named(stack, inner, d);
                 if let Some(written) = mechanism.needs.iter().find(|need| need.name == inner.name) {
                     d.push(
@@ -50,8 +50,15 @@ pub fn check(stack: &Stack, places: &[&Choices], d: &mut Diagnostics) {
 /// Every value written in a mechanism.
 fn exprs(mechanism: &Mechanism) -> Vec<&Expr> {
     let mut all: Vec<&Expr> = Vec::new();
-    all.extend(mechanism.shape.slots.iter().map(|slot| &slot.expr));
-    if let UnitKind::Runs(Runs::OwnContainer { published }) = &mechanism.shape.kind {
+    all.extend(
+        mechanism
+            .description
+            .settings
+            .slots()
+            .into_iter()
+            .map(|slot| &slot.expr),
+    );
+    if let UnitKind::Runs(Runs::OwnContainer { published }) = &mechanism.description.kind {
         for entry in published {
             all.push(&entry.host_port.expr);
             all.extend(entry.address.iter().map(|slot| &slot.expr));
@@ -255,7 +262,13 @@ fn volume_owned(stack: &Stack, mounted: &VolumeMount, d: &mut Diagnostics) {
     let mut owned: Vec<&str> = owner
         .mechanisms()
         .into_iter()
-        .flat_map(|mechanism| mechanism.shape.volumes.iter().map(|v| v.name.as_str()))
+        .flat_map(|mechanism| {
+            mechanism
+                .description
+                .volumes
+                .iter()
+                .map(|v| v.name.as_str())
+        })
         .collect();
     if owned.contains(&mounted.volume.name.as_str()) {
         return;
@@ -296,7 +309,7 @@ fn view_unit(stack: &Stack, view: Option<&View>, reference: &Reference, d: &mut 
         );
         return;
     };
-    let runs = |mechanism: &&Mechanism| matches!(mechanism.shape.kind, UnitKind::Runs(_));
+    let runs = |mechanism: &&Mechanism| matches!(mechanism.description.kind, UnitKind::Runs(_));
     if !matches!(unit.body, Body::Unreadable) && !unit.mechanisms().iter().any(runs) {
         d.error(
             reference.loc,

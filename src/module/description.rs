@@ -4,21 +4,18 @@ use crate::diagnostic::source::Loc;
 use crate::syntax::expr::Expr;
 use crate::syntax::names::NameAt;
 
-use crate::diagnostic::Diagnostics;
-use crate::syntax::expr;
-use crate::syntax::yaml::Node;
+use super::settings::{Slot, WrittenSettings};
 
-use super::want::{Form, Want};
-
-/// A module's account of one unit, read from the unit's settings. The planner
-/// works from this alone.
-#[derive(Clone, Debug)]
-pub struct UnitShape {
+/// A module's description of one unit, read from the unit's `with`: its own
+/// settings, and what the planner needs to know of the unit, which it works
+/// from alone.
+#[derive(Debug)]
+pub struct Description {
     pub kind: UnitKind,
-    /// Every value the unit's settings use, with what each must be and where
-    /// it goes.
-    pub slots: Vec<Slot>,
-    /// The values the module gives, used as `${unit.name}`.
+    /// The module's own settings, every value still to be resolved.
+    pub settings: Box<dyn WrittenSettings>,
+    /// The values the module gives, used as `${unit.name}`. Reading the unit
+    /// moves them in among the values the unit gives.
     pub gives: Vec<ModuleGive>,
     /// The files the unit builds, used as `${unit.outputs.name}`.
     pub outputs: Vec<Output>,
@@ -36,17 +33,18 @@ pub struct UnitShape {
     pub restart_by_default: RestartDefault,
 }
 
-impl UnitShape {
-    /// A unit's shape with only its kind and its defaults: what it uses,
-    /// gives and makes is filled in by its module.
+impl Description {
+    /// A unit's description with only its kind, its settings and its
+    /// defaults: what it gives and makes is filled in by its module.
     pub fn new(
         kind: UnitKind,
+        settings: Box<dyn WrittenSettings>,
         ready_without_check: &'static str,
         restart_by_default: RestartDefault,
-    ) -> UnitShape {
-        UnitShape {
+    ) -> Description {
+        Description {
             kind,
-            slots: Vec::new(),
+            settings,
             gives: Vec::new(),
             outputs: Vec::new(),
             volumes: Vec::new(),
@@ -115,39 +113,6 @@ pub struct Published {
     /// The host address it is opened on; `None` for 127.0.0.1.
     pub address: Option<Slot>,
     pub always: bool,
-}
-
-/// One value a unit's settings use.
-#[derive(Clone, Debug)]
-pub struct Slot {
-    pub expr: Expr,
-    pub want: Want,
-    pub place: Place,
-}
-
-impl Slot {
-    /// Reads a setting's value. Its written form is checked now; a reference
-    /// in it is checked once it is resolved.
-    pub fn read(node: &Node, want: Want, place: Place, d: &mut Diagnostics) -> Option<Slot> {
-        let expr = expr::from_node(node, d)?;
-        if let Some(problem) = Form::of_written(&expr).and_then(|form| want.problem(&form)) {
-            d.error(node.loc, format!("this {problem}"));
-            return None;
-        }
-        Some(Slot { expr, want, place })
-    }
-}
-
-/// Where a value ends up, which decides whether a secret may go there.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Place {
-    /// `secret_env`: only values with a secret in them.
-    SecretEnv,
-    /// A `file` unit's content, which is written for its owner alone when
-    /// it holds a secret and no `mode` is written.
-    FileContent,
-    /// A place other programs can read, named for messages.
-    Readable(&'static str),
 }
 
 /// A file a unit builds, and its path on the host.

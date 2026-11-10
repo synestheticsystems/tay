@@ -31,7 +31,9 @@ pub fn plan(plan: &Plan) -> String {
 fn unit_lines(lines: &mut Vec<String>, number: usize, unit: &PlannedUnit) {
     let mechanism = match &unit.mechanism {
         Mechanism::Group => "a group".to_string(),
-        Mechanism::Module { module, way, runs } => {
+        Mechanism::Module {
+            module, way, runs, ..
+        } => {
             let way = way
                 .as_ref()
                 .map(|way| format!(" (way `{way}`)"))
@@ -40,7 +42,7 @@ fn unit_lines(lines: &mut Vec<String>, number: usize, unit: &PlannedUnit) {
                 Some(runs) => running(runs),
                 None => "is made".to_string(),
             };
-            format!("uses `{module}`{way}, {runs}")
+            format!("uses `{}`{way}, {runs}", module.name())
         }
     };
     lines.push(format!("{number}. {}: {mechanism}", unit.name));

@@ -3,7 +3,7 @@
 use crate::syntax::expr::{Expr, ExprKind, Type};
 use crate::value::Value;
 
-use super::shape::Place;
+use super::settings::Destination;
 
 /// What a value must be once resolved.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -39,9 +39,10 @@ pub enum PathUse {
     /// the state or shared folder, where tay makes it, or is built from a
     /// value produced by running.
     Mounted,
-    /// A file whose text is read before start and has its references filled
-    /// in; the text goes to the place given.
-    Read(Place),
+    /// A file whose text is read before start and has its references
+    /// filled in. The value used is the text, which ends up where the
+    /// destination says.
+    Read(Destination),
 }
 
 /// What is known of a value when it is checked against a [`Want`]: its type,
@@ -220,7 +221,7 @@ mod tests {
     fn a_produced_value_passes_type_checks_but_not_a_file_read_before_start() {
         assert_eq!(Want::Number.problem(&Form::Unknown), None);
         assert!(
-            Want::Path(PathUse::Read(Place::FileContent))
+            Want::Path(PathUse::Read(Destination::FileContent))
                 .problem(&Form::Unknown)
                 .is_some()
         );

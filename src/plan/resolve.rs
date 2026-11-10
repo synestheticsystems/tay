@@ -200,7 +200,8 @@ impl<'s> Resolver<'s> {
     /// Whether `unit` runs, and where, under its chosen way; `None` for a
     /// group.
     pub fn kind(&mut self, unit: usize) -> Option<&'s UnitKind> {
-        self.mechanism(unit).map(|mechanism| &mechanism.shape.kind)
+        self.mechanism(unit)
+            .map(|mechanism| &mechanism.description.kind)
     }
 
     pub fn resolve(&mut self, expr: &Expr, scope: Scope) -> Res {
@@ -239,7 +240,7 @@ impl<'s> Resolver<'s> {
         if reported {
             return Err(Fail::Reported);
         }
-        text.value = Value::Text(bits);
+        text.value = Value::from_bits(bits);
         Ok(text)
     }
 

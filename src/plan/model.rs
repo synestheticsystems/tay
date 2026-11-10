@@ -4,6 +4,8 @@ mod needs;
 mod published;
 mod values;
 
+use crate::module::{Module, Settings};
+
 pub use needs::{After, Because, Need};
 pub use published::{OpenedBy, OpenedPort, Opener, PublishedPort};
 pub use values::{GivenLine, Seen, Shown};
@@ -37,11 +39,21 @@ pub enum Mechanism {
     /// A unit that only brings up what it needs.
     Group,
     Module {
-        module: &'static str,
+        module: &'static dyn Module,
         way: Option<String>,
         /// Where the unit runs; `None` for a unit that is made, which runs
         /// nowhere.
         runs: Option<Running>,
+        /// The module's own settings, every value resolved: what the unit
+        /// is brought up from.
+        #[cfg_attr(
+            not(test),
+            expect(
+                dead_code,
+                reason = "the engine, which is not built yet, brings each unit up from its settings"
+            )
+        )]
+        settings: Box<dyn Settings>,
     },
 }
 

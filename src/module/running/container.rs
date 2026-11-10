@@ -1,13 +1,16 @@
 //! `container`: an image run through Docker, on the environment's network.
 
 use crate::diagnostic::Diagnostics;
+use crate::diagnostic::source::Loc;
 use crate::syntax::fields::{self, Fields};
-use crate::syntax::names;
+use crate::syntax::names::{self, NameAt};
 use crate::syntax::yaml::{Kind, Node, Scalar};
+use crate::value::Value;
 
-use super::common::{self, argv, environment};
-use crate::module::shape::{
-    Concern, Place, Published, RestartDefault, Runs, Slot, UnitKind, UnitShape,
+use super::common::{Mount, Variables, argv, mounts, variables};
+use crate::module::description::{Concern, Description, Published, RestartDefault, Runs, UnitKind};
+use crate::module::settings::{
+    Destination, Settings, Slot, WrittenSettings, each, each_named, maybe,
 };
 use crate::module::want::{PathUse, Want};
 use crate::module::{Cx, Module};
@@ -39,7 +42,144 @@ const FIELDS: &[&str] = &[
     "pids_limit",
 ];
 
-const SETTING: Place = Place::Readable("a container's settings");
+const SETTING: Destination = Destination::Readable("a container's settings");
+
+/// A container's settings, each value a [`Slot`] as written or a [`Value`]
+/// once resolved. Its published ports are in the unit's description, where
+/// the planner decides which are opened.
+#[derive(Debug)]
+struct ContainerSettings<V> {
+    image: Image<V>,
+    /// `None`: the image's own.
+    command: Option<Vec<V>>,
+    /// `None`: the image's own.
+    entrypoint: Option<Vec<V>>,
+    variables: Variables<V>,
+    volumes: Vec<Volume<V>>,
+    mounts: Vec<Mount<V>>,
+    tmpfs: Vec<V>,
+    /// Further names on the environment's network, besides the unit's own.
+    aliases: Vec<String>,
+    labels: Vec<(String, V)>,
+    user: Option<V>,
+    workdir: Option<V>,
+    platform: Option<V>,
+    read_only: Option<V>,
+    security_opt: Vec<V>,
+    pids_limit: Option<V>,
+}
+
+/// The image a container runs.
+#[derive(Debug)]
+enum Image<V> {
+    /// An image by name.
+    Named(V),
+    /// An image built from a folder on the host.
+    Built {
+        context: V,
+        dockerfile: Option<V>,
+        args: Vec<(String, V)>,
+    },
+}
+
+/// A named volume the unit owns, and where it is in the container.
+#[derive(Debug)]
+struct Volume<V> {
+    name: NameAt,
+    to: V,
+    /// The numeric user the volume is given to.
+    owner: Option<V>,
+}
+
+impl<V> Image<V> {
+    fn map<'a, W>(&'a self, f: &mut dyn FnMut(&'a V) -> Option<W>) -> Option<Image<W>> {
+        match self {
+            Image::Named(name) => f(name).map(Image::Named),
+            Image::Built {
+                context,
+                dockerfile,
+                args,
+            } => {
+                let context = f(context);
+                let dockerfile = maybe(dockerfile, f);
+                let args = each_named(args, f);
+                Some(Image::Built {
+                    context: context?,
+                    dockerfile: dockerfile?,
+                    args: args?,
+                })
+            }
+        }
+    }
+}
+
+impl<V> Volume<V> {
+    fn map<'a, W>(&'a self, f: &mut dyn FnMut(&'a V) -> Option<W>) -> Option<Volume<W>> {
+        let to = f(&self.to);
+        let owner = maybe(&self.owner, f);
+        Some(Volume {
+            name: self.name.clone(),
+            to: to?,
+            owner: owner?,
+        })
+    }
+}
+
+impl<V> ContainerSettings<V> {
+    fn map<'a, W>(&'a self, f: &mut dyn FnMut(&'a V) -> Option<W>) -> Option<ContainerSettings<W>> {
+        let image = self.image.map(f);
+        let command = maybe(&self.command, &mut |words| each(words, f));
+        let entrypoint = maybe(&self.entrypoint, &mut |words| each(words, f));
+        let variables = self.variables.map(f);
+        let volumes: Vec<Option<Volume<W>>> = self.volumes.iter().map(|v| v.map(f)).collect();
+        let mounts: Vec<Option<Mount<W>>> = self.mounts.iter().map(|m| m.map(f)).collect();
+        let tmpfs = each(&self.tmpfs, f);
+        let labels = each_named(&self.labels, f);
+        let user = maybe(&self.user, f);
+        let workdir = maybe(&self.workdir, f);
+        let platform = maybe(&self.platform, f);
+        let read_only = maybe(&self.read_only, f);
+        let security_opt = each(&self.security_opt, f);
+        let pids_limit = maybe(&self.pids_limit, f);
+        Some(ContainerSettings {
+            image: image?,
+            command: command?,
+            entrypoint: entrypoint?,
+            variables: variables?,
+            volumes: volumes.into_iter().collect::<Option<_>>()?,
+            mounts: mounts.into_iter().collect::<Option<_>>()?,
+            tmpfs: tmpfs?,
+            aliases: self.aliases.clone(),
+            labels: labels?,
+            user: user?,
+            workdir: workdir?,
+            platform: platform?,
+            read_only: read_only?,
+            security_opt: security_opt?,
+            pids_limit: pids_limit?,
+        })
+    }
+}
+
+impl WrittenSettings for ContainerSettings<Slot> {
+    fn slots(&self) -> Vec<&Slot> {
+        let mut slots = Vec::new();
+        self.map(&mut |slot| {
+            slots.push(slot);
+            Some(())
+        });
+        slots
+    }
+
+    fn resolve(
+        &self,
+        resolve: &mut dyn FnMut(&Slot) -> Option<Value>,
+    ) -> Option<Box<dyn Settings>> {
+        Some(Box::new(self.map(resolve)?))
+    }
+}
+
+impl Settings for ContainerSettings<Value> {}
 
 impl Module for Container {
     fn name(&self) -> &'static str {
@@ -50,164 +190,245 @@ impl Module for Container {
         &["env", "secret_env", "labels", "volumes", "publish"]
     }
 
-    fn check(&self, with: Option<&Node>, cx: &mut Cx<'_>) -> Option<UnitShape> {
-        let Some(with) = with else {
-            cx.d.error(
-                cx.uses,
-                "a `container` unit needs `with` and in it an `image` or a `build`",
-            );
-            return None;
-        };
-        let errors_before = cx.d.len();
-        let d = &mut *cx.d;
-        let settings = Fields::of(with, "the settings of a `container` unit", FIELDS, d)?;
-        let published = settings
-            .get("publish")
-            .map(|node| publish_settings(node, d))
-            .unwrap_or_default();
-        let mut shape = UnitShape::new(
-            UnitKind::Runs(Runs::OwnContainer { published }),
-            "when its image's own health check passes, or when it has started if the image has none",
-            RestartDefault::OnFailure,
-        );
-        match (settings.entry("image"), settings.entry("build")) {
-            (Some((_, image)), None) => {
-                shape.slots.extend(Slot::read(
-                    image,
-                    Want::Text,
-                    Place::Readable("an image name"),
-                    d,
-                ));
-            }
-            (None, Some((key, build))) => {
-                shape.slots.extend(build_settings(build, d));
-                shape.production.push(Concern::BuildsImage(key.loc));
-            }
-            (Some(_), Some((key, _))) => d.error(
-                key.loc,
-                "a `container` unit has exactly one of `image` and `build`; this one has both",
-            ),
-            (None, None) => d.error(
-                settings.loc(),
-                "a `container` unit needs exactly one of `image` and `build`",
-            ),
-        }
-        for list in ["command", "entrypoint"] {
-            if let Some(node) = settings.get(list) {
-                shape
-                    .slots
-                    .extend(argv(node, &format!("`{list}`"), d).unwrap_or_default());
-            }
-        }
-        shape.slots.extend(environment(&settings, d));
-        if let Some(volumes) = settings.get("volumes") {
-            volume_settings(volumes, &mut shape, d);
-        }
-        if let Some(mounts) = settings.get("mounts") {
-            common::mounts(mounts, &mut shape, d);
-        }
-        if let Some(tmpfs) = settings.get("tmpfs")
-            && let Some(paths) = fields::list(tmpfs, "`tmpfs`", d)
-        {
-            for path in paths {
-                shape.slots.extend(Slot::read(path, Want::Text, SETTING, d));
-            }
-        }
-        if let Some(aliases) = settings.get("aliases") {
-            fields::name_list(aliases, "an alias", names::name_problem, d);
-        }
-        if let Some(labels) = settings.get("labels") {
-            for (_, label) in fields::keyed(labels, "a label", label_key_problem, d) {
-                shape.slots.extend(Slot::read(
-                    label,
-                    Want::Scalar,
-                    Place::Readable("a label"),
-                    d,
-                ));
-            }
-        }
-        for (field, want) in [
-            ("user", Want::Scalar),
-            ("workdir", Want::Text),
-            ("platform", Want::Text),
-            ("read_only", Want::Bool),
-            ("pids_limit", Want::Number),
-        ] {
-            if let Some(node) = settings.get(field) {
-                shape.slots.extend(Slot::read(node, want, SETTING, d));
-            }
-        }
-        if let Some(options) = settings.get("security_opt")
-            && let Some(items) = fields::list(options, "`security_opt`", d)
-        {
-            for item in items {
-                shape.slots.extend(Slot::read(item, Want::Text, SETTING, d));
-            }
-        }
-        (cx.d.len() == errors_before).then_some(shape)
+    fn read(&self, with: Option<&Node>, cx: &mut Cx<'_>) -> Option<Description> {
+        let Read {
+            settings,
+            published,
+            built_at,
+        } = read(with, cx)?;
+        let volumes = settings
+            .volumes
+            .iter()
+            .map(|volume| volume.name.clone())
+            .collect();
+        let volume_mounts = settings
+            .mounts
+            .iter()
+            .filter_map(|mount| mount.volume().cloned())
+            .collect();
+        let mut production: Vec<Concern> = built_at.map(Concern::BuildsImage).into_iter().collect();
+        production.extend(settings.mounts.iter().filter_map(Mount::concern));
+        Some(Description {
+            volumes,
+            volume_mounts,
+            production,
+            ..Description::new(
+                UnitKind::Runs(Runs::OwnContainer { published }),
+                Box::new(settings),
+                "when its image's own health check passes, or when it has started if the image has none",
+                RestartDefault::OnFailure,
+            )
+        })
     }
 }
 
-fn build_settings(node: &Node, d: &mut Diagnostics) -> Vec<Slot> {
-    const BUILD: Place = Place::Readable("an image build");
-    let mut slots = Vec::new();
-    let Some(build) = Fields::of(node, "`build`", &["context", "dockerfile", "args"], d) else {
-        return slots;
+/// What a container unit's `with` says.
+struct Read {
+    settings: ContainerSettings<Slot>,
+    published: Vec<Published>,
+    /// Where `build` is written, when the image is built.
+    built_at: Option<Loc>,
+}
+
+fn read(with: Option<&Node>, cx: &mut Cx<'_>) -> Option<Read> {
+    let Some(with) = with else {
+        cx.d.error(
+            cx.uses,
+            "a `container` unit needs `with` and in it an `image` or a `build`",
+        );
+        return None;
     };
-    slots.extend(
-        build
-            .require("context", d)
-            .and_then(|n| Slot::read(n, Want::Path(PathUse::Named), BUILD, d)),
-    );
-    slots.extend(
-        build
-            .get("dockerfile")
-            .and_then(|n| Slot::read(n, Want::Text, BUILD, d)),
-    );
-    if let Some(args) = build.get("args") {
-        for (_, arg) in fields::keyed(args, "a build argument", names::variable_name_problem, d) {
-            slots.extend(Slot::read(
-                arg,
-                Want::Scalar,
-                Place::Readable("an image build argument"),
-                d,
-            ));
+    let errors_before = cx.d.len();
+    let d = &mut *cx.d;
+    let settings = Fields::of(with, "the settings of a `container` unit", FIELDS, d)?;
+    let published = settings
+        .get("publish")
+        .map(|node| publish_settings(node, d))
+        .unwrap_or_default();
+    let (image, built_at) = match (settings.entry("image"), settings.entry("build")) {
+        (Some((_, image)), None) => (
+            Slot::read(image, Want::Text, Destination::Readable("an image name"), d)
+                .map(Image::Named),
+            None,
+        ),
+        (None, Some((key, build))) => (build_settings(build, d), Some(key.loc)),
+        (Some(_), Some((key, _))) => {
+            d.error(
+                key.loc,
+                "a `container` unit has exactly one of `image` and `build`; this one has both",
+            );
+            (None, None)
         }
+        (None, None) => {
+            d.error(
+                settings.loc(),
+                "a `container` unit needs exactly one of `image` and `build`",
+            );
+            (None, None)
+        }
+    };
+    let [command, entrypoint] = ["command", "entrypoint"].map(|list| {
+        settings
+            .get(list)
+            .and_then(|node| argv(node, &format!("`{list}`"), d))
+    });
+    let variables = variables(&settings, d);
+    let volumes = settings
+        .get("volumes")
+        .map(|volumes| volume_settings(volumes, d))
+        .unwrap_or_default();
+    let mounts = settings
+        .get("mounts")
+        .map(|node| mounts(node, d))
+        .unwrap_or_default();
+    let tmpfs = text_list(&settings, "tmpfs", d);
+    let aliases = settings
+        .get("aliases")
+        .map(|aliases| {
+            fields::name_list(aliases, "an alias", names::name_problem, d)
+                .into_iter()
+                .map(|alias| alias.name)
+                .collect()
+        })
+        .unwrap_or_default();
+    let labels = settings
+        .get("labels")
+        .map(|labels| {
+            fields::keyed(labels, "a label", label_key_problem, d)
+                .into_iter()
+                .filter_map(|(key, label)| {
+                    let label =
+                        Slot::read(label, Want::Scalar, Destination::Readable("a label"), d)?;
+                    Some((key.name, label))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let [user, workdir, platform, read_only, pids_limit] = [
+        ("user", Want::Scalar),
+        ("workdir", Want::Text),
+        ("platform", Want::Text),
+        ("read_only", Want::Bool),
+        ("pids_limit", Want::Number),
+    ]
+    .map(|(field, want)| {
+        settings
+            .get(field)
+            .and_then(|node| Slot::read(node, want, SETTING, d))
+    });
+    let security_opt = text_list(&settings, "security_opt", d);
+    if cx.d.len() != errors_before {
+        return None;
     }
-    slots
+    let settings = ContainerSettings {
+        image: image?,
+        command,
+        entrypoint,
+        variables,
+        volumes,
+        mounts,
+        tmpfs,
+        aliases,
+        labels,
+        user,
+        workdir,
+        platform,
+        read_only,
+        security_opt,
+        pids_limit,
+    };
+    Some(Read {
+        settings,
+        published,
+        built_at,
+    })
+}
+
+/// A setting that is a list of text, such as `tmpfs`.
+fn text_list(settings: &Fields<'_>, field: &'static str, d: &mut Diagnostics) -> Vec<Slot> {
+    let Some(items) = settings
+        .get(field)
+        .and_then(|node| fields::list(node, &format!("`{field}`"), d))
+    else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(|item| Slot::read(item, Want::Text, SETTING, d))
+        .collect()
+}
+
+fn build_settings(node: &Node, d: &mut Diagnostics) -> Option<Image<Slot>> {
+    const BUILD: Destination = Destination::Readable("an image build");
+    let build = Fields::of(node, "`build`", &["context", "dockerfile", "args"], d)?;
+    let context = build
+        .require("context", d)
+        .and_then(|n| Slot::read(n, Want::Path(PathUse::Named), BUILD, d));
+    let dockerfile = build
+        .get("dockerfile")
+        .and_then(|n| Slot::read(n, Want::Text, BUILD, d));
+    let args = build
+        .get("args")
+        .map(|args| {
+            fields::keyed(args, "a build argument", names::variable_name_problem, d)
+                .into_iter()
+                .filter_map(|(name, arg)| {
+                    let arg = Slot::read(
+                        arg,
+                        Want::Scalar,
+                        Destination::Readable("an image build argument"),
+                        d,
+                    )?;
+                    Some((name.name, arg))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Some(Image::Built {
+        context: context?,
+        dockerfile,
+        args,
+    })
 }
 
 /// `volumes`: the named volumes the unit owns, each a path in the
 /// container, or `{ to, owner }`.
-fn volume_settings(node: &Node, shape: &mut UnitShape, d: &mut Diagnostics) {
-    const VOLUME: Place = Place::Readable("a volume");
+fn volume_settings(node: &Node, d: &mut Diagnostics) -> Vec<Volume<Slot>> {
+    const VOLUME: Destination = Destination::Readable("a volume");
+    let mut volumes = Vec::new();
     for (name, volume) in fields::keyed(node, "a volume", names::name_problem, d) {
-        shape.volumes.push(name);
         if volume.as_map().is_none() {
-            shape
-                .slots
-                .extend(Slot::read(volume, Want::Text, VOLUME, d));
+            if let Some(to) = Slot::read(volume, Want::Text, VOLUME, d) {
+                volumes.push(Volume {
+                    name,
+                    to,
+                    owner: None,
+                });
+            }
             continue;
         }
         let Some(long) = Fields::of(volume, "a volume", &["to", "owner"], d) else {
             continue;
         };
-        shape.slots.extend(
-            long.require("to", d)
-                .and_then(|n| Slot::read(n, Want::Text, VOLUME, d)),
-        );
-        shape.slots.extend(
-            long.get("owner")
-                .and_then(|n| Slot::read(n, Want::Number, VOLUME, d)),
-        );
+        let to = long
+            .require("to", d)
+            .and_then(|n| Slot::read(n, Want::Text, VOLUME, d));
+        let owner = match long.get("owner") {
+            Some(n) => Slot::read(n, Want::Number, VOLUME, d).map(Some),
+            None => Some(None),
+        };
+        if let (Some(to), Some(owner)) = (to, owner) {
+            volumes.push(Volume { name, to, owner });
+        }
     }
+    volumes
 }
 
 /// `publish`: container ports, as keys, each made reachable at a host port
-/// when it is opened. Its values are not among the unit's slots: an entry
-/// that is not opened uses nothing.
+/// when it is opened. Its values are not among the container's settings: an
+/// entry that is not opened uses nothing.
 fn publish_settings(node: &Node, d: &mut Diagnostics) -> Vec<Published> {
-    const PUBLISHED: Place = Place::Readable("a published port");
+    const PUBLISHED: Destination = Destination::Readable("a published port");
     let Some(map) = node.as_map() else {
         d.error(
             node.loc,
@@ -274,8 +495,14 @@ fn label_key_problem(key: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use crate::module::testing::check;
-    use crate::module::{PathUse, Runs, UnitKind, Want};
+    use super::*;
+    use crate::module::testing::{self, check};
+
+    fn settings(with: &str) -> ContainerSettings<Slot> {
+        let (read, errors) = testing::read(with, |node, cx| read(Some(node), cx));
+        assert!(errors.is_empty(), "{errors:?}");
+        read.unwrap().settings
+    }
 
     #[test]
     fn exactly_one_of_image_and_build() {
@@ -293,15 +520,21 @@ mod tests {
 
     #[test]
     fn publish_keys_are_container_ports_and_values_host_ports() {
-        let (shape, errors) = check(
+        let (description, errors) = check(
             "container",
             "image: db\npublish:\n  5432: \"${db-port.number}\"\n  8080: { port: 18080, address: 0.0.0.0, always: true }\n",
         );
         assert!(errors.is_empty(), "{errors:?}");
-        let shape = shape.unwrap();
+        let description = description.unwrap();
         // A published port's values are used only once it is opened.
-        assert!(shape.slots.iter().all(|slot| slot.want != Want::PortNumber));
-        let UnitKind::Runs(Runs::OwnContainer { published }) = shape.kind else {
+        assert!(
+            description
+                .settings
+                .slots()
+                .iter()
+                .all(|slot| slot.want != Want::PortNumber)
+        );
+        let UnitKind::Runs(Runs::OwnContainer { published }) = description.kind else {
             panic!("a container runs in its own container");
         };
         assert_eq!(
@@ -325,20 +558,20 @@ mod tests {
 
     #[test]
     fn a_mount_is_a_host_path_or_another_units_volume_and_volumes_are_owned() {
-        let (shape, errors) = check(
+        let (description, errors) = check(
             "container",
             "image: app\nvolumes: { cache: /cache }\nmounts:\n  - { from: config, to: /config }\n  - { volume: database/data, to: /data }\ntmpfs: [/tmp]\n",
         );
         assert!(errors.is_empty(), "{errors:?}");
-        let shape = shape.unwrap();
-        assert_eq!(shape.volumes[0].name, "cache");
-        let mounted = &shape.volume_mounts[0];
+        let description = description.unwrap();
+        assert_eq!(description.volumes[0].name, "cache");
+        let mounted = &description.volume_mounts[0];
         assert_eq!(
             (mounted.unit.name.as_str(), mounted.volume.name.as_str()),
             ("database", "data")
         );
         // Only the host path is something a production profile looks at.
-        assert_eq!(shape.production.len(), 1);
+        assert_eq!(description.production.len(), 1);
         let (_, errors) = check(
             "container",
             "image: app\nmounts:\n  - { volume: data, to: /data }\n  - { from: a, volume: b/c, to: /x }\n",
@@ -354,17 +587,63 @@ mod tests {
 
     #[test]
     fn a_build_is_a_production_concern_and_volumes_take_two_forms() {
-        let (shape, errors) = check(
+        let (description, errors) = check(
             "container",
             "build: { context: ., args: { V: 1 } }\nvolumes: { data: /data, logs: { to: /logs, owner: 999 } }\nread_only: yes\n",
         );
         assert_eq!(errors, ["3:12: this must be true or false; this is text"]);
-        assert!(shape.is_none());
-        let (shape, errors) = check("container", "build: { context: . }\n");
+        assert!(description.is_none());
+        let (description, errors) = check("container", "build: { context: . }\n");
         assert!(errors.is_empty(), "{errors:?}");
-        let shape = shape.unwrap();
-        assert_eq!(shape.production.len(), 1);
+        let description = description.unwrap();
+        assert_eq!(description.production.len(), 1);
         // The build's context is a host path.
-        assert_eq!(shape.slots[0].want, Want::Path(PathUse::Named));
+        assert_eq!(
+            description.settings.slots()[0].want,
+            Want::Path(PathUse::Named)
+        );
+    }
+
+    #[test]
+    fn each_setting_is_read_into_its_place_and_every_value_is_resolved() {
+        let read = settings(
+            "build: { context: ., dockerfile: Dockerfile.dev, args: { V: 1 } }\ncommand: [serve]\nenv: { A: a }\nvolumes: { data: /data, logs: { to: /logs, owner: 999 } }\nmounts: [{ from: ./conf, to: /conf, readonly: false }]\ntmpfs: [/tmp]\naliases: [db]\nlabels: { team: core }\nuser: \"999\"\nworkdir: /app\nplatform: linux/amd64\nread_only: true\nsecurity_opt: [no-new-privileges]\npids_limit: 100\n",
+        );
+        let Image::Built {
+            dockerfile, args, ..
+        } = &read.image
+        else {
+            panic!("the image is built");
+        };
+        assert!(dockerfile.is_some());
+        assert_eq!(args[0].0, "V");
+        assert!(read.command.is_some() && read.entrypoint.is_none());
+        assert_eq!(read.volumes[1].name.name, "logs");
+        assert!(read.volumes[1].owner.is_some());
+        assert!(read.mounts[0].readonly.is_some());
+        assert_eq!(read.aliases, ["db"]);
+        assert_eq!(read.labels[0].0, "team");
+        for field in [
+            &read.user,
+            &read.workdir,
+            &read.platform,
+            &read.read_only,
+            &read.pids_limit,
+        ] {
+            assert!(field.is_some());
+        }
+        assert_eq!((read.tmpfs.len(), read.security_opt.len()), (1, 1));
+        // context, dockerfile, V, serve, A, /data, /logs, 999, ./conf, /conf,
+        // false, /tmp, core, "999", /app, linux/amd64, true,
+        // no-new-privileges and 100.
+        let mut resolved = 0;
+        assert!(
+            read.map(&mut |_| {
+                resolved += 1;
+                Some(())
+            })
+            .is_some()
+        );
+        assert_eq!(resolved, 19);
     }
 }

@@ -134,6 +134,19 @@ impl Value {
         Value::Text(vec![Bit::Text(text.into())])
     }
 
+    /// Text built from `bits`, with text that stands side by side joined, so
+    /// that one value has one way of being written.
+    pub fn from_bits(bits: impl IntoIterator<Item = Bit>) -> Value {
+        let mut joined: Vec<Bit> = Vec::new();
+        for bit in bits {
+            match (joined.last_mut(), bit) {
+                (Some(Bit::Text(before)), Bit::Text(text)) => before.push_str(&text),
+                (_, bit) => joined.push(bit),
+            }
+        }
+        Value::Text(joined)
+    }
+
     /// The value as bits of text, for building text from it.
     pub fn bits(&self) -> Vec<Bit> {
         match self {
@@ -245,6 +258,26 @@ mod tests {
         assert_eq!(
             Value::text("plain").exact(),
             Some(Exact::Text("plain".into()))
+        );
+    }
+
+    #[test]
+    fn text_side_by_side_is_joined() {
+        let port = Hole::Port {
+            unit: "web-port".into(),
+        };
+        assert_eq!(
+            Value::from_bits([
+                Bit::Text("http".into()),
+                Bit::Text("://".into()),
+                Bit::Hole(port.clone()),
+                Bit::Text("/".into()),
+            ]),
+            Value::Text(vec![
+                Bit::Text("http://".into()),
+                Bit::Hole(port),
+                Bit::Text("/".into())
+            ])
         );
     }
 

@@ -1,12 +1,12 @@
 //! A unit using a value: the value resolved for where the unit runs, and
-//! checked against what the place wants and whether a secret may go there.
+//! checked against what is wanted there and whether a secret may go there.
 
 use std::fs;
 use std::path::Path;
 
 use crate::diagnostic::Diagnostic;
 use crate::diagnostic::source::Loc;
-use crate::module::{Form, PathUse, Place, Want};
+use crate::module::{Destination, Form, PathUse, Want};
 use crate::syntax::expr::{self, Expr};
 
 use super::visit::NeedEdge;
@@ -56,16 +56,18 @@ pub struct Opening {
 }
 
 impl Planner<'_> {
-    /// Resolves `expr` for `user` and checks it at its place. Each unit that
-    /// makes or produces a value it is built from is a need, and each
-    /// published port it reaches from the host is opened; both go into
-    /// `uses`. `None` when it cannot be used; the reason is reported.
+    /// Resolves `expr` for `user` and checks it against what is wanted and
+    /// where it ends up. Each unit that makes or produces a value it is built
+    /// from is a need, and each published port it reaches from the host is
+    /// opened; both go into `uses`. For a file read before start the value
+    /// used is the file's text, resolved. `None` when it cannot be used; the
+    /// reason is reported.
     pub fn use_value(
         &mut self,
         user: User<'_>,
         expr: &Expr,
         want: Want,
-        place: Place,
+        destination: Destination,
         uses: &mut Uses,
     ) -> Option<Resolved> {
         let scope = Scope {
@@ -129,7 +131,7 @@ impl Planner<'_> {
             self.resolver.d.error(expr.loc, format!("{what} {problem}"));
             return None;
         }
-        self.check_place(&value, place, expr.loc);
+        self.check_destination(&value, destination, expr.loc);
         match want {
             Want::Path(PathUse::Read(content)) => {
                 if !value.producers.is_empty() {
@@ -140,7 +142,7 @@ impl Planner<'_> {
                     return None;
                 }
                 let path = value.value.exact_text()?;
-                self.use_template_file(user, &path, expr.loc, content, uses)?;
+                return self.use_template_file(user, &path, expr.loc, content, uses);
             }
             Want::Path(PathUse::Mounted) => self.check_mount_source(&value, expr.loc),
             _ => {}
@@ -148,7 +150,7 @@ impl Planner<'_> {
         Some(value)
     }
 
-    fn check_place(&mut self, value: &Resolved, place: Place, loc: Loc) {
+    fn check_destination(&mut self, value: &Resolved, destination: Destination, loc: Loc) {
         let secrets = || {
             value
                 .value
@@ -159,15 +161,15 @@ impl Planner<'_> {
                 .join(", ")
         };
         let secret = value.value.is_secret();
-        match place {
-            Place::Readable(what) if secret => self.resolver.d.error(
+        match destination {
+            Destination::Readable(what) if secret => self.resolver.d.error(
                 loc,
                 format!(
                     "a secret ({}) cannot go in {what}: other programs can read it",
                     secrets()
                 ),
             ),
-            Place::SecretEnv if !secret => self.resolver.d.error(
+            Destination::SecretEnv if !secret => self.resolver.d.error(
                 loc,
                 "a value in `secret_env` must have a secret in it, and this one has none",
             ),
@@ -197,15 +199,15 @@ impl Planner<'_> {
     }
 
     /// Reads a file whose text has references in it, before start, and
-    /// resolves those references for `user`.
+    /// resolves those references for `user`: the text is the value used.
     fn use_template_file(
         &mut self,
         user: User<'_>,
         path: &str,
         at: Loc,
-        content: Place,
+        content: Destination,
         uses: &mut Uses,
-    ) -> Option<()> {
+    ) -> Option<Resolved> {
         let file = Path::new(path);
         let text = match fs::read_to_string(file) {
             Ok(text) => text,
@@ -230,7 +232,6 @@ impl Planner<'_> {
             kind: expr::ExprKind::Text(pieces),
         };
         self.use_value(user, &content_expr, Want::Scalar, content, uses)
-            .map(|_| ())
     }
 }
 

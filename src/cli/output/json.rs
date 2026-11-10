@@ -68,7 +68,9 @@ fn at(loc: Loc, sources: &Sources) -> Value {
 fn unit(unit: &PlannedUnit) -> Value {
     let (module, way, made, runs, runs_inside) = match &unit.mechanism {
         Mechanism::Group => (None, None, false, None, None),
-        Mechanism::Module { module, way, runs } => {
+        Mechanism::Module {
+            module, way, runs, ..
+        } => {
             let (runs, inside) = match runs {
                 None => (None, None),
                 Some(Running::OnHost) => (Some("host"), None),
@@ -76,7 +78,13 @@ fn unit(unit: &PlannedUnit) -> Value {
                 Some(Running::InsideUnit(other)) => (Some("inside_unit"), Some(other.as_str())),
                 Some(Running::OneOffContainer) => (Some("one_off_container"), None),
             };
-            (Some(*module), way.as_deref(), runs.is_none(), runs, inside)
+            (
+                Some(module.name()),
+                way.as_deref(),
+                runs.is_none(),
+                runs,
+                inside,
+            )
         }
     };
     json!({

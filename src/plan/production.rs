@@ -28,16 +28,16 @@ impl Planner<'_> {
                 continue;
             };
             let mut refusals: Vec<(Loc, String)> = Vec::new();
-            if matches!(mechanism.shape.kind, UnitKind::Runs(Runs::OnHost)) {
+            if matches!(mechanism.description.kind, UnitKind::Runs(Runs::OnHost)) {
                 refusals.push((mechanism.uses, "it runs on the host".to_string()));
             }
-            for concern in &mechanism.shape.production {
+            for concern in &mechanism.description.production {
                 match concern {
                     Concern::BuildsImage(loc) => {
                         refusals.push((*loc, "it builds an image".to_string()))
                     }
                     Concern::MountsHostPath(from) => {
-                        let asker = Asker::of(&mechanism.shape.kind);
+                        let asker = Asker::of(&mechanism.description.kind);
                         if let Some(why) = self.mount_outside(*index, from, asker) {
                             refusals.push((from.loc, why));
                         }

@@ -167,3 +167,90 @@ fn choose_profile<'s>(
         },
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The plan of the fixture stack `name`, with no personal choices.
+    fn planned(name: &str, sets: &[&str]) -> Plan {
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+        let root = fixtures.join(name).canonicalize().unwrap();
+        let options = Options {
+            profile: None,
+            sets: sets.iter().map(|set| set.to_string()).collect(),
+            home: Some(fixtures.join("homes/none")),
+        };
+        let mut sources = Sources::default();
+        let mut d = Diagnostics::default();
+        match plan(&root, &options, &mut sources, &mut d) {
+            Outcome::Plan(plan) => plan,
+            _ => panic!("{name} plans: {:?}", d.into_sorted()),
+        }
+    }
+
+    /// A unit's settings in the plan, as `Debug` writes them.
+    fn settings(plan: &Plan, unit: &str) -> String {
+        let unit = plan.units.iter().find(|u| u.name == unit).unwrap();
+        match &unit.mechanism {
+            Mechanism::Module { settings, .. } => format!("{settings:?}"),
+            Mechanism::Group => panic!("`{}` is a group", unit.name),
+        }
+    }
+
+    #[test]
+    fn the_plan_holds_each_units_settings_with_every_value_resolved_where_it_runs() {
+        let plan = planned("shop", &[]);
+        let web = settings(&plan, "web");
+        // The command's words, the port a hole that names its unit.
+        assert!(
+            web.contains(
+                r#"command: [Text([Text("serve")]), Text([Text("--port")]), Hole(Port { unit: "web-port" })]"#
+            ),
+            "{web}"
+        );
+        // The API's address as the host, where `web` runs, sees it.
+        assert!(
+            web.contains(
+                r#"("API_URL", Text([Text("http://127.0.0.1:"), Hole(Port { unit: "api-port" })]))"#
+            ),
+            "{web}"
+        );
+        // A secret in `secret_env` names the secret that fills it.
+        let database = settings(&plan, "database");
+        assert!(
+            database.contains(
+                r#"secret_env: [("DB_PASSWORD", Hole(Generated { unit: "db-password", name: "value", secret: true }))]"#
+            ),
+            "{database}"
+        );
+    }
+
+    #[test]
+    fn a_ways_settings_are_the_units_joined_with_its_own_entry_by_entry() {
+        // The template's unit-wide `env` is a mapping parameter, joined with
+        // the way's own `env`; `command` is a list parameter.
+        let service = settings(&planned("template-ok", &[]), "service");
+        assert!(
+            service.contains(r#"command: [Text([Text("serve")]), Text([Text("--fast")])]"#),
+            "{service}"
+        );
+        assert!(
+            service.contains(
+                r#"env: [("MODE", Text([Text("fast")])), ("LEVEL", Text([Text("debug")]))]"#
+            ),
+            "{service}"
+        );
+    }
+
+    #[test]
+    fn a_secret_settings_value_is_kept_in_the_plan_under_its_name() {
+        let database = settings(&planned("secrets-allowed", &[]), "database");
+        assert!(
+            database.contains(
+                r#"("LICENCE", Hole(SecretSetting { name: "licence_key", value: Kept(..) }))"#
+            ),
+            "{database}"
+        );
+    }
+}
