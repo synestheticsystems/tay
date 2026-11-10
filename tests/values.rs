@@ -29,6 +29,21 @@ fn a_doubled_dollar_writes_a_literal_reference_opening() {
 }
 
 #[test]
+fn references_to_the_environment_and_the_host() {
+    let plan = plan_json("value-types", &[]);
+    let port = unit(&plan, "fixed-port");
+    let text = |name: &str| given(port, name)["from_host"]["text"].clone();
+    assert_eq!(text("name"), "value-types");
+    assert_eq!(text("label"), "value-types");
+    assert_eq!(text("profile"), "dev");
+    let root = support::fixture("value-types").canonicalize().unwrap();
+    assert_eq!(text("state"), format!("{}/.tay/state", root.display()));
+    // Neither is known until the environment is first brought up.
+    assert_eq!(text("id"), "<environment.id>");
+    assert_eq!(text("listen"), "<host.listen>");
+}
+
+#[test]
 fn a_whole_string_reference_of_the_wrong_type_is_an_error() {
     // The setting is the text "8080", and a port number is wanted.
     let run = plan("value-type-error", &[]);
