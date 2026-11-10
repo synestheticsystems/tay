@@ -7,8 +7,7 @@ use crate::module::running::{RECORD, remove_record};
 use crate::module::settings::{Keeps, filled};
 use crate::value::{Filled, Placeholder, Unfilled, Value};
 
-use super::CommandSettings;
-use super::produced;
+use super::{CommandSettings, produced};
 
 impl Keeps for CommandSettings<Value> {
     fn kept(&self, _: &UnitPlace) -> Keeping {
@@ -43,6 +42,7 @@ impl Keeps for CommandSettings<Value> {
                 && let Some(undo) = &undoing.undo
             {
                 undoing
+                    .steps
                     .undo(&place, undo)
                     .await
                     .map_err(PartlyRemoved::after(removed))?;

@@ -4,6 +4,7 @@
 
 mod attempt;
 mod produced;
+mod step;
 mod wipe;
 
 use std::sync::Arc;
@@ -15,16 +16,18 @@ use crate::syntax::yaml::Node;
 use crate::value::Filled;
 
 use super::command_line::{RunForm, run_form};
-use super::mounts::{self, Mount, mounts};
-use super::variables::{Variables, variables};
+use super::mounts::{self, mounts};
+use super::variables::variables;
 use crate::module::description::{
     Description, ModuleGive, ModuleValue, OpenedPort, Output, ReadyWithoutCheck, RestartOn, Runs,
-    UnitKind,
+    UnitKind, VolumeMount,
 };
 use crate::module::operations::Operations;
 use crate::module::settings::{Destination, MapValues, Operate, Slot, each_named, maybe};
 use crate::module::want::{PathUse, Want};
 use crate::module::{Cx, Module};
+
+use step::StepSettings;
 
 pub struct Command;
 
@@ -52,21 +55,13 @@ const FILE_PATH: Destination = Destination::Readable("a file path");
 /// planner.
 #[derive(Debug)]
 struct CommandSettings<V> {
-    /// The unit inside whose container it runs, with `in`.
-    inside: Option<String>,
     run: RunForm<V>,
     /// Exit 0: already done. Exit 1: not done. `None`: run every time.
     check: Option<RunForm<V>>,
     undo: Option<RunForm<V>>,
     when_removed: WhenRemoved,
-    /// The image of the container made for the run, with `mounts`.
-    image: Option<V>,
-    mounts: Vec<Mount<V>>,
-    /// The user it runs as in a container.
-    user: Option<V>,
-    /// `None`: the stack's root on the host, the container's own in one.
-    workdir: Option<V>,
-    variables: Variables<V>,
+    /// Where each of its steps runs, and with what.
+    steps: StepSettings<V>,
     /// A file fed to `run` on standard input.
     stdin: Option<V>,
     /// The values the command writes out, each with whether it is secret.
@@ -79,7 +74,7 @@ struct CommandSettings<V> {
     outputs: Vec<(NameAt, V)>,
 }
 
-/// What wiping a command that leaves the plan does.
+/// What a command's leaving the plan does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum WhenRemoved {
     Keep,
@@ -97,24 +92,15 @@ impl<V> MapValues for CommandSettings<V> {
         let run = self.run.map(f);
         let check = maybe(&self.check, &mut |form| form.map(f));
         let undo = maybe(&self.undo, &mut |form| form.map(f));
-        let image = maybe(&self.image, f);
-        let mounts: Vec<Option<Mount<W>>> = self.mounts.iter().map(|m| m.map(f)).collect();
-        let user = maybe(&self.user, f);
-        let workdir = maybe(&self.workdir, f);
-        let variables = self.variables.map(f);
+        let steps = self.steps.map(f);
         let stdin = maybe(&self.stdin, f);
         let outputs = each_named(&self.outputs, f);
         Some(CommandSettings {
-            inside: self.inside.clone(),
             run: run?,
             check: check?,
             undo: undo?,
             when_removed: self.when_removed,
-            image: image?,
-            mounts: mounts.into_iter().collect::<Option<_>>()?,
-            user: user?,
-            workdir: workdir?,
-            variables: variables?,
+            steps: steps?,
             stdin: stdin?,
             produces: self.produces.clone(),
             keeps_values: self.keeps_values,
@@ -140,7 +126,7 @@ impl Module for Command {
     }
 
     fn read(&self, with: Option<&Node>, cx: &mut Cx<'_>) -> Option<Description> {
-        let (settings, runs) = read(with, cx)?;
+        let (settings, runs, volume_mounts) = read(with, cx)?;
         let gives = settings
             .produces
             .iter()
@@ -157,7 +143,7 @@ impl Module for Command {
                 path: path.expr.clone(),
             })
             .collect();
-        let (volume_mounts, production) = mounts::described(&settings.mounts);
+        let production = mounts::concerns(&settings.steps.mounts);
         Some(Description {
             gives,
             outputs,
@@ -173,7 +159,12 @@ impl Module for Command {
     }
 }
 
-fn read(with: Option<&Node>, cx: &mut Cx<'_>) -> Option<(CommandSettings<Slot>, Runs)> {
+/// The command's settings, where it runs, and each other unit's volume it
+/// mounts, where it is written.
+fn read(
+    with: Option<&Node>,
+    cx: &mut Cx<'_>,
+) -> Option<(CommandSettings<Slot>, Runs, Vec<VolumeMount>)> {
     let Some(with) = with else {
         cx.d.error(cx.uses, "a `command` unit needs `with` and in it a `run`");
         return None;
@@ -217,16 +208,16 @@ fn read(with: Option<&Node>, cx: &mut Cx<'_>) -> Option<(CommandSettings<Slot>, 
             }
         },
     };
-    let mounts = match settings.entry("mounts") {
+    let (mounts, volume_mounts) = match settings.entry("mounts") {
         Some((_, node)) if one_off => mounts(node, d),
         Some((key, _)) => {
             d.error(
                 key.loc,
                 "`mounts` goes with `image`: it is for a command run in a container of its own",
             );
-            Vec::new()
+            (Vec::new(), Vec::new())
         }
-        None => Vec::new(),
+        None => (Vec::new(), Vec::new()),
     };
     let user = match settings.entry("user") {
         Some((_, user)) if in_container => Slot::read(
@@ -278,25 +269,27 @@ fn read(with: Option<&Node>, cx: &mut Cx<'_>) -> Option<(CommandSettings<Slot>, 
         return None;
     }
     let settings = CommandSettings {
-        inside: match &runs {
-            Runs::InsideUnit(unit) => Some(unit.name.clone()),
-            Runs::OnHost | Runs::OwnContainer | Runs::OneOffContainer => None,
-        },
         run: run?,
         check,
         undo,
         when_removed,
-        image,
-        mounts,
-        user,
-        workdir,
-        variables,
+        steps: StepSettings {
+            inside: match &runs {
+                Runs::InsideUnit(unit) => Some(unit.name.clone()),
+                Runs::OnHost | Runs::OwnContainer | Runs::OneOffContainer => None,
+            },
+            image,
+            mounts,
+            user,
+            workdir,
+            variables,
+        },
         stdin,
         produces,
         keeps_values: !cx.is_action,
         outputs,
     };
-    Some((settings, runs))
+    Some((settings, runs, volume_mounts))
 }
 
 /// Where the command runs: inside the container `in` names, in a container
@@ -407,7 +400,10 @@ mod tests {
             ["3:1: a `command` unit runs in at most one of `in` and `image`; this one has both"]
         );
         let read = settings("run: [x]\nimage: alpine\nmounts: [{ from: a, to: /a }]\n");
-        assert_eq!((read.image.is_some(), read.mounts.len()), (true, 1));
+        assert_eq!(
+            (read.steps.image.is_some(), read.steps.mounts.len()),
+            (true, 1)
+        );
         // The mounts of a container made for the run are described as a
         // container's are: a volume to check, a host path to judge.
         let description = check(
@@ -429,7 +425,7 @@ mod tests {
     fn the_working_folder_is_a_host_path_only_for_a_command_on_the_host_and_stdin_always() {
         let wants = |with: &str| {
             let read = settings(with);
-            [read.workdir.unwrap().want, read.stdin.unwrap().want]
+            [read.steps.workdir.unwrap().want, read.stdin.unwrap().want]
         };
         let path = Want::Path(PathUse::Named);
         assert_eq!(
@@ -448,7 +444,7 @@ mod tests {
             "run: [x]\nin: db\nuser: \"999\"\n",
             "run: [x]\nimage: a\nuser: app\n",
         ] {
-            assert!(settings(with).user.is_some(), "{with}");
+            assert!(settings(with).steps.user.is_some(), "{with}");
         }
         let (_, errors) = check("command", "run: [x]\nuser: app\n");
         assert_eq!(
@@ -511,7 +507,7 @@ mod tests {
         );
         let read = settings("run: [x]\nsecret_env: { DSN: \"db://app:${pw.value}@db\" }\n");
         assert_eq!(
-            read.variables.secret_env[0].1.destination,
+            read.steps.variables.secret_env[0].1.destination,
             Destination::SecretEnv
         );
     }

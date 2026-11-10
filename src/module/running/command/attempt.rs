@@ -17,28 +17,17 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::keeper::{Look, Program};
+use crate::keeper::Look;
 use crate::module::operations::{
     self, Driving, Failure, Finding, Fingerprint, Fingerprinting, Found, Outcome, ReadinessCommand,
     Running, Step, Steps, Taking, UnderWay, UnitPlace,
 };
-use crate::module::running::command_line::{RunForm, filled_run_form};
-use crate::module::running::container::{self, CommandStep, ContainerStepEnd, FoundStep};
+use crate::module::running::container::{self, FoundStep};
 use crate::module::running::host;
-use crate::module::running::mounts::Mount;
 use crate::value::Filled;
 
-use super::CommandSettings;
-use super::produced;
-
-/// The steps of a command's attempt, as its record says them, and the step
-/// wiping it runs.
-const CHECK: &str = "check";
-const RUN: &str = "run";
-const UNDO: &str = "undo";
-
-/// The variable that names the file a command writes its values to.
-const VALUES: &str = "TAY_VALUES";
+use super::step::{CHECK, RUN, StepOutcome, Where};
+use super::{CommandSettings, produced};
 
 #[derive(Debug, thiserror::Error)]
 enum CommandError {
@@ -46,61 +35,6 @@ enum CommandError {
     UnknownStep(String),
     #[error("a command run inside another unit's container is not found again under way")]
     NotFoundInside,
-    #[error("its `undo` {0}")]
-    NotUndone(String),
-}
-
-/// Where a command's steps run.
-enum Where<'a> {
-    Host,
-    /// Inside the running container of this unit.
-    Inside(&'a str),
-    /// In a container of its own for each step, from this image.
-    Own(&'a Filled),
-}
-
-/// How a step of a command came out, wherever it ran.
-enum StepOutcome {
-    /// Its program ended, as these words say, read after "its check" or
-    /// "ran and", with this exit status, as a shell gives it: the code it
-    /// exited with, or 128 and the signal that ended it.
-    Exited { status: i64, words: String },
-    /// Its program could not be started, as these words say.
-    NotStarted(String),
-    /// Its keeper ended without saying how; what was left of its group has
-    /// been stopped.
-    Lost,
-    /// Its record went with the environment's folder; what was left of its
-    /// group has been stopped.
-    Gone,
-}
-
-impl StepOutcome {
-    fn on_host(end: host::StepEnd) -> StepOutcome {
-        match end {
-            host::StepEnd::Ended(ended) => match ended.how.exit_status() {
-                Some(status) => StepOutcome::Exited {
-                    status,
-                    words: host::ended_words(&ended),
-                },
-                None => StepOutcome::NotStarted(ended.how.to_string()),
-            },
-            host::StepEnd::Lost => StepOutcome::Lost,
-            host::StepEnd::Gone => StepOutcome::Gone,
-        }
-    }
-
-    fn in_container(end: ContainerStepEnd) -> StepOutcome {
-        match end {
-            ContainerStepEnd::Exited { code, words } => StepOutcome::Exited {
-                status: code,
-                words,
-            },
-            ContainerStepEnd::NotStarted(why) => {
-                StepOutcome::NotStarted(format!("could not be started: {why}"))
-            }
-        }
-    }
 }
 
 /// Whether a command that is done and wrote no values gives those kept when
@@ -163,9 +97,10 @@ impl Running for CommandSettings<Filled> {
         limit: Duration,
     ) -> ReadinessCommand {
         Box::pin(async move {
-            match self.where_it_runs() {
+            match self.steps.where_it_runs() {
                 Where::Host => {
                     let program = self
+                        .steps
                         .program(&place, command, None)
                         .map_err(|failure| failure.to_string())?;
                     host::check(program, limit).await
@@ -193,26 +128,10 @@ impl CommandSettings<Filled> {
         if let Some(check) = &self.check {
             taking.setting("check", &check.revealed());
         }
-        if let Some(inside) = &self.inside {
-            taking.setting("in", inside);
+        self.steps.take(&mut taking);
+        if let Some(stdin) = &self.stdin {
+            taking.value("stdin", stdin);
         }
-        if let Some(image) = &self.image {
-            taking.value("image", image);
-        }
-        if !self.mounts.is_empty() {
-            let mounts: Vec<_> = self.mounts.iter().map(Mount::revealed).collect();
-            taking.setting("mounts", &mounts);
-        }
-        for (name, value) in [
-            ("user", &self.user),
-            ("workdir", &self.workdir),
-            ("stdin", &self.stdin),
-        ] {
-            if let Some(value) = value {
-                taking.value(name, value);
-            }
-        }
-        self.variables.take(&mut taking);
         let produces: Vec<(&str, bool)> = (self.produces.iter())
             .map(|(name, secret)| (name.name.as_str(), *secret))
             .collect();
@@ -225,17 +144,9 @@ impl CommandSettings<Filled> {
         taking.taken()
     }
 
-    fn where_it_runs(&self) -> Where<'_> {
-        match (&self.inside, &self.image) {
-            (Some(unit), _) => Where::Inside(unit),
-            (None, Some(image)) => Where::Own(image),
-            (None, None) => Where::Host,
-        }
-    }
-
     /// The command as a daemon that did not start it finds it.
     async fn found_now(&self, place: &UnitPlace) -> Result<Found, Failure> {
-        let found = match self.where_it_runs() {
+        let found = match self.steps.where_it_runs() {
             Where::Host => {
                 return match host::files(place).look()? {
                     Look::Never => Ok(Found::Never),
@@ -321,7 +232,9 @@ impl CommandSettings<Filled> {
                         .as_ref()
                         .ok_or_else(|| CommandError::UnknownStep(CHECK.to_string()))?;
                     produced::clear(place)?;
-                    self.step(place, attempt, CHECK, check, None, None).await?
+                    (self.steps)
+                        .step(place, attempt, CHECK, check, None, None)
+                        .await?
                 }
             };
             match self.checked(&end) {
@@ -340,67 +253,12 @@ impl CommandSettings<Filled> {
                     Some(stdin) => Some(PathBuf::from(operations::text(stdin, "stdin")?)),
                     None => None,
                 };
-                self.step(place, attempt, RUN, &self.run, stdin, Some(steps))
+                (self.steps)
+                    .step(place, attempt, RUN, &self.run, stdin, Some(steps))
                     .await?
             }
         };
         self.ran(place, &end, "", Kept::NotGiven)
-    }
-
-    /// Runs `form` as `step` of attempt `attempt`, where the command runs,
-    /// fed `stdin`, and waits for it to end. When `running` is given, it is
-    /// told when the program has started: it is the command's own.
-    async fn step(
-        &self,
-        place: &UnitPlace,
-        attempt: u32,
-        step: &'static str,
-        form: &RunForm<Filled>,
-        stdin: Option<PathBuf>,
-        running: Option<&Steps>,
-    ) -> Result<StepOutcome, Failure> {
-        let what = match step {
-            CHECK => "`check`",
-            UNDO => "`undo`",
-            _ => "`run`",
-        };
-        let argv = filled_run_form(form, what)?;
-        let values = produced::file(place);
-        Ok(match self.where_it_runs() {
-            Where::Host => {
-                let program = self.program(place, argv, stdin)?;
-                let files = host::files(place);
-                StepOutcome::on_host(host::run(&files, attempt, step, program, running).await?)
-            }
-            Where::Inside(unit) => {
-                let step = self.in_container(attempt, step, argv, stdin.as_deref())?;
-                let ended = container::run_inside(place, unit, step, &values, running);
-                StepOutcome::in_container(ended.await?)
-            }
-            Where::Own(image) => {
-                let step = self.in_container(attempt, step, argv, stdin.as_deref())?;
-                let image = operations::text(image, "image")?;
-                let ended = container::run_own(place, image, &self.mounts, step, &values, running);
-                StepOutcome::in_container(ended.await?)
-            }
-        })
-    }
-
-    /// Runs `undo` where the command runs, and waits for it to exit with 0.
-    /// It is no attempt of the unit's: it is noted as a first, and the
-    /// record it leaves goes with what else wiping the unit removes.
-    pub(super) async fn undo(
-        &self,
-        place: &UnitPlace,
-        undo: &RunForm<Filled>,
-    ) -> Result<(), Failure> {
-        let words = match self.step(place, 1, UNDO, undo, None, None).await? {
-            StepOutcome::Exited { status: 0, .. } => return Ok(()),
-            StepOutcome::Exited { words, .. } | StepOutcome::NotStarted(words) => words,
-            StepOutcome::Lost => "ended with no record of how: its keeper was lost".to_string(),
-            StepOutcome::Gone => host::GONE.to_string(),
-        };
-        Err(CommandError::NotUndone(words).into())
     }
 
     /// Waits for step `step` of attempt `attempt`, under way, which a daemon
@@ -412,7 +270,7 @@ impl CommandSettings<Filled> {
         step: &str,
         running: Option<&Steps>,
     ) -> Result<StepOutcome, Failure> {
-        Ok(match self.where_it_runs() {
+        Ok(match self.steps.where_it_runs() {
             Where::Host => StepOutcome::on_host(host::wait(&host::files(place), running).await?),
             Where::Own(_) => StepOutcome::in_container(
                 container::wait_own(place, attempt, step, &produced::file(place), running).await?,
@@ -496,70 +354,6 @@ impl CommandSettings<Filled> {
                 detail: detail.to_string(),
             },
             Err(why) => Outcome::Failed(format!("{detail}, but {why}")),
-        })
-    }
-
-    /// The program `argv`, run on the host with the command's environment
-    /// in its folder, with `TAY_VALUES` naming the file it writes its values
-    /// to.
-    fn program(
-        &self,
-        place: &UnitPlace,
-        argv: Vec<String>,
-        stdin: Option<PathBuf>,
-    ) -> Result<Program, Failure> {
-        let values = produced::file(place).display().to_string();
-        Ok(Program {
-            argv,
-            env: host::environment(&self.variables, None, &[(VALUES, values)]),
-            workdir: host::workdir(self.workdir.as_ref(), place)?,
-            stdin,
-        })
-    }
-
-    /// The step `step` of attempt `attempt`, the program `argv` fed the
-    /// file at `stdin`, as it is run in a container: with only the
-    /// environment the definition gives it, as `user` in `workdir` when
-    /// they are given.
-    fn in_container(
-        &self,
-        attempt: u32,
-        step: &'static str,
-        argv: Vec<String>,
-        stdin: Option<&Path>,
-    ) -> Result<CommandStep, Failure> {
-        let mut env = Vec::new();
-        let mut secrets = Vec::new();
-        for (name, value) in &self.variables.env {
-            env.push(format!("{name}={}", value.reveal()));
-        }
-        for (name, value) in &self.variables.secret_env {
-            env.push(format!("{name}={}", value.reveal()));
-            secrets.push(value.reveal());
-        }
-        let stdin = match stdin {
-            Some(path) => {
-                Some(std::fs::read(path).map_err(crate::disk::DiskError::io(path, "read"))?)
-            }
-            None => None,
-        };
-        Ok(CommandStep {
-            attempt,
-            step,
-            argv,
-            env,
-            secrets,
-            user: self
-                .user
-                .as_ref()
-                .map(|user| operations::scalar(user, "user"))
-                .transpose()?,
-            workdir: self
-                .workdir
-                .as_ref()
-                .map(|workdir| Ok::<_, Failure>(operations::text(workdir, "workdir")?.to_string()))
-                .transpose()?,
-            stdin,
         })
     }
 }

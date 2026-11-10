@@ -1,5 +1,8 @@
 //! Mounts: a host file or folder, or another unit's volume, made visible in
-//! a container.
+//! a container. Where a mount is written is told to the planner as it is
+//! read; the settings hold only what is mounted.
+
+use serde::{Deserialize, Serialize};
 
 use crate::diagnostic::Diagnostics;
 use crate::syntax::fields::{self, Fields};
@@ -29,7 +32,14 @@ pub enum Source<V> {
     /// A file or folder on the host.
     Host(V),
     /// A volume another unit owns.
-    Volume(VolumeMount),
+    Volume(UnitVolume),
+}
+
+/// A volume another unit owns: that unit, and the volume's name.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UnitVolume {
+    pub unit: String,
+    pub volume: String,
 }
 
 impl<V> Mount<V> {
@@ -54,7 +64,7 @@ impl Mount<Filled> {
         let source = match &self.source {
             Source::Host(from) => serde_json::json!({ "from": from.reveal() }),
             Source::Volume(volume) => {
-                serde_json::json!({ "volume": [&volume.unit.name, &volume.volume.name] })
+                serde_json::json!({ "volume": [&volume.unit, &volume.volume] })
             }
         };
         serde_json::json!({
@@ -65,28 +75,29 @@ impl Mount<Filled> {
     }
 }
 
-/// What mounting these tells the planner: the other units' volumes they
-/// mount, and each host path, which a production profile judges.
-pub fn described(mounts: &[Mount<Slot>]) -> (Vec<VolumeMount>, Vec<Concern>) {
-    let mut volumes = Vec::new();
-    let mut concerns = Vec::new();
-    for mount in mounts {
-        match &mount.source {
-            Source::Host(from) => concerns.push(Concern::MountsHostPath(from.expr.clone())),
-            Source::Volume(volume) => volumes.push(volume.clone()),
-        }
-    }
-    (volumes, concerns)
+/// What mounting host paths tells the planner: each path, which a
+/// production profile judges.
+pub fn concerns(mounts: &[Mount<Slot>]) -> Vec<Concern> {
+    mounts
+        .iter()
+        .filter_map(|mount| match &mount.source {
+            Source::Host(from) => Some(Concern::MountsHostPath(from.expr.clone())),
+            Source::Volume(_) => None,
+        })
+        .collect()
 }
 
 /// `mounts`: each a host file or folder made visible in a container,
 /// `{ from, to, readonly }`, or a volume another unit owns,
-/// `{ volume: "unit/name", to, readonly }`.
-pub fn mounts(node: &Node, d: &mut Diagnostics) -> Vec<Mount<Slot>> {
-    let Some(items) = fields::list(node, "`mounts`", d) else {
-        return Vec::new();
-    };
+/// `{ volume: "unit/name", to, readonly }`. Gives the mounts, and each
+/// other unit's volume they mount where it is written, which the planner
+/// checks.
+pub fn mounts(node: &Node, d: &mut Diagnostics) -> (Vec<Mount<Slot>>, Vec<VolumeMount>) {
     let mut mounts = Vec::new();
+    let mut volumes = Vec::new();
+    let Some(items) = fields::list(node, "`mounts`", d) else {
+        return (mounts, volumes);
+    };
     for item in items {
         let Some(mount) = Fields::of(item, "a mount", &["from", "volume", "to", "readonly"], d)
         else {
@@ -96,7 +107,14 @@ pub fn mounts(node: &Node, d: &mut Diagnostics) -> Vec<Mount<Slot>> {
             (Some((_, from)), None) => {
                 Slot::read(from, Want::Path(PathUse::Mounted), MOUNT, d).map(Source::Host)
             }
-            (None, Some((_, volume))) => volume_mount(volume, d).map(Source::Volume),
+            (None, Some((_, volume))) => volume_mount(volume, d).map(|written| {
+                let volume = UnitVolume {
+                    unit: written.unit.name.clone(),
+                    volume: written.volume.name.clone(),
+                };
+                volumes.push(written);
+                Source::Volume(volume)
+            }),
             (Some(_), Some((key, _))) => {
                 d.error(
                     key.loc,
@@ -127,7 +145,7 @@ pub fn mounts(node: &Node, d: &mut Diagnostics) -> Vec<Mount<Slot>> {
             });
         }
     }
-    mounts
+    (mounts, volumes)
 }
 
 /// `"unit/name"`: the unit that owns the volume, and the volume's name.

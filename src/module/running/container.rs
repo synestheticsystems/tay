@@ -76,7 +76,7 @@ pub fn mounted(mount: &Mount<Filled>, place: &UnitPlace) -> Result<DockerMount, 
         },
         Source::Volume(volume) => DockerMount {
             typ: Some(MountType::VOLUME),
-            source: Some(volume_name(place, &volume.unit.name, &volume.volume.name)),
+            source: Some(volume_name(place, &volume.unit, &volume.volume)),
             target,
             read_only: Some(read_only),
             ..DockerMount::default()
@@ -265,6 +265,7 @@ impl Module for Container {
     fn read(&self, with: Option<&Node>, cx: &mut Cx<'_>) -> Option<Description> {
         let read::Read {
             settings,
+            volume_mounts,
             publish,
             built_at,
         } = read::read(with, cx)?;
@@ -273,7 +274,7 @@ impl Module for Container {
             .iter()
             .map(|volume| volume.name.clone())
             .collect();
-        let (volume_mounts, mut production) = mounts::described(&settings.mounts);
+        let mut production = mounts::concerns(&settings.mounts);
         production.extend(built_at.map(Concern::BuildsImage));
         Some(Description {
             publish,

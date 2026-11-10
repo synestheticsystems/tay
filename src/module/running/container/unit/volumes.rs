@@ -78,11 +78,11 @@ pub async fn make(
         let Source::Volume(volume) = &mount.source else {
             continue;
         };
-        let name = volume_name(place, &volume.unit.name, &volume.volume.name);
+        let name = volume_name(place, &volume.unit, &volume.volume);
         if !docker.has_volume(id, &name).await? {
             return Err(VolumeError::NotMade {
-                unit: volume.unit.name.clone(),
-                volume: volume.volume.name.clone(),
+                unit: volume.unit.clone(),
+                volume: volume.volume.clone(),
             }
             .into());
         }

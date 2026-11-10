@@ -8,7 +8,7 @@ use crate::syntax::yaml::{Kind, Node, Scalar};
 
 use super::{ContainerSettings, Image, Volume};
 use crate::module::Cx;
-use crate::module::description::PublishEntry;
+use crate::module::description::{PublishEntry, VolumeMount};
 use crate::module::running::command_line::{COMMAND_LINE, argv, words};
 use crate::module::running::mounts::mounts;
 use crate::module::running::variables::variables;
@@ -41,6 +41,8 @@ const SETTING: Destination = Destination::Readable("a container's settings");
 /// What a container unit's `with` says.
 pub struct Read {
     pub settings: ContainerSettings<Slot>,
+    /// Each other unit's volume it mounts, where it is written.
+    pub volume_mounts: Vec<VolumeMount>,
     pub publish: Vec<PublishEntry>,
     /// Where `build` is written, when the image is built.
     pub built_at: Option<Loc>,
@@ -95,7 +97,7 @@ pub fn read(with: Option<&Node>, cx: &mut Cx<'_>) -> Option<Read> {
         .get("volumes")
         .map(|volumes| volume_settings(volumes, d))
         .unwrap_or_default();
-    let mounts = settings
+    let (mounts, volume_mounts) = settings
         .get("mounts")
         .map(|node| mounts(node, d))
         .unwrap_or_default();
@@ -157,6 +159,7 @@ pub fn read(with: Option<&Node>, cx: &mut Cx<'_>) -> Option<Read> {
     };
     Some(Read {
         settings,
+        volume_mounts,
         publish,
         built_at,
     })
