@@ -5,7 +5,7 @@
 use std::path::{Component, Path, PathBuf};
 
 use crate::diagnostic::source::Source;
-use crate::plan::resolve::value::Resolved;
+use crate::plan::resolve::resolved::Resolved;
 use crate::value::{Bit, Value};
 
 use super::Resolver;

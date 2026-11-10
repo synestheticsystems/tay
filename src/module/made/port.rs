@@ -8,7 +8,7 @@ use crate::value::Value;
 use crate::module::description::{
     Description, ModuleGive, ModuleValue, ReadyWithoutCheck, RestartOn, UnitKind,
 };
-use crate::module::settings::{Destination, Settings, Slot, WrittenSettings};
+use crate::module::settings::{Destination, MapSlots, Settings, Slot};
 use crate::module::want::Want;
 use crate::module::{Cx, Module};
 
@@ -26,31 +26,18 @@ enum PortSettings<V> {
     Fixed(V),
 }
 
-impl<V> PortSettings<V> {
-    fn map<'a, W>(&'a self, f: &mut dyn FnMut(&'a V) -> Option<W>) -> Option<PortSettings<W>> {
+impl MapSlots for PortSettings<Slot> {
+    type With<W> = PortSettings<W>;
+
+    fn map_slots<'a, W>(
+        &'a self,
+        f: &mut dyn FnMut(&'a Slot) -> Option<W>,
+    ) -> Option<PortSettings<W>> {
         Some(match self {
             PortSettings::Any => PortSettings::Any,
             PortSettings::Prefer(number) => PortSettings::Prefer(f(number)?),
             PortSettings::Fixed(number) => PortSettings::Fixed(f(number)?),
         })
-    }
-}
-
-impl WrittenSettings for PortSettings<Slot> {
-    fn slots(&self) -> Vec<&Slot> {
-        let mut slots = Vec::new();
-        self.map(&mut |slot| {
-            slots.push(slot);
-            Some(())
-        });
-        slots
-    }
-
-    fn resolve(
-        &self,
-        resolve: &mut dyn FnMut(&Slot) -> Option<Value>,
-    ) -> Option<Box<dyn Settings>> {
-        Some(Box::new(self.map(resolve)?))
     }
 }
 

@@ -118,3 +118,15 @@ fn a_folder_tay_yaml_names_must_exist_though_a_default_one_may_be_absent() {
         )]
     );
 }
+
+#[test]
+fn a_module_or_template_that_does_not_exist_is_an_error_listing_those_that_do() {
+    let run = plan("unknown-names", &[]);
+    assert_eq!(
+        run.errors(),
+        [
+            "tay.yaml:5:14: `proces` is not a module; the modules are `process`, `container`, `command`, `port`, `file`, `secret`",
+            "tay.yaml:6:14: there is no template `nosuch`; the templates are `db`",
+        ]
+    );
+}

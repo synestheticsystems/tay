@@ -17,6 +17,15 @@ pub struct Given {
 #[derive(Debug)]
 pub enum Seen {
     Value(Value),
-    /// The value has no form for this asker, and why.
-    Unreachable(String),
+    /// The value has no form for this asker, for each of these reasons.
+    Unreachable(Vec<Unreachable>),
+}
+
+/// Why the host cannot have an address in a value a unit gives.
+#[derive(Debug)]
+pub enum Unreachable {
+    /// The container publishes no host port for this port of its.
+    NotPublished { port: String },
+    /// The container publishes this port of its, and nothing opens it.
+    NotOpened { port: i64 },
 }

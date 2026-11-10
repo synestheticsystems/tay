@@ -2,7 +2,7 @@
 
 use crate::definition::{GiveValue, reference_errors};
 use crate::module::{ModuleValue, UnitKind};
-use crate::plan::resolve::value::Resolved;
+use crate::plan::resolve::resolved::Resolved;
 use crate::syntax::expr::{Part, Reference, UnitRef};
 use crate::value::{Hole, Value};
 

@@ -10,9 +10,9 @@
 pub mod endpoint;
 mod environment;
 pub mod paths;
+pub mod resolved;
 mod settings;
 mod unit_values;
-pub mod value;
 
 pub use environment::Environment;
 
@@ -27,7 +27,7 @@ use crate::syntax::names::NameAt;
 
 use super::choices::{self, Layered};
 use crate::value::{Bit, Hole, Value};
-use value::Resolved;
+use resolved::Resolved;
 
 /// Who uses a value, which decides the view of an address.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

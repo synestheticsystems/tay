@@ -8,7 +8,7 @@ use crate::value::Value;
 use super::command_line::{COMMAND_LINE, argv, argv_list};
 use super::variables::{Variables, variables};
 use crate::module::description::{Description, ReadyWithoutCheck, RestartOn, Runs, UnitKind};
-use crate::module::settings::{Destination, Settings, Slot, WrittenSettings, each, maybe};
+use crate::module::settings::{Destination, MapSlots, Settings, Slot, each, maybe};
 use crate::module::want::{PathUse, Want};
 use crate::module::{Cx, Module};
 
@@ -38,8 +38,13 @@ struct ProcessSettings<V> {
     prepare: Vec<Vec<V>>,
 }
 
-impl<V> ProcessSettings<V> {
-    fn map<'a, W>(&'a self, f: &mut dyn FnMut(&'a V) -> Option<W>) -> Option<ProcessSettings<W>> {
+impl MapSlots for ProcessSettings<Slot> {
+    type With<W> = ProcessSettings<W>;
+
+    fn map_slots<'a, W>(
+        &'a self,
+        f: &mut dyn FnMut(&'a Slot) -> Option<W>,
+    ) -> Option<ProcessSettings<W>> {
         let command = each(&self.command, f);
         let workdir = maybe(&self.workdir, f);
         let variables = self.variables.map(f);
@@ -52,24 +57,6 @@ impl<V> ProcessSettings<V> {
             inherit: self.inherit.clone(),
             prepare: prepare.into_iter().collect::<Option<_>>()?,
         })
-    }
-}
-
-impl WrittenSettings for ProcessSettings<Slot> {
-    fn slots(&self) -> Vec<&Slot> {
-        let mut slots = Vec::new();
-        self.map(&mut |slot| {
-            slots.push(slot);
-            Some(())
-        });
-        slots
-    }
-
-    fn resolve(
-        &self,
-        resolve: &mut dyn FnMut(&Slot) -> Option<Value>,
-    ) -> Option<Box<dyn Settings>> {
-        Some(Box::new(self.map(resolve)?))
     }
 }
 
@@ -148,6 +135,7 @@ fn read(with: Option<&Node>, cx: &mut Cx<'_>) -> Option<ProcessSettings<Slot>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::module::settings::WrittenSettings;
     use crate::module::testing::{self, check};
 
     fn settings(with: &str) -> ProcessSettings<Slot> {
@@ -206,7 +194,7 @@ mod tests {
         assert_eq!(read.slots().len(), 10);
         // Each value is resolved where it is written: here, to its own text.
         let resolved = read
-            .map(&mut |slot| Some(Value::text(format!("{:?}", slot.expr.kind))))
+            .map_slots(&mut |slot| Some(Value::text(format!("{:?}", slot.expr.kind))))
             .unwrap();
         let text = |value: &Value| value.exact_text().unwrap();
         assert_eq!(resolved.command.len(), 3);
@@ -222,7 +210,7 @@ mod tests {
     fn a_value_that_cannot_be_resolved_leaves_no_settings_and_every_value_is_tried() {
         let read = settings("command: [a, b, c]\n");
         let mut tried = 0;
-        let resolved = read.map(&mut |_| {
+        let resolved = read.map_slots(&mut |_| {
             tried += 1;
             (tried != 2).then(|| Value::text("x"))
         });

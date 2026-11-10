@@ -8,8 +8,8 @@ use crate::diagnostic::source::Loc;
 use crate::syntax::expr::{Expr, ExprKind, Part, Reference, Target, UnitRef};
 
 use crate::plan::Planner;
-use crate::plan::model::{Given, Seen};
-use crate::plan::resolve::value::Resolved;
+use crate::plan::model::{Given, Seen, Unreachable};
+use crate::plan::resolve::resolved::Resolved;
 use crate::plan::resolve::{Asker, Fail, Scope, ViewProblem};
 
 use crate::plan::reach::usage::view_error;
@@ -83,20 +83,17 @@ impl Planner<'_> {
             let scope = Scope { unit: None, asker };
             let problems = match self.resolver.resolve(&reference, scope) {
                 Ok(value) => {
-                    let closed: Vec<String> = value
+                    let closed: Vec<Unreachable> = value
                         .published_uses
                         .iter()
                         .filter(|used| {
                             !used.always && !opened.contains(&(used.container.clone(), used.port))
                         })
-                        .map(|used| format!(
-                            "its port {} is published, but nothing in the plan opens it on the host",
-                            used.port
-                        ))
+                        .map(|used| Unreachable::NotOpened { port: used.port })
                         .collect();
                     return Some(match closed.is_empty() {
                         true => (Seen::Value(value.value.clone()), Some(value)),
-                        false => (Seen::Unreachable(closed.join("; ")), None),
+                        false => (Seen::Unreachable(closed), None),
                     });
                 }
                 Err(Fail::Reported) => return None,
@@ -106,7 +103,7 @@ impl Planner<'_> {
             for problem in problems {
                 match &problem {
                     ViewProblem::NotPublished { port, .. } => {
-                        unreachable.push(format!("its port {port} is not published to the host"));
+                        unreachable.push(Unreachable::NotPublished { port: port.clone() });
                     }
                     // An address with no view in a value of a unit that is
                     // made has no form for anyone.
@@ -118,7 +115,7 @@ impl Planner<'_> {
             }
             match unreachable.is_empty() {
                 true => None,
-                false => Some((Seen::Unreachable(unreachable.join("; ")), None)),
+                false => Some((Seen::Unreachable(unreachable), None)),
             }
         };
         let (from_host, host_value) = seen(Asker::Host)?;

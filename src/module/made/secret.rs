@@ -9,7 +9,7 @@ use crate::value::Value;
 use crate::module::description::{
     Description, ModuleGive, ModuleValue, ReadyWithoutCheck, RestartOn, UnitKind,
 };
-use crate::module::settings::{Destination, Settings, Slot, WrittenSettings, maybe};
+use crate::module::settings::{Destination, MapSlots, Settings, Slot, maybe};
 use crate::module::want::Want;
 use crate::module::{Cx, Module};
 
@@ -37,8 +37,13 @@ enum SecretSettings<V> {
     Keypair { algorithm: V },
 }
 
-impl<V> SecretSettings<V> {
-    fn map<'a, W>(&'a self, f: &mut dyn FnMut(&'a V) -> Option<W>) -> Option<SecretSettings<W>> {
+impl MapSlots for SecretSettings<Slot> {
+    type With<W> = SecretSettings<W>;
+
+    fn map_slots<'a, W>(
+        &'a self,
+        f: &mut dyn FnMut(&'a Slot) -> Option<W>,
+    ) -> Option<SecretSettings<W>> {
         Some(match self {
             SecretSettings::Password { length } => SecretSettings::Password {
                 length: maybe(length, f)?,
@@ -55,24 +60,6 @@ impl<V> SecretSettings<V> {
                 algorithm: f(algorithm)?,
             },
         })
-    }
-}
-
-impl WrittenSettings for SecretSettings<Slot> {
-    fn slots(&self) -> Vec<&Slot> {
-        let mut slots = Vec::new();
-        self.map(&mut |slot| {
-            slots.push(slot);
-            Some(())
-        });
-        slots
-    }
-
-    fn resolve(
-        &self,
-        resolve: &mut dyn FnMut(&Slot) -> Option<Value>,
-    ) -> Option<Box<dyn Settings>> {
-        Some(Box::new(self.map(resolve)?))
     }
 }
 

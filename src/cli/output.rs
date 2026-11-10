@@ -5,21 +5,23 @@ pub mod json;
 pub mod text;
 
 use crate::definition::Check;
-use crate::module::ReadyWithoutCheck;
+use crate::plan::Unreachable;
 use crate::value::Value;
 
-/// How a unit with no `ready` is known to be ready, as a person reads it.
-fn ready_without_check(ready: ReadyWithoutCheck) -> &'static str {
-    match ready {
-        ReadyWithoutCheck::Started => "when it has started",
-        ReadyWithoutCheck::Healthy => {
-            "when its image's own health check passes, or when it has started if the image has none"
-        }
-        ReadyWithoutCheck::Exited => "when it exits with 0",
-        ReadyWithoutCheck::Held => "when it is held",
-        ReadyWithoutCheck::Generated => "when it has been generated",
-        ReadyWithoutCheck::Written => "when it has been written",
-    }
+/// Why a value a unit gives has no form for the host, as a person reads it.
+fn unreachable(why: &[Unreachable]) -> String {
+    let each: Vec<String> = why
+        .iter()
+        .map(|why| match why {
+            Unreachable::NotPublished { port } => {
+                format!("its port {port} is not published to the host")
+            }
+            Unreachable::NotOpened { port } => format!(
+                "its port {port} is published, but nothing in the plan opens it on the host"
+            ),
+        })
+        .collect();
+    each.join("; ")
 }
 
 /// The kind of a readiness check, as `ready` writes it, and what it checks.

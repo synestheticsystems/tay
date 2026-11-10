@@ -4,7 +4,7 @@
 use std::borrow::Cow;
 
 use crate::definition::{Action, Body, Give, GiveValue, Mechanism, Ready, Restart, Unit, Way};
-use crate::diagnostic::{Diagnostic, Diagnostics};
+use crate::diagnostic::{Diagnostic, Diagnostics, quoted_list};
 use crate::module::{self, Cx, Module, Slot, UnitKind};
 use crate::syntax::fields::{self, Fields};
 use crate::syntax::names::{self, NameAt};
@@ -224,7 +224,7 @@ fn mechanism(
             uses.loc,
             format!(
                 "`{module_name}` is not a module; the modules are {}",
-                module::names().collect::<Vec<_>>().join(", ")
+                quoted_list(module::names())
             ),
         );
         return None;

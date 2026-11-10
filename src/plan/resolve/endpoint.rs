@@ -14,7 +14,7 @@ use crate::module::{Form, HOST_IN_CONTAINERS, Published, Runs, UnitKind, Want};
 use crate::syntax::expr::{Expr, Part, Reference};
 
 use super::{Asker, Fail, Res, Resolver, Scope, ViewProblem};
-use crate::plan::resolve::value::{PublishedUse, Resolved};
+use crate::plan::resolve::resolved::{PublishedUse, Resolved};
 use crate::value::{Bit, Exact, Value};
 
 /// The host's own address, which a unit on the host reaches another at and

@@ -6,12 +6,12 @@ use crate::syntax::fields::{self, Fields};
 use crate::syntax::names;
 use crate::syntax::yaml::{Kind, Node, Scalar};
 
-use super::super::command_line::{COMMAND_LINE, argv, words};
-use super::super::mounts::mounts;
-use super::super::variables::variables;
 use super::{ContainerSettings, Image, Volume};
 use crate::module::Cx;
 use crate::module::description::Published;
+use crate::module::running::command_line::{COMMAND_LINE, argv, words};
+use crate::module::running::mounts::mounts;
+use crate::module::running::variables::variables;
 use crate::module::settings::{Destination, Slot};
 use crate::module::want::{PathUse, Want};
 

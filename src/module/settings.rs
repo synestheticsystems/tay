@@ -25,9 +25,47 @@ pub trait WrittenSettings: fmt::Debug {
 }
 
 /// A module's own settings for one unit with every value resolved: what the
-/// module brings the unit up from, held in the plan. An engine asks these,
-/// whatever their module, to start, stop and check the unit.
+/// module brings the unit up from. The plan holds them without knowing their
+/// type, so whatever is later done with a unit by its module is asked of
+/// them.
 pub trait Settings: fmt::Debug {}
+
+/// A module's settings as written, which can be rebuilt with each slot
+/// passed through a function: how each module's settings become written
+/// settings the planner can resolve.
+pub trait MapSlots {
+    /// The same settings with values of type `W`.
+    type With<W>;
+
+    /// The settings with each slot passed through `f`, every one even when
+    /// one fails, so that each error is reported; `None` if any failed.
+    fn map_slots<'a, W>(
+        &'a self,
+        f: &mut dyn FnMut(&'a Slot) -> Option<W>,
+    ) -> Option<Self::With<W>>;
+}
+
+impl<S> WrittenSettings for S
+where
+    S: MapSlots + fmt::Debug,
+    S::With<Value>: Settings + 'static,
+{
+    fn slots(&self) -> Vec<&Slot> {
+        let mut slots = Vec::new();
+        self.map_slots(&mut |slot| {
+            slots.push(slot);
+            Some(())
+        });
+        slots
+    }
+
+    fn resolve(
+        &self,
+        resolve: &mut dyn FnMut(&Slot) -> Option<Value>,
+    ) -> Option<Box<dyn Settings>> {
+        Some(Box::new(self.map_slots(resolve)?))
+    }
+}
 
 /// One value a unit's settings use: as written, with what it must be once
 /// resolved and where it ends up.

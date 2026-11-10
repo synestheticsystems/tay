@@ -78,7 +78,7 @@ fn unit_lines(lines: &mut Vec<String>, number: usize, unit: &PlannedUnit) {
 fn mechanism_lines(lines: &mut Vec<String>, mechanism: &PlannedMechanism) {
     lines.push(match &mechanism.ready {
         Readiness::WithoutCheck(ready) => {
-            format!("   ready: {}", super::ready_without_check(*ready))
+            format!("   ready: {}", ready.words())
         }
         Readiness::Check { check, within } => {
             let (kind, target) = super::check(check);
@@ -90,10 +90,15 @@ fn mechanism_lines(lines: &mut Vec<String>, mechanism: &PlannedMechanism) {
         }
     });
     let restart = &mechanism.restart;
-    lines.push(match (restart.on, restart.attempts) {
-        (RestartOn::Never, _) => "   restart: never".to_string(),
-        (on, Some(attempts)) => format!("   restart: on {}, up to {attempts} attempts", on.word()),
-        (on, None) => format!("   restart: on {}", on.word()),
+    lines.push(match restart.on {
+        RestartOn::Never => "   restart: never".to_string(),
+        on => {
+            let attempts = restart
+                .attempts
+                .map(|attempts| format!(", up to {attempts} attempts"))
+                .unwrap_or_default();
+            format!("   restart: on {}{attempts}", on.word())
+        }
     });
     for folder in &mechanism.watch {
         lines.push(format!("   watches {}", folder.shown()));
@@ -160,7 +165,7 @@ fn given_lines(lines: &mut Vec<String>, given: &Given) {
     };
     let seen = |seen: &Seen| match seen {
         Seen::Value(value) => value.shown(),
-        Seen::Unreachable(why) => format!("not reachable: {why}"),
+        Seen::Unreachable(why) => format!("not reachable: {}", super::unreachable(why)),
     };
     let (host, containers) = (seen(&given.from_host), seen(&given.from_containers));
     if host == containers {

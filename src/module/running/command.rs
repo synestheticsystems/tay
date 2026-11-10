@@ -13,7 +13,7 @@ use super::variables::{Variables, variables};
 use crate::module::description::{
     Description, ModuleGive, ModuleValue, Output, ReadyWithoutCheck, RestartOn, Runs, UnitKind,
 };
-use crate::module::settings::{Destination, Settings, Slot, WrittenSettings, each_named, maybe};
+use crate::module::settings::{Destination, MapSlots, Settings, Slot, each_named, maybe};
 use crate::module::want::{PathUse, Want};
 use crate::module::{Cx, Module};
 
@@ -71,8 +71,13 @@ enum WhenRemoved {
     Undo,
 }
 
-impl<V> CommandSettings<V> {
-    fn map<'a, W>(&'a self, f: &mut dyn FnMut(&'a V) -> Option<W>) -> Option<CommandSettings<W>> {
+impl MapSlots for CommandSettings<Slot> {
+    type With<W> = CommandSettings<W>;
+
+    fn map_slots<'a, W>(
+        &'a self,
+        f: &mut dyn FnMut(&'a Slot) -> Option<W>,
+    ) -> Option<CommandSettings<W>> {
         let run = self.run.map(f);
         let check = maybe(&self.check, &mut |form| form.map(f));
         let undo = maybe(&self.undo, &mut |form| form.map(f));
@@ -97,24 +102,6 @@ impl<V> CommandSettings<V> {
             produces: self.produces.clone(),
             outputs: outputs?,
         })
-    }
-}
-
-impl WrittenSettings for CommandSettings<Slot> {
-    fn slots(&self) -> Vec<&Slot> {
-        let mut slots = Vec::new();
-        self.map(&mut |slot| {
-            slots.push(slot);
-            Some(())
-        });
-        slots
-    }
-
-    fn resolve(
-        &self,
-        resolve: &mut dyn FnMut(&Slot) -> Option<Value>,
-    ) -> Option<Box<dyn Settings>> {
-        Some(Box::new(self.map(resolve)?))
     }
 }
 
@@ -508,7 +495,7 @@ mod tests {
         );
         let mut resolved = Vec::new();
         let settings = read
-            .map(&mut |slot| {
+            .map_slots(&mut |slot| {
                 let text = slot.expr.literal_text()?;
                 resolved.push(text.clone());
                 Some(text)

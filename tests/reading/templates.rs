@@ -25,7 +25,7 @@ fn a_missing_required_parameter_and_an_undeclared_one_are_errors() {
         [
             "tay.yaml:4:14: template `database` needs the parameter `name`, which has no default",
             "  stack/templates/database.yaml:2:3: the parameter is declared here",
-            "tay.yaml:5:47: template `database` has no parameter `colour`; its parameters are name",
+            "tay.yaml:5:47: template `database` has no parameter `colour`; its parameters are `name`",
             "  stack/templates/database.yaml:1:1: the template is here",
             "tay.yaml:6:10: template `broken` needs the parameter `name`, which has no default",
             "  stack/templates/broken.yaml:2:3: the parameter is declared here",

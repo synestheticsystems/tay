@@ -11,7 +11,7 @@ use super::variables::Variables;
 use crate::module::description::{
     Concern, Description, ReadyWithoutCheck, RestartOn, Runs, UnitKind,
 };
-use crate::module::settings::{Settings, Slot, WrittenSettings, each, each_named, maybe};
+use crate::module::settings::{MapSlots, Settings, Slot, each, each_named, maybe};
 use crate::module::{Cx, Module};
 
 pub struct Container;
@@ -101,8 +101,13 @@ impl<V> Volume<V> {
     }
 }
 
-impl<V> ContainerSettings<V> {
-    fn map<'a, W>(&'a self, f: &mut dyn FnMut(&'a V) -> Option<W>) -> Option<ContainerSettings<W>> {
+impl MapSlots for ContainerSettings<Slot> {
+    type With<W> = ContainerSettings<W>;
+
+    fn map_slots<'a, W>(
+        &'a self,
+        f: &mut dyn FnMut(&'a Slot) -> Option<W>,
+    ) -> Option<ContainerSettings<W>> {
         let image = self.image.map(f);
         let command = maybe(&self.command, &mut |words| each(words, f));
         let entrypoint = maybe(&self.entrypoint, &mut |words| each(words, f));
@@ -134,24 +139,6 @@ impl<V> ContainerSettings<V> {
             security_opt: security_opt?,
             pids_limit: pids_limit?,
         })
-    }
-}
-
-impl WrittenSettings for ContainerSettings<Slot> {
-    fn slots(&self) -> Vec<&Slot> {
-        let mut slots = Vec::new();
-        self.map(&mut |slot| {
-            slots.push(slot);
-            Some(())
-        });
-        slots
-    }
-
-    fn resolve(
-        &self,
-        resolve: &mut dyn FnMut(&Slot) -> Option<Value>,
-    ) -> Option<Box<dyn Settings>> {
-        Some(Box::new(self.map(resolve)?))
     }
 }
 
@@ -351,7 +338,7 @@ mod tests {
         // no-new-privileges and 100.
         let mut resolved = 0;
         assert!(
-            read.map(&mut |_| {
+            read.map_slots(&mut |_| {
                 resolved += 1;
                 Some(())
             })

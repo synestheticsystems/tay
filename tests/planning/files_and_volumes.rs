@@ -40,9 +40,9 @@ fn a_file_is_written_under_files_in_its_folder_in_the_state_folder() {
 
 #[test]
 fn a_template_file_is_read_once_and_its_references_checked_as_a_definitions_are() {
-    // Two units read `a.tmpl`: an error in it is reported once, naming each
-    // unit it was found for, in the words the same reference written in a
-    // definition would get.
+    // Two units read `a.tmpl`: an error in it that is the same for both is
+    // reported once, naming each unit it was found for, and each error is
+    // in the words the same reference written in a definition would get.
     let run = plan("template-files", &[]);
     assert_eq!(run.code, 2);
     assert_eq!(

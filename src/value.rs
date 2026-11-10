@@ -83,31 +83,37 @@ impl Hole {
         }
     }
 
+    /// Whether what fills the hole is secret.
+    pub fn is_secret(&self) -> bool {
+        matches!(
+            self,
+            Hole::SecretSetting { .. }
+                | Hole::Generated { secret: true, .. }
+                | Hole::Produced { secret: true, .. }
+        )
+    }
+
     /// The secret that fills the hole, as a reference names it; `None`
     /// when what fills it is not secret.
     pub fn secret(&self) -> Option<String> {
         match self {
             Hole::SecretSetting { name, .. } => Some(format!("settings.{name}")),
-            Hole::Generated {
-                unit,
-                name,
-                secret: true,
+            Hole::Generated { unit, name, .. } | Hole::Produced { unit, name, .. }
+                if self.is_secret() =>
+            {
+                Some(format!("{unit}.{name}"))
             }
-            | Hole::Produced {
-                unit,
-                name,
-                secret: true,
-            } => Some(format!("{unit}.{name}")),
             _ => None,
         }
     }
 
-    /// The hole as `tay plan` prints it.
+    /// The hole as `tay plan` prints it: a secret as `<secret>`, whatever
+    /// fills it.
     pub fn shown(&self) -> String {
-        if self.secret().is_some() {
-            return "<secret>".to_string();
-        }
         match self {
+            Hole::SecretSetting { .. }
+            | Hole::Generated { secret: true, .. }
+            | Hole::Produced { secret: true, .. } => "<secret>".to_string(),
             Hole::Port { unit } => format!("<port: {unit}>"),
             Hole::Generated { unit, name, .. } => format!("<generated: {unit}.{name}>"),
             Hole::Produced { unit, name, .. } => format!("<produced: {unit}.{name}>"),
@@ -115,7 +121,6 @@ impl Hole {
             Hole::HostListen => "<host.listen>".to_string(),
             Hole::EnvironmentId => "<environment.id>".to_string(),
             Hole::EnvironmentNetwork => "<environment.network>".to_string(),
-            Hole::SecretSetting { .. } => "<secret>".to_string(),
         }
     }
 }
@@ -172,7 +177,7 @@ impl Value {
     }
 
     /// The secrets the value is built from, as references name them, each
-    /// once and in order.
+    /// once, sorted.
     pub fn secrets(&self) -> Vec<String> {
         let mut secrets: Vec<String> = self.holes().iter().filter_map(|h| h.secret()).collect();
         secrets.sort();
@@ -181,7 +186,7 @@ impl Value {
     }
 
     pub fn is_secret(&self) -> bool {
-        self.holes().iter().any(|hole| hole.secret().is_some())
+        self.holes().iter().any(|hole| hole.is_secret())
     }
 
     /// The text up to the first hole.

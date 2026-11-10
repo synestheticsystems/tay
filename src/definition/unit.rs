@@ -83,6 +83,7 @@ pub struct Way {
 
 /// A module and the fields that go with it: what a unit with `uses` runs
 /// by, and what each of a unit's ways is.
+#[derive(Debug)]
 pub struct Mechanism {
     pub module: &'static dyn Module,
     /// Where `uses` names the module.
@@ -105,22 +106,6 @@ impl Mechanism {
     /// The files the mechanism builds.
     pub fn outputs(&self) -> &[Output] {
         &self.description.outputs
-    }
-}
-
-impl std::fmt::Debug for Mechanism {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Mechanism")
-            .field("module", &self.module.name())
-            .field("uses", &self.uses)
-            .field("description", &self.description)
-            .field("needs", &self.needs)
-            .field("after", &self.after)
-            .field("gives", &self.gives)
-            .field("ready", &self.ready)
-            .field("restart", &self.restart)
-            .field("watch", &self.watch)
-            .finish()
     }
 }
 

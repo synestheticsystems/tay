@@ -94,7 +94,7 @@ fn unit(unit: &PlannedUnit) -> Value {
         "ready": mechanism.map(|mechanism| match &mechanism.ready {
             Readiness::WithoutCheck(ready) => json!({
                 "check": Value::Null,
-                "without_check": super::ready_without_check(*ready),
+                "without_check": ready.words(),
             }),
             Readiness::Check { check, within } => {
                 let (kind, target) = super::check(check);
@@ -142,7 +142,7 @@ fn published(published: &PublishedPort) -> Value {
 fn given(given: &Given) -> Value {
     let seen = |seen: &Seen| match seen {
         Seen::Value(value) => shown(value),
-        Seen::Unreachable(why) => json!({ "unreachable": why }),
+        Seen::Unreachable(why) => json!({ "unreachable": super::unreachable(why) }),
     };
     json!({
         "name": given.name,

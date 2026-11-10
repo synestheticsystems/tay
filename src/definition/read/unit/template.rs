@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 
 use crate::definition::{Body, Mechanism, Unit};
-use crate::diagnostic::{Diagnostic, Diagnostics};
+use crate::diagnostic::{Diagnostic, Diagnostics, quoted_list};
 use crate::syntax::expr::{self, Expr, Reference, Target};
 use crate::syntax::fields::{self, Fields};
 use crate::syntax::names::{self, NameAt};
@@ -196,7 +196,7 @@ pub fn made_from(
                 _ => format!(
                     "there is no template `{}`; the templates are {}",
                     template_name.name,
-                    known.join(", ")
+                    quoted_list(known)
                 ),
             },
         );
@@ -291,7 +291,7 @@ fn param_values(
                         if declared.is_empty() {
                             "none".to_string()
                         } else {
-                            declared.join(", ")
+                            quoted_list(declared)
                         }
                     ),
                 )

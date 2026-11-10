@@ -6,7 +6,7 @@ use crate::definition::read::ENVIRONMENT_FOLDER;
 use crate::definition::{Profile, Stack};
 use crate::diagnostic::{Diagnostic, Diagnostics};
 use crate::plan::choices::Layered;
-use crate::plan::resolve::value::Resolved;
+use crate::plan::resolve::resolved::Resolved;
 use crate::syntax::expr::{EnvField, Reference};
 use crate::value::{Hole, Value};
 

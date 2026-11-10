@@ -13,7 +13,7 @@ use crate::syntax::expr::{self, Expr, ExprKind};
 use super::visit::NeedEdge;
 use crate::plan::Planner;
 use crate::plan::model::{Because, OpenedBy, Opener};
-use crate::plan::resolve::value::Resolved;
+use crate::plan::resolve::resolved::Resolved;
 use crate::plan::resolve::{Asker, Fail, Scope, ViewProblem};
 
 /// Who uses a value: a unit, from where it runs, or from the host for a
@@ -227,7 +227,8 @@ impl Planner<'_> {
     }
 
     /// The text of the template file at `path`, read once however many units
-    /// use it, as a value whose references are each at their place in it.
+    /// use it, as a value whose references each stand where they are
+    /// written in it.
     /// `None` when it cannot be read or a reference in it cannot be parsed,
     /// which is reported.
     fn template_text(&mut self, path: &str, at: Loc) -> Option<Expr> {

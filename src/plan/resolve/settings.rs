@@ -3,7 +3,7 @@
 
 use crate::definition::{SettingValue, reference_errors};
 use crate::diagnostic::Diagnostic;
-use crate::plan::resolve::value::Resolved;
+use crate::plan::resolve::resolved::Resolved;
 use crate::syntax::expr::{Literal, Reference};
 use crate::value::{Hole, Kept, Value};
 

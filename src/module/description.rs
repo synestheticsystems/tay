@@ -171,29 +171,55 @@ pub enum ReadyWithoutCheck {
     Written,
 }
 
+impl ReadyWithoutCheck {
+    /// How a person reads it.
+    pub fn words(self) -> &'static str {
+        match self {
+            ReadyWithoutCheck::Started => "when it has started",
+            ReadyWithoutCheck::Healthy => {
+                "when its image's own health check passes, or when it has started if the image has none"
+            }
+            ReadyWithoutCheck::Exited => "when it exits with 0",
+            ReadyWithoutCheck::Held => "when it is held",
+            ReadyWithoutCheck::Generated => "when it has been generated",
+            ReadyWithoutCheck::Written => "when it has been written",
+        }
+    }
+}
+
 /// When a unit that runs is started again: `restart.on`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RestartOn {
-    Failure,
-    Always,
-    Never,
+    Failure = 0,
+    Always = 1,
+    Never = 2,
 }
 
 impl RestartOn {
-    /// The words `restart.on` is written with.
+    const ALL: [RestartOn; 3] = [RestartOn::Failure, RestartOn::Always, RestartOn::Never];
+
+    /// The words `restart.on` is written with, each in the place of its
+    /// `RestartOn` in `ALL`.
     pub const WORDS: &[&str] = &["failure", "always", "never"];
 
     pub fn word(self) -> &'static str {
-        match self {
-            RestartOn::Failure => "failure",
-            RestartOn::Always => "always",
-            RestartOn::Never => "never",
-        }
+        Self::WORDS[self as usize]
     }
 
     pub fn of_word(word: &str) -> Option<RestartOn> {
-        [RestartOn::Failure, RestartOn::Always, RestartOn::Never]
-            .into_iter()
-            .find(|on| on.word() == word)
+        Self::ALL.into_iter().find(|on| on.word() == word)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn each_restart_is_read_from_the_word_it_is_written_with() {
+        for on in RestartOn::ALL {
+            assert_eq!(RestartOn::of_word(on.word()), Some(on));
+        }
+        assert_eq!(RestartOn::of_word("sometimes"), None);
     }
 }

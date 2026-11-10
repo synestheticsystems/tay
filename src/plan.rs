@@ -22,6 +22,7 @@ use crate::syntax::expr::Expr;
 
 pub use model::{
     Because, Given, OpenedBy, Plan, PlannedMechanism, PlannedUnit, PublishedPort, Readiness, Seen,
+    Unreachable,
 };
 
 use resolve::{Environment, Resolver};
