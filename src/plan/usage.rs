@@ -76,7 +76,11 @@ impl Planner<'_> {
             });
         }
         if let Some(problem) = want.problem(&value.form()) {
-            self.resolver.d.error(expr.loc, format!("this {problem}"));
+            let what = match &expr.kind {
+                expr::ExprKind::Ref(reference) => format!("`{}`", reference.written()),
+                _ => "this".to_string(),
+            };
+            self.resolver.d.error(expr.loc, format!("{what} {problem}"));
             return None;
         }
         self.check_place(&value, place, expr.loc);
@@ -160,7 +164,7 @@ fn view_error(user: User<'_>, at: Loc, problem: ViewProblem) -> Diagnostic {
         } => Diagnostic::new(
             at,
             format!(
-                "{who} and uses an address of unit `{owner}` here, but `{owner}` publishes no host port for its port {port}"
+                "{who}, and uses here an address of unit `{owner}` as the host sees it, but `{owner}` publishes no host port for its port {port}"
             ),
         )
         .with(endpoint, format!("the endpoint of `{owner}` is defined here")),

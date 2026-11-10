@@ -39,9 +39,7 @@ impl Module for File {
         let content_place = match &mode {
             None => Place::PrivateFile,
             Some(mode) if mode.expr.literal_text().as_deref() == Some("0600") => Place::PrivateFile,
-            Some(_) => {
-                Place::Readable("a file whose mode is not \"0600\", so other users can read it")
-            }
+            Some(_) => Place::Readable("a file whose mode is not \"0600\""),
         };
         slots.extend(mode);
         match (settings.entry("content"), settings.entry("template")) {
