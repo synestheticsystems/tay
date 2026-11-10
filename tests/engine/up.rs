@@ -244,3 +244,28 @@ fn the_shop_stack_comes_up_as_far_as_tay_can_bring_it() {
         "waiting blocked: `build`, `database` have failed"
     );
 }
+
+#[test]
+fn a_unit_with_watch_starts_as_any_other_and_up_says_once_that_watching_is_not_built() {
+    let machine = Machine::new();
+    let root = machine.stack("services");
+    let up = machine.at(&root, "up", &["watcher"]);
+    assert_eq!(up.code, 0, "{}{}", up.stdout, up.stderr);
+    let notice = "tay up: `watcher` watches files, but watching is not built yet: it will not be run again when they change.\n";
+    assert_eq!(up.stdout.matches(notice).count(), 1, "{}", up.stdout);
+    assert_eq!(up.last_change("watcher"), "ready attempt 1, running");
+    let json = machine.at(&root, "up", &["watcher", "--json"]);
+    let notices: Vec<serde_json::Value> = json
+        .stdout
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .filter(|line: &serde_json::Value| line["event"] == "notice")
+        .collect();
+    assert_eq!(notices.len(), 1, "{}", json.stdout);
+    assert!(
+        notices[0]["notice"]
+            .as_str()
+            .unwrap()
+            .starts_with("`watcher` watches files")
+    );
+}

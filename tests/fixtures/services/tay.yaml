@@ -59,3 +59,8 @@ units:
     doc: The same, run once as a command, which inherits what a process does when `inherit` does not say.
     uses: command
     with: { run: ["${environment.root}/services/report.sh", "once"] }
+  watcher:
+    doc: Watches its scripts, which tay does not do yet.
+    uses: process
+    with: { command: ["${environment.root}/services/ticker.sh"] }
+    watch: [services]

@@ -58,6 +58,20 @@ impl Daemon {
         change.say(Event::Units {
             units: units.iter().map(|unit| unit.name.clone()).collect(),
         });
+        for unit in &units {
+            if unit
+                .mechanism
+                .as_ref()
+                .is_some_and(|mechanism| !mechanism.watch.is_empty())
+            {
+                change.say(Event::Notice {
+                    notice: format!(
+                        "`{}` watches files, but watching is not built yet: it will not be run again when they change",
+                        unit.name
+                    ),
+                });
+            }
+        }
         let mut decided = |decision: Decision| {
             log(&format!("{}: {}", change.describe(), words(&decision)));
             change.say(Event::Up(decision));

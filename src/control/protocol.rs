@@ -75,6 +75,8 @@ pub enum Event {
         detail: String,
         at: u64,
     },
+    /// Something a person should know of the change, said once.
+    Notice { notice: String },
     /// The definitions, planned again by the daemon, have errors: each as
     /// `tay plan` prints it.
     Errors { lines: Vec<String>, too_old: bool },
@@ -93,7 +95,7 @@ impl Event {
     /// Whether this is the last thing a change says.
     pub fn ends_change(&self) -> bool {
         match self {
-            Event::Units { .. } | Event::State { .. } => false,
+            Event::Units { .. } | Event::State { .. } | Event::Notice { .. } => false,
             Event::Errors { .. }
             | Event::Up(_)
             | Event::Cancelled { .. }

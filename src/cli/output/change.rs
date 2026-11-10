@@ -44,7 +44,7 @@ impl Printer {
 
     pub fn event(&mut self, event: Event) {
         self.exit = match &event {
-            Event::Units { .. } | Event::State { .. } => self.exit,
+            Event::Units { .. } | Event::State { .. } | Event::Notice { .. } => self.exit,
             Event::Errors { too_old: true, .. } => Some(Exit::TooOld),
             Event::Errors { .. } => Some(Exit::Errors),
             Event::Up(Decision::Ready) => Some(Exit::Done),
@@ -75,6 +75,7 @@ impl Printer {
                 state.word(),
                 width = self.width
             )),
+            Event::Notice { notice } => out(&format!("{command}: {notice}.\n")),
             Event::Errors { lines, too_old } => {
                 for line in &lines {
                     err(&format!("{line}\n"));
@@ -139,6 +140,7 @@ impl Printer {
                 "detail": detail,
                 "at": at,
             }),
+            Event::Notice { notice } => json!({ "event": "notice", "notice": notice }),
             Event::Errors { lines, too_old } => json!({
                 "event": "errors",
                 "too_old": too_old,
