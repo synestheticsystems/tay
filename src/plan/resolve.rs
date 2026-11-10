@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use crate::definition::{GiveValue, SettingValue, Stack};
 use crate::diagnostic::{Diagnostic, Diagnostics};
-use crate::expr::{EnvField, Expr, ExprKind, Piece, Reference, Target, Type, UnitRef, View};
+use crate::expr::{EnvField, Expr, ExprKind, Part, Piece, Reference, Target, Type, UnitRef, View};
 use crate::module::{GivenValue, Runs};
 use crate::source::Loc;
 
@@ -95,7 +95,8 @@ pub struct Resolver<'s> {
     pub d: Diagnostics,
     units: HashMap<&'s str, usize>,
     chosen: HashMap<usize, Option<(usize, Option<Loc>)>>,
-    memo: HashMap<(Key, Asker), Res>,
+    /// Results by value, the part of an endpoint asked for, and asker.
+    memo: HashMap<(Key, Option<Part>, Asker), Res>,
     resolving: Vec<(Key, Loc)>,
     circles: HashSet<BTreeSet<Key>>,
     /// Each setting with no value and no default that the plan uses, and where.
@@ -286,7 +287,7 @@ impl<'s> Resolver<'s> {
         &mut self,
         owner: usize,
         name: &str,
-        part: Option<crate::expr::Part>,
+        part: Option<Part>,
         asker: Asker,
         reference: &Reference,
     ) -> Res {
@@ -318,13 +319,15 @@ impl<'s> Resolver<'s> {
             asker,
         };
         match &give.value {
-            GiveValue::Value(expr) => {
-                self.keyed(key, reference.loc, asker, |this| this.resolve(expr, scope))
-            }
+            GiveValue::Value(expr) => self.keyed(key, None, reference.loc, asker, |this| {
+                this.resolve(expr, scope)
+            }),
             GiveValue::Module(GivenValue::Expr(expr)) => {
-                self.keyed(key, reference.loc, asker, |this| this.resolve(expr, scope))
+                self.keyed(key, None, reference.loc, asker, |this| {
+                    this.resolve(expr, scope)
+                })
             }
-            GiveValue::Endpoint(endpoint) => self.keyed(key, reference.loc, asker, |this| {
+            GiveValue::Endpoint(endpoint) => self.keyed(key, part, reference.loc, asker, |this| {
                 this.endpoint(owner, endpoint, part, asker, reference)
             }),
             GiveValue::Module(GivenValue::Port) => Ok(Resolved::known(Shape::Opaque {
@@ -371,7 +374,7 @@ impl<'s> Resolver<'s> {
             }
         };
         let scope = Scope { unit: None, asker };
-        let resolved = self.keyed(Key::Setting(name.to_string()), at, asker, |this| {
+        let resolved = self.keyed(Key::Setting(name.to_string()), None, at, asker, |this| {
             this.resolve(value.expr(), scope)
         })?;
         let ty = match decl.ty {
@@ -444,16 +447,17 @@ impl<'s> Resolver<'s> {
         })
     }
 
-    /// Resolves the value `key` names, remembering the result for this asker
-    /// and reporting a circle when the value is built from itself.
+    /// Resolves the value `key` names, remembering the result for this part
+    /// and asker, and reporting a circle when the value is built from itself.
     fn keyed(
         &mut self,
         key: Key,
+        part: Option<Part>,
         at: Loc,
         asker: Asker,
         resolve: impl FnOnce(&mut Self) -> Res,
     ) -> Res {
-        if let Some(done) = self.memo.get(&(key.clone(), asker)) {
+        if let Some(done) = self.memo.get(&(key.clone(), part, asker)) {
             return done.clone();
         }
         if let Some(start) = self.resolving.iter().position(|(k, _)| *k == key) {
@@ -463,7 +467,7 @@ impl<'s> Resolver<'s> {
         self.resolving.push((key.clone(), at));
         let result = resolve(self);
         self.resolving.pop();
-        self.memo.insert((key, asker), result.clone());
+        self.memo.insert((key, part, asker), result.clone());
         result
     }
 

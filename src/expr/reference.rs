@@ -47,7 +47,7 @@ pub enum UnitRef {
 }
 
 /// The part of an endpoint a reference asks for. With none, it asks for `host:port`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Part {
     Url,
     Host,
