@@ -11,7 +11,10 @@
 //! with the time, and when the child ends writes how and when to the record,
 //! stops whatever the child left of its group, and ends. The program's
 //! environment, which may hold secrets, is the keeper's own, given by the
-//! daemon; secrets are never arguments.
+//! daemon; secrets are never arguments. The daemon names each of its
+//! variables, and the child is given those alone, since the system may add
+//! variables of its own to a program as it starts, as macOS does to one
+//! that uses its frameworks, which tay does to be told of changed files.
 //!
 //! Two limits are known and accepted. A process that puts itself in a
 //! session of its own escapes the stop. And if a keeper is killed, a child
@@ -60,6 +63,8 @@ struct Arguments {
     log: UnitLog,
     /// What the step is called in its log: `attempt 2, run`.
     name: String,
+    /// The names of the variables of its environment the program is given.
+    env: Vec<String>,
     argv: Vec<String>,
 }
 
@@ -84,9 +89,11 @@ pub fn keep(args: impl Iterator<Item = OsString>) -> ExitCode {
     }
 }
 
-/// `--lock FD --record FILE --log FOLDER --name NAME -- PROGRAM ARGS...`.
+/// `--lock FD --record FILE --log FOLDER --name NAME [--env VARIABLE]...
+/// -- PROGRAM ARGS...`.
 fn read_args(mut args: impl Iterator<Item = OsString>) -> Option<Arguments> {
     let (mut lock, mut record, mut log, mut name) = (None, None, None, None);
+    let mut env = Vec::new();
     loop {
         let flag = args.next()?;
         if flag == "--" {
@@ -98,6 +105,7 @@ fn read_args(mut args: impl Iterator<Item = OsString>) -> Option<Arguments> {
             "--record" => record = Some(PathBuf::from(value)),
             "--log" => log = Some(UnitLog::at(PathBuf::from(value))),
             "--name" => name = value.into_string().ok(),
+            "--env" => env.push(value.into_string().ok()?),
             _ => return None,
         }
     }
@@ -112,6 +120,7 @@ fn read_args(mut args: impl Iterator<Item = OsString>) -> Option<Arguments> {
         record: record?,
         log: log?,
         name: name?,
+        env,
         argv,
     })
 }
@@ -127,7 +136,7 @@ fn run(arguments: &Arguments) -> Result<(), DiskError> {
     let log = Arc::new(Mutex::new(arguments.log.open()?));
     let shown = arguments.argv.join(" ");
     note(&log, &format!("{}: starting `{shown}`", arguments.name));
-    let started = start(&arguments.argv);
+    let started = start(&arguments.argv, &arguments.env);
     let (mut child, output) = match started {
         Ok(started) => started,
         Err(error) => {
@@ -215,10 +224,17 @@ fn this_process() -> RecordedProcess {
 /// Starts `argv` as the keeper's child, leading a process group of its own,
 /// with its standard output and error both read from one pipe, so that their
 /// lines stay in the order written. It reads the keeper's standard input
-/// and runs in the keeper's folder, with the keeper's environment.
-fn start(argv: &[String]) -> std::io::Result<(std::process::Child, PipeReader)> {
+/// and runs in the keeper's folder, with the variables `env` names of the
+/// keeper's environment.
+fn start(argv: &[String], env: &[String]) -> std::io::Result<(std::process::Child, PipeReader)> {
     let (reader, writer) = std::io::pipe()?;
     let mut command = Command::new(&argv[0]);
+    command.env_clear();
+    for name in env {
+        if let Some(value) = std::env::var_os(name) {
+            command.env(name, value);
+        }
+    }
     command
         .args(&argv[1..])
         .stdin(Stdio::inherit())

@@ -231,7 +231,11 @@ impl StepFiles {
             .arg("--log")
             .arg(self.log.folder())
             .arg("--name")
-            .arg(format!("attempt {attempt}, {step}"))
+            .arg(format!("attempt {attempt}, {step}"));
+        for (name, _) in &program.env {
+            command.arg("--env").arg(name);
+        }
+        command
             .arg("--")
             .args(&program.argv)
             .env_clear()
