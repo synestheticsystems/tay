@@ -9,7 +9,7 @@ use std::path::Path;
 use serde_json::json;
 
 use crate::cli::Exit;
-use crate::cli::args::{Args, Takes, UnitsNamed};
+use crate::cli::args::{Args, Takes, Words};
 use crate::cli::stack;
 use crate::control::client::Client;
 use crate::control::protocol;
@@ -25,7 +25,7 @@ pub const TAKES: Takes = Takes {
     choices: false,
     json: true,
     follows: false,
-    units: UnitsNamed::None,
+    words: Words::None,
 };
 
 /// The schema of `--json`. A change to any key or its meaning is a new

@@ -256,3 +256,27 @@ fn an_up_cancelled_while_its_last_unit_is_made_ends_cancelled() {
     );
     assert_eq!(down.wait_with_output().unwrap().status.code(), Some(0));
 }
+
+#[test]
+fn set_and_unset_are_refused_while_another_change_runs() {
+    let machine = Machine::new();
+    let root = up_once(&machine);
+    assert_eq!(machine.at(&root, "set", &["label=first"]).code, 0);
+    let list = hold_the_list(&machine);
+    let up = starting_port(&root, &machine);
+    for (command, word) in [("set", "label=second"), ("unset", "label")] {
+        let refused = machine.at(&root, command, &[word]);
+        assert_eq!(refused.code, 4, "{}{}", refused.stdout, refused.stderr);
+        assert!(
+            refused.stderr.starts_with(&format!(
+                "tay {command}: another change is running: `tay up`, since 2"
+            )),
+            "{}",
+            refused.stderr
+        );
+    }
+    drop(list);
+    assert_eq!(up.finish().code, 0);
+    let listed = machine.at(&root, "set", &[]);
+    assert_eq!(listed.stdout, "set      label=first\n");
+}

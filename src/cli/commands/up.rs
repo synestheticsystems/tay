@@ -4,7 +4,7 @@
 //! can no longer become ready.
 
 use crate::cli::Exit;
-use crate::cli::args::{Args, Takes, UnitsNamed};
+use crate::cli::args::{Args, Takes, Words};
 use crate::cli::output::change::Printer;
 use crate::cli::stack;
 use crate::control::client::Client;
@@ -19,7 +19,7 @@ pub const TAKES: Takes = Takes {
     choices: true,
     json: true,
     follows: false,
-    units: UnitsNamed::Any,
+    words: Words::Any,
 };
 
 const COMMAND: &str = "tay up";
@@ -29,7 +29,7 @@ pub fn run(args: Args) -> Exit {
         Ok(root) => root,
         Err(message) => return no_stack(COMMAND, &message, args.json),
     };
-    let options = match options(&root, args.profile.clone(), &args.sets, &args.units) {
+    let options = match options(&root, args.profile.clone(), &args.sets, &args.words) {
         Ok(options) => options,
         Err(error) => return disk_problem(COMMAND, &error),
     };

@@ -1,7 +1,9 @@
 //! What the daemon answers under `/v1/`: who it is, each unit's state, and
 //! the changes, one at a time. A second `tay up` that asks for what the one
 //! under way asks for joins it; `tay down` is always accepted and cancels
-//! what is under way; any other change is refused while one runs.
+//! what is under way; any other change is refused while one runs. A change
+//! to what the environment remembers is made at once, while it holds the
+//! place of the change under way, so that none begins meanwhile.
 
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -12,12 +14,13 @@ use http_body_util::{BodyExt, Full};
 use hyper::body::{Bytes, Incoming};
 use hyper::{Method, Request, Response, StatusCode};
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 
-use super::Daemon;
 use super::change::{Change, Kind};
 use super::down::Down;
+use super::{Daemon, log};
 use crate::clock;
-use crate::control::protocol::{self, Problem, Refused, Status, UnitStatus, UpRequest};
+use crate::control::protocol::{self, Problem, Refused, Remember, Status, UnitStatus, UpRequest};
 use crate::engine;
 
 type Body = BoxBody<Bytes, Infallible>;
@@ -44,10 +47,16 @@ pub async fn route(
     Ok(match (request.method().clone(), path.as_str()) {
         (Method::GET, protocol::DAEMON) => json(StatusCode::OK, &daemon.about),
         (Method::GET, protocol::STATUS) => status(&daemon).await,
-        (Method::POST, protocol::UP) => match up_request(request).await {
+        (Method::POST, protocol::UP) => match asked::<UpRequest>(request, "tay up").await {
             Ok(asked) => up(&daemon, asked),
             Err(problem) => json(StatusCode::BAD_REQUEST, &problem),
         },
+        (Method::POST, protocol::REMEMBER) => {
+            match asked::<Remember>(request, "tay set or tay unset").await {
+                Ok(remember) => remembered(&daemon, &remember),
+                Err(problem) => json(StatusCode::BAD_REQUEST, &problem),
+            }
+        }
         (Method::POST, protocol::DOWN) => down(&daemon),
         (Method::POST, protocol::EXIT) => {
             daemon.exit("asked to by a tay of another version");
@@ -55,7 +64,12 @@ pub async fn route(
         }
         (
             _,
-            protocol::DAEMON | protocol::STATUS | protocol::UP | protocol::DOWN | protocol::EXIT,
+            protocol::DAEMON
+            | protocol::STATUS
+            | protocol::UP
+            | protocol::DOWN
+            | protocol::EXIT
+            | protocol::REMEMBER,
         ) => json(
             StatusCode::METHOD_NOT_ALLOWED,
             &Problem {
@@ -71,7 +85,11 @@ pub async fn route(
     })
 }
 
-async fn up_request(request: Request<Incoming>) -> Result<UpRequest, Problem> {
+/// What `command` asks for, as the body of its request says.
+async fn asked<T: DeserializeOwned>(
+    request: Request<Incoming>,
+    command: &str,
+) -> Result<T, Problem> {
     let body = request
         .into_body()
         .collect()
@@ -80,7 +98,7 @@ async fn up_request(request: Request<Incoming>) -> Result<UpRequest, Problem> {
             problem: format!("the request could not be read: {error}"),
         })?;
     serde_json::from_slice(&body.to_bytes()).map_err(|error| Problem {
-        problem: format!("the request is not what `tay up` asks: {error}"),
+        problem: format!("the request is not what `{command}` asks: {error}"),
     })
 }
 
@@ -110,6 +128,34 @@ fn up(daemon: &Arc<Daemon>, asked: UpRequest) -> Response<Body> {
     };
     drop(under_way);
     follow(change)
+}
+
+/// Changes what the environment remembers being asked for, unless another
+/// change is under way.
+fn remembered(daemon: &Arc<Daemon>, remember: &Remember) -> Response<Body> {
+    let under_way = daemon
+        .change
+        .lock()
+        .expect("the change under way is not poisoned");
+    if let Some(change) = under_way.as_ref() {
+        return json(
+            StatusCode::CONFLICT,
+            &Refused {
+                change: change.describe(),
+                since: change.since,
+            },
+        );
+    }
+    log(&format!("change: {}", remember.describe()));
+    match remember.apply(&daemon.environment.layout) {
+        Ok(()) => json(StatusCode::OK, &serde_json::json!({})),
+        Err(error) => json(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            &Problem {
+                problem: error.to_string(),
+            },
+        ),
+    }
 }
 
 fn down(daemon: &Arc<Daemon>) -> Response<Body> {

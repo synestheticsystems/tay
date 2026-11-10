@@ -8,12 +8,11 @@ use std::path::Path;
 use serde_json::json;
 
 use crate::cli::Exit;
-use crate::cli::args::{Args, Takes, UnitsNamed};
+use crate::cli::args::{Args, Takes, Words};
+use crate::cli::output::asked;
 use crate::cli::stack;
 use crate::control::client::{Client, ClientError};
-use crate::definition::read::{self, THIS_TAY};
-use crate::diagnostic::Diagnostics;
-use crate::diagnostic::source::Sources;
+use crate::definition::read::THIS_TAY;
 use crate::disk::{Asked, Environment, Identity, Intent, Layout};
 use crate::engine::State;
 use crate::module;
@@ -27,7 +26,7 @@ pub const TAKES: Takes = Takes {
     choices: false,
     json: true,
     follows: false,
-    units: UnitsNamed::AtMostOne,
+    words: Words::AtMostOneUnit,
 };
 
 /// The schema of `--json`. A change to any key or its meaning is a new
@@ -84,10 +83,10 @@ pub fn run(args: Args) -> Exit {
         Err(exit) => return exit,
     };
     report.asked = match Asked::read(&Layout::of(&root)) {
-        Ok(asked) => shown(asked, &root),
+        Ok(asked) => asked::shown(asked, &root),
         Err(error) => return disk_problem(COMMAND, &error),
     };
-    if let [unit] = args.units.as_slice() {
+    if let [unit] = args.words.as_slice() {
         report.units.retain(|line| line.unit == *unit);
         if report.units.is_empty() {
             return problem(
@@ -191,33 +190,6 @@ fn stopped(
         asked: Asked::default(),
         units,
     })
-}
-
-/// What was asked as `tay status` shows it: a `--set` of a setting the stack
-/// does not declare plain has its value hidden, since it may be a secret.
-fn shown(mut asked: Asked, root: &Path) -> Asked {
-    let mut sources = Sources::default();
-    let mut d = Diagnostics::default();
-    let stack = match read::read(root, &mut sources, &mut d) {
-        read::Outcome::Read { stack, .. } => Some(stack),
-        read::Outcome::TooOld(_) | read::Outcome::Unreadable => None,
-    };
-    for set in &mut asked.sets {
-        let Some((place, _)) = set.split_once('=') else {
-            continue;
-        };
-        let Some(setting) = place.strip_prefix("settings.") else {
-            continue;
-        };
-        let plain = stack
-            .as_ref()
-            .and_then(|stack| stack.setting(setting))
-            .is_some_and(|declared| !declared.secret);
-        if !plain {
-            *set = format!("{place}=<secret>");
-        }
-    }
-    asked
 }
 
 /// What was asked, as the plain `tay up` it now stands for.

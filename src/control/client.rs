@@ -16,7 +16,7 @@ use hyper::{Method, StatusCode};
 use rustix::io::Errno;
 use serde::de::DeserializeOwned;
 
-use crate::control::protocol::{self, Event, Problem, Refused, Status, UpRequest};
+use crate::control::protocol::{self, Event, Problem, Refused, Remember, Status, UpRequest};
 use crate::definition::read::{THIS_TAY, parse_version};
 use crate::disk::{DiskError, Environment, Lock, socket_fits};
 
@@ -140,6 +140,47 @@ impl Client {
                 return Err(ClientError::NoDaemon(environment.layout.daemon_log()));
             }
             tokio::time::sleep(RETRY).await;
+        }
+    }
+
+    /// Makes `change` to what `environment` remembers being asked for, as
+    /// one change: through its daemon, which refuses it while another
+    /// change runs, when one answers; and when none does, under the
+    /// daemon's lock, so that no daemon, and so no other change, begins
+    /// until it is made. No daemon is started for it.
+    pub async fn remember(environment: &Environment, change: &Remember) -> Result<(), ClientError> {
+        let until = Instant::now() + START;
+        loop {
+            if let Some(client) = Client::find(environment).await?
+                && let Some(client) = client.of_this_tay().await?
+            {
+                return client.ask_to_remember(change).await;
+            }
+            if let Some(_daemon) = Lock::try_take(&environment.layout.daemon_lock())? {
+                return Ok(change.apply(&environment.layout)?);
+            }
+            // A daemon that holds its lock and does not answer is starting
+            // or ending.
+            if Instant::now() >= until {
+                return Err(ClientError::NoDaemon(environment.layout.daemon_log()));
+            }
+            tokio::time::sleep(RETRY).await;
+        }
+    }
+
+    async fn ask_to_remember(&self, change: &Remember) -> Result<(), ClientError> {
+        let body = serde_json::to_vec(change).expect("a change serializes");
+        let (status, body) = http::ask(
+            &self.socket,
+            Method::POST,
+            protocol::REMEMBER,
+            body,
+            http::ANSWER,
+        )
+        .await?;
+        match status {
+            StatusCode::CONFLICT => Err(ClientError::Refused(parse(StatusCode::OK, &body)?)),
+            _ => parse::<serde_json::Value>(status, &body).map(|_| ()),
         }
     }
 

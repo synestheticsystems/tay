@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::disk::{self, Asked};
+use crate::disk::{self, Asked, DiskError, Layout};
 use crate::engine::{Decision, Left, State};
 use crate::plan::Options;
 
@@ -23,6 +23,9 @@ pub const STATUS: &str = "/v1/status";
 /// `POST`: the daemon exits and leaves the stack as it is, for a command of
 /// another version that starts its own. It answers `{}` first.
 pub const EXIT: &str = "/v1/exit";
+/// `POST` a [`Remember`]: changes what the environment remembers being
+/// asked for, and touches no unit. It answers `{}`.
+pub const REMEMBER: &str = "/v1/remember";
 
 /// Who a daemon is.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -59,6 +62,45 @@ impl UpRequest {
             home: self.home.clone(),
             shared_folders: disk::shared_folders(),
         }
+    }
+}
+
+/// A change to what the environment remembers being asked for, which no
+/// unit sees until the next `tay up`. It has no `Debug`, since a `tay set`
+/// may give a secret setting its value.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "change", rename_all = "snake_case")]
+pub enum Remember {
+    /// `tay set`: each `PLACE=VALUE` replaces what is remembered for its
+    /// place, as a `--set` of `tay up` does.
+    Set { sets: Vec<String> },
+    /// `tay unset`: what is remembered for each place is forgotten.
+    Unset { places: Vec<String> },
+}
+
+impl Remember {
+    /// Makes the change to what the environment at `layout` remembers.
+    pub fn apply(&self, layout: &Layout) -> Result<(), DiskError> {
+        let remembered = Asked::read(layout)?;
+        let asked = match self {
+            Remember::Set { sets } => remembered.with(None, sets, &[]),
+            Remember::Unset { places } => remembered.without(places),
+        };
+        asked.write(layout)
+    }
+
+    /// The change as the command that asked for it is written, with no
+    /// value, which may be a secret.
+    pub fn describe(&self) -> String {
+        let words: Vec<String> = match self {
+            Remember::Set { sets } => std::iter::once("tay set".to_string())
+                .chain(sets.iter().map(|set| format!("{}=…", Asked::place(set))))
+                .collect(),
+            Remember::Unset { places } => std::iter::once("tay unset".to_string())
+                .chain(places.iter().cloned())
+                .collect(),
+        };
+        words.join(" ")
     }
 }
 

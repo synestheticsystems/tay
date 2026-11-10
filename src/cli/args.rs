@@ -1,5 +1,5 @@
-//! Reading a command's arguments: the options it takes, and the units it
-//! may name.
+//! Reading a command's arguments: the options it takes, and the words that
+//! are not options: the units it may name, or what else it takes.
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -15,13 +15,14 @@ pub struct Takes {
     pub json: bool,
     /// Whether it takes `--since` and `--follow`, as it reads a log.
     pub follows: bool,
-    /// How many units it may name.
-    pub units: UnitsNamed,
+    /// How many words it takes that are not options.
+    pub words: Words,
 }
 
-pub enum UnitsNamed {
+pub enum Words {
     None,
-    AtMostOne,
+    /// At most one, the unit it names.
+    AtMostOneUnit,
     Any,
 }
 
@@ -32,7 +33,9 @@ pub struct Args {
     pub profile: Option<String>,
     pub sets: Vec<String>,
     pub json: bool,
-    pub units: Vec<String>,
+    /// The words that are not options: the units a command names, or what
+    /// else it takes, as the places `tay set` sets.
+    pub words: Vec<String>,
     /// How far back to read a log, as `10m`.
     pub since: Option<String>,
     pub follow: bool,
@@ -76,10 +79,10 @@ impl Takes {
                     parsed.since = Some(text(value("--since")?, "--since")?);
                 }
                 "--follow" if self.follows && inline.is_none() => parsed.follow = true,
-                unit if !unit.starts_with('-') && self.takes_another_unit(&parsed) => {
-                    parsed.units.push(unit.to_string());
+                word if !word.starts_with('-') && self.takes_another_word(&parsed) => {
+                    parsed.words.push(word.to_string());
                 }
-                unit if !unit.starts_with('-') && matches!(self.units, UnitsNamed::AtMostOne) => {
+                unit if !unit.starts_with('-') && matches!(self.words, Words::AtMostOneUnit) => {
                     return Err(format!(
                         "`{command}` names at most one unit; `{unit}` is a second"
                     ));
@@ -90,11 +93,11 @@ impl Takes {
         Ok(Some(parsed))
     }
 
-    fn takes_another_unit(&self, parsed: &Args) -> bool {
-        match self.units {
-            UnitsNamed::None => false,
-            UnitsNamed::AtMostOne => parsed.units.is_empty(),
-            UnitsNamed::Any => true,
+    fn takes_another_word(&self, parsed: &Args) -> bool {
+        match self.words {
+            Words::None => false,
+            Words::AtMostOneUnit => parsed.words.is_empty(),
+            Words::Any => true,
         }
     }
 }

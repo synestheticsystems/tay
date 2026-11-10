@@ -51,8 +51,11 @@ impl Asked {
         if profile.is_some() {
             self.profile = profile;
         }
-        self.sets
-            .retain(|kept| !sets.iter().any(|set| place(set) == place(kept)));
+        self.sets.retain(|kept| {
+            !sets
+                .iter()
+                .any(|set| Asked::place(set) == Asked::place(kept))
+        });
         self.sets.extend(sets.iter().cloned());
         if !units.is_empty() {
             self.units = units.to_vec();
@@ -60,14 +63,30 @@ impl Asked {
         self
     }
 
+    /// What is asked once the `--set`s for `places` are forgotten, so that
+    /// what the profile or the stack gives there holds again.
+    pub fn without(mut self, places: &[String]) -> Asked {
+        self.sets.retain(|kept| {
+            !places
+                .iter()
+                .any(|forgotten| Asked::place(kept) == forgotten)
+        });
+        self
+    }
+
+    /// Whether a `--set` for `place` is remembered.
+    pub fn remembers(&self, wanted: &str) -> bool {
+        self.sets.iter().any(|kept| Asked::place(kept) == wanted)
+    }
+
     pub fn is_empty(&self) -> bool {
         *self == Asked::default()
     }
-}
 
-/// The place a `--set PLACE=VALUE` sets.
-pub fn place(set: &str) -> &str {
-    set.split_once('=').map_or(set, |(place, _)| place)
+    /// The place a `--set PLACE=VALUE` sets.
+    pub fn place(set: &str) -> &str {
+        set.split_once('=').map_or(set, |(place, _)| place)
+    }
 }
 
 #[cfg(test)]
@@ -96,11 +115,19 @@ mod tests {
             strings(&["up_add=tools", "settings.b=2", "settings.a=3"])
         );
         assert_eq!(asked.units, strings(&["web"]));
-        let asked = remembered.with(Some("ci".to_string()), &[], &strings(&["api"]));
+        let asked = remembered
+            .clone()
+            .with(Some("ci".to_string()), &[], &strings(&["api"]));
         assert_eq!(
             (asked.profile.as_deref(), asked.units),
             (Some("ci"), strings(&["api"]))
         );
+        // Forgetting a place forgets its `--set` alone.
+        assert!(remembered.remembers("up_add"));
+        let asked = remembered.without(&strings(&["up_add", "settings.c"]));
+        assert_eq!(asked.sets, strings(&["settings.a=1", "settings.b=2"]));
+        assert!(!asked.remembers("up_add"));
+        assert_eq!(asked.profile.as_deref(), Some("dev"));
     }
 
     #[test]

@@ -4,7 +4,9 @@ pub mod down;
 pub mod logs;
 pub mod ls;
 pub mod plan;
+pub mod set;
 pub mod status;
+pub mod unset;
 pub mod up;
 
 use std::future::Future;

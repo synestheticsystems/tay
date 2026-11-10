@@ -23,7 +23,7 @@ Four rules run through all of it.
 | `tay ls` | The environments on this machine | yes |
 | `tay restart UNIT...` | Stops the units and starts them again | no |
 | `tay run ACTION [NAME=VALUE...]` | Runs an action, with its arguments | no |
-| `tay set PLACE=VALUE...`, `tay unset PLACE...` | Changes what the environment remembers being asked for | no |
+| `tay set PLACE=VALUE...`, `tay unset PLACE...` | Changes what the environment remembers being asked for | yes |
 | `tay wipe UNIT... --yes`, `tay wipe --all --yes` | Removes what the units keep, or everything the environment keeps | no |
 
 Every command takes `--root FOLDER`, and `--json` where it prints something a program would read. No command ever reads from the terminal. Without a terminal there is no colour, and nothing follows for ever unless asked to.

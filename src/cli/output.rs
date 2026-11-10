@@ -1,7 +1,8 @@
-//! Printing a plan, or the errors that stop one, and the events of a
-//! change. Each printer of a plan is a view over it; what both say alike is
-//! here.
+//! Printing a plan, or the errors that stop one, the events of a change,
+//! and what the environment remembers being asked for. Each printer of a
+//! plan is a view over it; what both say alike is here.
 
+pub mod asked;
 pub mod change;
 pub mod json;
 pub mod text;

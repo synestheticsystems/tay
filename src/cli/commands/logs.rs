@@ -11,7 +11,7 @@
 use std::time::Duration;
 
 use crate::cli::Exit;
-use crate::cli::args::{Args, Takes, UnitsNamed};
+use crate::cli::args::{Args, Takes, Words};
 use crate::cli::stack;
 use crate::clock;
 use crate::disk::unit_log::{self, Following, Line, UnitLog};
@@ -27,7 +27,7 @@ pub const TAKES: Takes = Takes {
     choices: false,
     json: false,
     follows: true,
-    units: UnitsNamed::Any,
+    words: Words::Any,
 };
 
 const COMMAND: &str = "tay logs";
@@ -36,7 +36,7 @@ const COMMAND: &str = "tay logs";
 const FOLLOW: Duration = Duration::from_millis(250);
 
 pub fn run(args: Args) -> Exit {
-    if let Some(why) = args.units.iter().find_map(|unit| names::name_problem(unit)) {
+    if let Some(why) = args.words.iter().find_map(|unit| names::name_problem(unit)) {
         return problem(COMMAND, Exit::Errors, &why);
     }
     let since = match &args.since {
@@ -62,7 +62,7 @@ pub fn run(args: Args) -> Exit {
         Err(message) => return problem(COMMAND, Exit::Errors, &message),
     };
     let layout = Layout::of(&root);
-    for unit in &args.units {
+    for unit in &args.words {
         let folder = layout.unit_log(unit);
         if !folder.exists() {
             return problem(
@@ -77,13 +77,13 @@ pub fn run(args: Args) -> Exit {
     }
     let mut reading = Reading {
         layout,
-        every_unit: args.units.is_empty(),
-        naming: args.units.len() != 1,
+        every_unit: args.words.is_empty(),
+        naming: args.words.len() != 1,
         since,
         width: 0,
         following: Vec::new(),
     };
-    let first = match reading.begin(&args.units) {
+    let first = match reading.begin(&args.words) {
         Ok(lines) => lines,
         Err(error) => return disk_problem(COMMAND, &error),
     };

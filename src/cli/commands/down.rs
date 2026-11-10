@@ -4,7 +4,7 @@
 //! started to find what runs.
 
 use crate::cli::Exit;
-use crate::cli::args::{Args, Takes, UnitsNamed};
+use crate::cli::args::{Args, Takes, Words};
 use crate::cli::output::change::Printer;
 use crate::cli::stack;
 use crate::control::client::Client;
@@ -20,7 +20,7 @@ pub const TAKES: Takes = Takes {
     choices: false,
     json: true,
     follows: false,
-    units: UnitsNamed::None,
+    words: Words::None,
 };
 
 const COMMAND: &str = "tay down";

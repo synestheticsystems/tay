@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::cli::Exit;
-use crate::cli::args::{Args, Takes, UnitsNamed};
+use crate::cli::args::{Args, Takes, Words};
 use crate::cli::output::{json, text};
 use crate::cli::stack;
 use crate::diagnostic::Diagnostics;
@@ -19,7 +19,7 @@ pub const TAKES: Takes = Takes {
     choices: true,
     json: true,
     follows: false,
-    units: UnitsNamed::None,
+    words: Words::None,
 };
 
 pub fn run(args: Args) -> Exit {

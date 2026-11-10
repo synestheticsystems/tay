@@ -1,5 +1,6 @@
 //! The command line: `tay plan`, `tay up`, `tay down`, `tay status`,
-//! `tay logs`, `tay ls`, `tay --version` and `tay --help`; `tay daemon`,
+//! `tay logs`, `tay ls`, `tay set`, `tay unset`, `tay --version` and
+//! `tay --help`; `tay daemon`,
 //! which a command runs to start an environment's daemon; and `tay keep`,
 //! which the daemon runs to keep one program of a unit.
 
@@ -16,8 +17,8 @@ use crate::definition::read::THIS_TAY;
 use crate::keeper;
 use crate::print::{err, out};
 
-use args::{Takes, UnitsNamed};
-use commands::{down, logs, ls, plan, status, up};
+use args::{Takes, Words};
+use commands::{down, logs, ls, plan, set, status, unset, up};
 
 /// How a command ends, as its exit code says it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -57,6 +58,8 @@ Usage:
   tay status [UNIT] [--root FOLDER] [--json]
   tay logs [UNIT...] [--root FOLDER] [--since TIME] [--follow]
   tay ls [--root FOLDER] [--json]
+  tay set [PLACE=VALUE...] [--root FOLDER] [--json]
+  tay unset PLACE... [--root FOLDER] [--json]
   tay --version
   tay --help
 
@@ -85,8 +88,16 @@ the environment remembers being asked for. tay logs prints what a unit wrote,
 each line with its time, and tay's notes of where each attempt starts and how
 it ended; with several units named, or none, which is every unit that has
 written anything, it prints the lines of all in the order of their times, each
-naming its unit. tay ls prints the environments tay knows on this machine, and marks
-with * the one it is run in.
+naming its unit. tay ls prints the environments tay knows on this machine, and
+marks with * the one it is run in.
+
+tay set changes what the environment remembers being asked for, in the places
+--set takes, and touches no unit until the next tay up: tay up --set is the
+same thing followed by up. Each is checked as tay up --set checks it, and
+nothing is remembered of a stack that does not plan with it. tay unset forgets
+what is remembered for each place, so that the profile's or the stack's value
+holds again. Both list what is remembered afterwards, as tay set with nothing
+after it does; the value of a secret setting is never printed.
 
 Options:
   --root FOLDER       look for tay.yaml from FOLDER instead of the current one
@@ -98,7 +109,8 @@ Options:
                       written with commas
   --json              print for programs, in schema 1: the plan, each event of
                       up and down as a JSON object on a line, the units of
-                      status, and the environments of ls
+                      status, the environments of ls, and what set and unset
+                      list
   --since TIME        of logs: only what was written in the last TIME, a
                       whole number followed by s, m or h, such as 10m
   --follow            of logs: go on printing what the units write
@@ -116,7 +128,7 @@ const DAEMON: Takes = Takes {
     choices: false,
     json: false,
     follows: false,
-    units: UnitsNamed::None,
+    words: Words::None,
 };
 
 pub fn run(args: impl IntoIterator<Item = OsString>) -> ExitCode {
@@ -141,6 +153,8 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> ExitCode {
         Some("ls") => (&ls::TAKES, ls::run),
         Some("daemon") => (&DAEMON, run_daemon),
         Some("logs") => (&logs::TAKES, logs::run),
+        Some("set") => (&set::TAKES, set::run),
+        Some("unset") => (&unset::TAKES, unset::run),
         Some("keep") => return keeper::keep(args),
         Some(other) if other.starts_with('-') => {
             err(&format!(
