@@ -70,6 +70,8 @@ Every unit has the same fields, whatever it uses.
 | `gives` | Named values other units may use |
 | `action`, `args` | `true` for a unit that runs only when asked for by name, and the arguments it may be asked with |
 
+`ready`, `restart` and `watch` belong to units that run. On a unit that is made (a `port`, a `file`, a `secret`) each is an error: such a unit is ready when it exists, and nothing would ever run the check.
+
 A unit has exactly one of `uses`, `run` or `from`, or none of them. A unit with none is a **group**: it may have only `doc` and `needs`, and asking for it asks for everything it needs.
 
 ```yaml
@@ -234,8 +236,8 @@ Gives `number`.
 |---|---|
 | `content` | The text, with references. Exactly one of `content` and `template` |
 | `template` | A file whose text is the content; references in it are filled in. `$${` writes a literal `${` |
-| `name` | The file's name. Default: the unit's name |
-| `folder` | A named folder to write it in. File units that name the same folder write side by side. Default: a folder named after the unit |
+| `name` | The file's name, written out: no reference. Default: the unit's name |
+| `folder` | A named folder to write it in, written out: no reference. File units that name the same folder write side by side. Default: a folder named after the unit |
 | `mode` | Permissions, as a string such as `"0600"`. Default `"0644"`, or `"0600"` if the content uses a secret. A `mode` that is written wins |
 | `overwrite` | `false` for a file another program rewrites: tay writes it once and then leaves it alone. Default `true` |
 
@@ -246,7 +248,7 @@ The file is written inside the environment's state folder, at `files/<folder>/<n
 | Setting | Meaning |
 |---|---|
 | `kind` | `password`, `bytes` or `keypair` |
-| `length` | For `password`: how many characters, default 32. For `bytes`: how many bytes, default 32 |
+| `length` | For `password`: how many characters, default 32. For `bytes`: how many bytes, default 32. At most 65536 |
 | `encoding` | For `bytes`: `hex` (the default), `base64` (padded) or `base64url` (not padded) |
 | `algorithm` | For `keypair`, and required there: `ed25519` or `rsa-2048` |
 
@@ -284,7 +286,7 @@ A unit gives values; other units use them by reference. A reference is `${...}` 
 | `${environment.label_suffix}`, `${environment.label_prefix}` | `-label` and `label-`, or nothing when the label is empty |
 | `${environment.root}`, `${environment.state}` | The stack's root folder, and this environment's state folder, which is `.tay/state` under the root |
 | `${environment.logs}` | The folder tay writes logs in, one folder per unit. It is `.tay/logs` under the root |
-| `${environment.shared}` | A folder shared by all of one person's environments of this stack, for what is costly to fetch and safe to share. It is `~/.local/share/tay/<stack>` |
+| `${environment.shared}` | A folder shared by all of one person's environments of this stack, for what is costly to fetch and safe to share. It is `~/.local/share/tay/<stack>`, or under `XDG_DATA_HOME` where that is set |
 | `${environment.network}` | The name of the environment's Docker network |
 | `${environment.profile}` | The profile in use |
 
@@ -392,7 +394,7 @@ What comes up, which way each unit runs, and the values of settings are choices.
 1. the stack's defaults (`up`, `run` and the defaults of `settings` in `tay.yaml`);
 2. the profile (`stack/profiles/<name>.yaml`);
 3. this person's own file (`~/.config/tay/<stack>.yaml`), read only when the profile is not a production one;
-4. this environment's file (`.tay/choices.yaml`), and then each `--set` on the command line, in the order written.
+4. this environment's file (`.tay/choices.yaml`), then what the environment remembers being asked for by earlier `tay up`s, and then each `--set` on the command line, in the order written.
 
 ```yaml
 # stack/profiles/dev.yaml
@@ -445,7 +447,7 @@ A value is secret if it comes from a `secret` unit (a key pair's `public` except
 
 `tay plan [--root FOLDER] [--profile NAME] [--set PLACE=VALUE]... [--json]`
 
-It reads everything above, applies the choices, and prints the plan: each unit that would come up, in the order it could start, with the module it uses (and which way), where it runs, what it needs and why (a need it wrote, a command's `in`, or a value it uses), what it waits for with `after`, how it is known to be ready, the host ports it opens and what opens each, and the values it gives. Of `.tay/` it reads `choices.yaml` and nothing else, and it never writes.
+It reads everything above, applies the choices, and prints the plan: each unit that would come up, in the order it could start, with the module it uses (and which way), where it runs, what it needs and why (a need it wrote, a command's `in`, or a value it uses), what it waits for with `after`, how it is known to be ready, the host ports it opens and what opens each, and the values it gives. Of `.tay/` it reads `choices.yaml` and what the environment was last asked for (see `engine.md`), and it never writes.
 
 - `tay plan` allocates nothing and runs nothing, so what only allocating or running can tell prints as a placeholder: a port as `<port: unit>`, a produced value as `<produced: unit.name>`, a key pair's public half as `<generated: unit.public>`, an action's argument as `<arg: name>`, and `<environment.id>`, `<environment.network>` and `<host.listen>`. A secret prints as `<secret>`. A built file prints as its whole path. All but the produced values and the built files still count as known before start.
 - Errors that can be judged only on a sound reading (an unset setting, a circle, an address with no view, a production refusal) are reported once the reading itself has no errors.

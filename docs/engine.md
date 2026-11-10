@@ -27,11 +27,13 @@ Every command takes `--root FOLDER`, and `--json` where it prints something a pr
 ### `tay up`
 
 1. Reads and plans exactly as `tay plan` does. Errors in the definitions stop it here, with nothing started.
-2. Starts this environment's daemon if none is running, and hands it the plan.
+2. Starts this environment's daemon if none is running, and hands it what was asked for. The daemon plans again from the same definitions, so no secret and no module's settings travel between the two.
 3. Prints each change of state as it happens, one line per change.
-4. Returns when every unit asked for is `ready`, or when one of them can no longer become ready.
+4. Returns when every unit asked for is `ready`, or when one of them can no longer become ready. In the second case the daemon goes on bringing up whatever can still come up; `tay status` shows where that ends.
 
 With no unit named it brings up what the choices list under `up`. With units named it brings up those and what they need, and leaves everything else as it is.
+
+**What an environment was asked for stays asked.** The profile, each `--set` and the units named on `tay up` are remembered by the environment, so a later plain `tay up`, a `tay status`, a `tay plan` and a daemon started afresh all see the same stack. A new `--set` for the same place replaces the remembered one, and `--profile` replaces the remembered profile. `tay status` lists what is remembered.
 
 When a unit fails, `tay up` names it, gives the reason and the last lines it wrote, and names every unit that was waiting on it. A unit that failed an attempt and then became ready counts as ready, and the earlier attempts are shown.
 
@@ -77,13 +79,13 @@ One daemon per environment. The first command that needs it starts it, detached 
 - **It owns the changes.** It starts units in order, watches them, applies restart policies, runs the checks and writes the records.
 - **It listens on a Unix socket** and speaks HTTP with JSON bodies, under `/v1/`. It opens no TCP port. Who may control an environment is decided by the socket's file permissions alone. The socket is in a short folder of its own named by the environment's id, because a socket's path is limited to about a hundred bytes.
 - **Its lifetime is a lock** on `.tay/daemon.lock`, held for as long as it runs and released by the system if it dies. A socket file whose lock is free is stale and is replaced.
-- **One change at a time.** A second `up` while one runs joins it and gets the same result. `down` is always accepted and cancels what is running, so there is always a way to stop. Any other change is refused with exit code 4.
-- **Versions.** A command and a daemon of different versions do not talk past each other: the command asks the older daemon to exit, which leaves the stack running, and starts its own.
-- **`tay down`** stops every unit, in the reverse of the order they started in, then the daemon exits.
+- **One change at a time.** A second `up` that asks for exactly what the running one asks for joins it and gets the same result. `down` is always accepted and cancels what is running, so there is always a way to stop. Any other change, a different `up` included, is refused with exit code 4.
+- **Versions.** A command and a daemon of different versions do not talk past each other: the command asks an older daemon to exit, which leaves the stack running, and starts its own. A command older than the daemon is refused with exit code 5 and changes nothing.
+- **`tay down`** stops every unit, in the reverse of the order they started in, then the daemon exits. What made units left on disk stays: ports, secrets and files are an environment's own and are kept.
 - **If the daemon dies,** nothing in the stack stops. The next command starts a new daemon, which adopts what is running (see "Finding units again").
 - **If the environment's folder disappears** while the stack runs, the daemon stops everything it started and exits.
 
-It keeps one fact about intent on disk: whether the environment is meant to be up. `tay up` sets it and `tay down` clears it.
+It keeps two facts about intent on disk: whether the environment is meant to be up, which `tay up` sets and `tay down` clears, and what it was last asked for. The second is readable by this account only, because a `--set` may carry a secret setting's value.
 
 ## What is kept on disk
 
@@ -96,6 +98,7 @@ It keeps one fact about intent on disk: whether the environment is meant to be u
   daemon.lock             held while the daemon runs
   state/
     intent                up or down
+    asked                 the profile, the `--set`s and the units last asked for
     ports.json            the port numbers this environment keeps
     secrets/              one file per secret, readable by this account only
     files/<folder>/<name> what `file` units write
