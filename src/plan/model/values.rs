@@ -1,6 +1,7 @@
 //! Values as the plan prints them.
 
-use crate::plan::resolve::value::{Exact, Resolved};
+use crate::plan::resolve::value::Resolved;
+use crate::value::Exact;
 
 #[derive(Debug)]
 pub struct GivenLine {
@@ -31,8 +32,8 @@ pub struct Shown {
 impl Shown {
     pub fn of(value: &Resolved) -> Shown {
         Shown {
-            text: value.shown(),
-            exact: value.exact(),
+            text: value.value.shown(),
+            exact: value.value.exact(),
         }
     }
 

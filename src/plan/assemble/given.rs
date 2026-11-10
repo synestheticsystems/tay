@@ -106,7 +106,7 @@ impl Planner<'_> {
                 .as_ref()
                 .map(|v| v.producers.keys().cloned().collect())
                 .unwrap_or_default(),
-            secret: value.as_ref().is_some_and(Resolved::is_secret),
+            secret: value.as_ref().is_some_and(|value| value.value.is_secret()),
             from_host,
             from_containers,
         })

@@ -5,7 +5,8 @@
 use std::path::{Component, Path, PathBuf};
 
 use crate::diagnostic::source::Loc;
-use crate::plan::resolve::value::{Bit, Resolved, Shape};
+use crate::plan::resolve::value::Resolved;
+use crate::value::{Bit, Value};
 
 use super::Resolver;
 
@@ -13,7 +14,7 @@ impl Resolver<'_> {
     /// The whole path a value written at `written` names. A value whose
     /// start is not known before start (a produced path) is left as it is.
     pub fn host_path(&self, mut value: Resolved, written: Loc) -> Resolved {
-        let Shape::Text(bits) = &mut value.shape else {
+        let Value::Text(bits) = &mut value.value else {
             return value;
         };
         let Some(Bit::Text(first)) = bits.first_mut() else {

@@ -257,7 +257,7 @@ impl<'s> Planner<'s> {
                 let value = self.use_value(user, watched, want, WATCHED, uses)?;
                 // A production profile refuses any watch, so where it points does not matter there.
                 if !self.production
-                    && let Some(path) = value.exact_text()
+                    && let Some(path) = value.value.exact_text()
                     && !std::path::Path::new(&path).exists()
                 {
                     self.resolver.d.error(

@@ -1,6 +1,7 @@
 //! What a value must be where it is used, checked against what is known of it.
 
-use crate::syntax::expr::{Expr, ExprKind};
+use crate::syntax::expr::{Expr, ExprKind, Type};
+use crate::value::Value;
 
 use super::shape::Place;
 
@@ -64,6 +65,22 @@ impl Form {
             ExprKind::Bool(_) => Some(Form::Bool),
             ExprKind::Text(_) => expr.literal_text().map(|text| Form::Text(Some(text))),
             ExprKind::Ref(_) => None,
+        }
+    }
+
+    /// The form of a resolved value. A hole's exact form is not known, even
+    /// when the hole is a secret whose value is.
+    pub fn of(value: &Value) -> Form {
+        match value {
+            Value::Text(_) => Form::Text(value.exact_text()),
+            Value::Number(n) => Form::Number(Some(*n)),
+            Value::Bool(_) => Form::Bool,
+            Value::Hole(hole) => match hole.ty() {
+                Some(Type::Text) => Form::Text(None),
+                Some(Type::Number) => Form::Number(None),
+                Some(Type::Bool) => Form::Bool,
+                None => Form::Unknown,
+            },
         }
     }
 

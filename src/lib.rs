@@ -10,3 +10,4 @@ mod diagnostic;
 mod module;
 mod plan;
 mod syntax;
+mod value;

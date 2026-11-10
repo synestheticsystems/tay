@@ -2,8 +2,9 @@
 
 use crate::definition::GiveValue;
 use crate::module::{ModuleValue, UnitKind};
-use crate::plan::resolve::value::{Hole, Resolved, Shape};
-use crate::syntax::expr::{Part, Reference, Type, UnitRef};
+use crate::plan::resolve::value::Resolved;
+use crate::syntax::expr::{Part, Reference, UnitRef};
+use crate::value::{Hole, Value};
 
 use super::{Asker, Chosen, Fail, Key, Res, Resolver, Scope};
 
@@ -90,41 +91,25 @@ impl Resolver<'_> {
                     this.endpoint(owner, endpoint, part, asker, reference)
                 })
             }
-            GiveValue::Module(ModuleValue::Port) => Ok(Resolved::known(Shape::Opaque {
-                ty: Some(Type::Number),
-                hole: Hole::Port(unit.name.name.clone()),
-            })),
+            GiveValue::Module(ModuleValue::Port) => Ok(Resolved::known(Value::Hole(Hole::Port {
+                unit: unit.name.name.clone(),
+            }))),
             GiveValue::Module(ModuleValue::Generated { secret }) => {
-                let hole = match secret {
-                    true => Hole::Secret,
-                    false => Hole::Generated {
-                        unit: unit.name.name.clone(),
-                        name: name.to_string(),
-                    },
-                };
-                let mut value = Resolved::known(Shape::Opaque {
-                    ty: Some(Type::Text),
-                    hole,
-                });
-                if *secret {
-                    value.secrets.insert(format!("{}.{name}", unit.name.name));
-                }
-                Ok(value)
+                Ok(Resolved::known(Value::Hole(Hole::Generated {
+                    unit: unit.name.name.clone(),
+                    name: name.to_string(),
+                    secret: *secret,
+                })))
             }
             GiveValue::Module(ModuleValue::Produced { secret }) => {
-                let hole = match secret {
-                    true => Hole::Secret,
-                    false => Hole::Produced {
-                        unit: unit.name.name.clone(),
-                        name: name.to_string(),
-                    },
-                };
-                let mut value = Resolved::known(Shape::Opaque { ty: None, hole });
-                let used = format!("{}.{name}", unit.name.name);
-                if *secret {
-                    value.secrets.insert(used.clone());
-                }
-                value.producers.insert(unit.name.name.clone(), used);
+                let mut value = Resolved::known(Value::Hole(Hole::Produced {
+                    unit: unit.name.name.clone(),
+                    name: name.to_string(),
+                    secret: *secret,
+                }));
+                value
+                    .producers
+                    .insert(unit.name.name.clone(), format!("{}.{name}", unit.name.name));
                 Ok(value)
             }
         }?;

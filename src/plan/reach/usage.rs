@@ -6,7 +6,7 @@ use std::path::Path;
 
 use crate::diagnostic::Diagnostic;
 use crate::diagnostic::source::Loc;
-use crate::module::{PathUse, Place, Want};
+use crate::module::{Form, PathUse, Place, Want};
 use crate::syntax::expr::{self, Expr};
 
 use super::visit::NeedEdge;
@@ -121,7 +121,7 @@ impl Planner<'_> {
                 },
             });
         }
-        if let Some(problem) = want.problem(&value.form()) {
+        if let Some(problem) = want.problem(&Form::of(&value.value)) {
             let what = match &expr.kind {
                 expr::ExprKind::Ref(reference) => format!("`{}`", reference.written()),
                 _ => "this".to_string(),
@@ -139,7 +139,7 @@ impl Planner<'_> {
                     );
                     return None;
                 }
-                let path = value.exact_text()?;
+                let path = value.value.exact_text()?;
                 self.use_template_file(user, &path, expr.loc, content, uses)?;
             }
             Want::Path(PathUse::Mounted) => self.check_mount_source(&value, expr.loc),
@@ -151,21 +151,23 @@ impl Planner<'_> {
     fn check_place(&mut self, value: &Resolved, place: Place, loc: Loc) {
         let secrets = || {
             value
-                .secrets
+                .value
+                .secrets()
                 .iter()
                 .map(|s| format!("`{s}`"))
                 .collect::<Vec<_>>()
                 .join(", ")
         };
+        let secret = value.value.is_secret();
         match place {
-            Place::Readable(what) if value.is_secret() => self.resolver.d.error(
+            Place::Readable(what) if secret => self.resolver.d.error(
                 loc,
                 format!(
                     "a secret ({}) cannot go in {what}: other programs can read it",
                     secrets()
                 ),
             ),
-            Place::SecretEnv if !value.is_secret() => self.resolver.d.error(
+            Place::SecretEnv if !secret => self.resolver.d.error(
                 loc,
                 "a value in `secret_env` must have a secret in it, and this one has none",
             ),
@@ -180,7 +182,7 @@ impl Planner<'_> {
         if !value.producers.is_empty() {
             return;
         }
-        let Some(path) = value.exact_text() else {
+        let Some(path) = value.value.exact_text() else {
             return;
         };
         if self.resolver.in_own_folders(Path::new(&path)) || Path::new(&path).exists() {

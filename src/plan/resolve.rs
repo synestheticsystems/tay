@@ -23,11 +23,12 @@ use crate::definition::{Body, Mechanism, Stack};
 use crate::diagnostic::source::Loc;
 use crate::diagnostic::{Diagnostic, Diagnostics};
 use crate::module::{Runs, UnitKind};
-use crate::syntax::expr::{Expr, ExprKind, Part, Piece, Reference, Target, Type, View};
+use crate::syntax::expr::{Expr, ExprKind, Part, Piece, Reference, Target, View};
 use crate::syntax::names::NameAt;
 
 use super::choices::{self, Layered};
-use value::{Bit, Hole, Resolved, Shape};
+use crate::value::{Bit, Hole, Value};
+use value::Resolved;
 
 /// Who uses a value, which decides the view of an address.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -212,8 +213,8 @@ impl<'s> Resolver<'s> {
 
     pub fn resolve(&mut self, expr: &Expr, scope: Scope) -> Res {
         match &expr.kind {
-            ExprKind::Number(n) => Ok(Resolved::known(Shape::Number(*n))),
-            ExprKind::Bool(b) => Ok(Resolved::known(Shape::Bool(*b))),
+            ExprKind::Number(n) => Ok(Resolved::known(Value::Number(*n))),
+            ExprKind::Bool(b) => Ok(Resolved::known(Value::Bool(*b))),
             ExprKind::Ref(reference) => self.reference(reference, scope),
             ExprKind::Text(pieces) => self.text(pieces, scope),
         }
@@ -221,7 +222,7 @@ impl<'s> Resolver<'s> {
 
     /// Resolves a document's pieces (a template file) as text.
     pub fn text(&mut self, pieces: &[Piece], scope: Scope) -> Res {
-        let mut text = Resolved::known(Shape::Text(Vec::new()));
+        let mut text = Resolved::known(Value::Text(Vec::new()));
         let mut bits = Vec::new();
         // Every piece is resolved, so that every error in the text is found.
         let mut reported = false;
@@ -233,7 +234,7 @@ impl<'s> Resolver<'s> {
                     Ok(value) => {
                         text.absorb(&value);
                         text.begins_with_setting |= index == 0 && value.begins_with_setting;
-                        bits.extend(value.bits());
+                        bits.extend(value.value.bits());
                     }
                     Err(Fail::Reported) => reported = true,
                     Err(Fail::View(problems)) => views.extend(problems),
@@ -246,7 +247,7 @@ impl<'s> Resolver<'s> {
         if reported {
             return Err(Fail::Reported);
         }
-        text.shape = Shape::Text(bits);
+        text.value = Value::Text(bits);
         Ok(text)
     }
 
@@ -254,10 +255,7 @@ impl<'s> Resolver<'s> {
         match &reference.target {
             Target::Setting(name) => self.setting(name, reference.loc),
             Target::Environment(field) => self.environment_field(*field, reference),
-            Target::HostListen => Ok(Resolved::known(Shape::Opaque {
-                ty: Some(Type::Text),
-                hole: Hole::HostListen,
-            })),
+            Target::HostListen => Ok(Resolved::known(Value::Hole(Hole::HostListen))),
             Target::Arg(name) => {
                 // An action's arguments were checked against its declaration
                 // while reading, in the unit the reference is written in.
@@ -266,10 +264,10 @@ impl<'s> Resolver<'s> {
                     .and_then(|unit| self.stack.units[unit].action.as_ref())
                     .and_then(|action| action.args.iter().find(|arg| arg.name.name == *name))
                     .and_then(|arg| arg.ty);
-                Ok(Resolved::known(Shape::Opaque {
+                Ok(Resolved::known(Value::Hole(Hole::Arg {
+                    name: name.clone(),
                     ty,
-                    hole: Hole::Arg(name.clone()),
-                }))
+                })))
             }
             Target::Param(_) => self.fail(
                 reference.loc,

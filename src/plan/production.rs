@@ -82,7 +82,7 @@ impl Planner<'_> {
         // Where a source leads is known from its start: what follows a part
         // known before start stays under the folder that part names.
         let value = self.resolver.host_path(value, from.loc);
-        let leading = value.leading_text();
+        let leading = value.value.leading_text();
         if leading.is_empty() {
             return Some("it mounts a source that is not known before start".to_string());
         }
@@ -92,7 +92,7 @@ impl Planner<'_> {
         (!inside).then(|| {
             format!(
                 "it mounts `{}`, which is neither under the stack's root nor in the shared folder, and does not begin with a setting's value",
-                value.shown()
+                value.value.shown()
             )
         })
     }

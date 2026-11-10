@@ -4,8 +4,9 @@
 use crate::definition::SettingValue;
 use crate::diagnostic::Diagnostic;
 use crate::diagnostic::source::Loc;
-use crate::plan::resolve::value::{Hole, Resolved, Shape};
+use crate::plan::resolve::value::Resolved;
 use crate::syntax::expr::Literal;
+use crate::value::{Hole, Kept, Value};
 
 use super::{Fail, Res, Resolver};
 
@@ -45,19 +46,19 @@ impl Resolver<'_> {
         };
         // A value of the wrong type was reported where it is written.
         let literal = value.typed(decl.ty).ok_or(Fail::Reported)?;
-        let mut resolved = match literal {
-            Literal::Text(text) => Resolved::text(text),
-            Literal::Number(n) => Resolved::known(Shape::Number(n)),
-            Literal::Bool(b) => Resolved::known(Shape::Bool(b)),
+        let value = match literal {
+            // A secret's value is kept, in a hole that is never shown.
+            literal if decl.secret => Value::Hole(Hole::SecretSetting {
+                name: name.to_string(),
+                value: Kept(literal),
+            }),
+            Literal::Text(text) => Value::text(text),
+            Literal::Number(n) => Value::Number(n),
+            Literal::Bool(b) => Value::Bool(b),
         };
-        resolved.begins_with_setting = true;
-        if decl.secret {
-            resolved.shape = Shape::Opaque {
-                ty: Some(decl.ty),
-                hole: Hole::Secret,
-            };
-            resolved.secrets.insert(format!("settings.{name}"));
-        }
-        Ok(resolved)
+        Ok(Resolved {
+            begins_with_setting: true,
+            ..Resolved::known(value)
+        })
     }
 }

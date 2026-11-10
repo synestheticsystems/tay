@@ -6,8 +6,9 @@ use crate::definition::read::ENVIRONMENT_FOLDER;
 use crate::definition::{Profile, Stack};
 use crate::diagnostic::Diagnostics;
 use crate::plan::choices::Layered;
-use crate::plan::resolve::value::{Hole, Resolved, Shape};
-use crate::syntax::expr::{EnvField, Reference, Type};
+use crate::plan::resolve::value::Resolved;
+use crate::syntax::expr::{EnvField, Reference};
+use crate::value::{Hole, Value};
 
 use super::{Res, Resolver};
 
@@ -130,14 +131,8 @@ impl Resolver<'_> {
                     );
                 }
             },
-            EnvField::Id => Resolved::known(Shape::Opaque {
-                ty: Some(Type::Text),
-                hole: Hole::EnvironmentId,
-            }),
-            EnvField::Network => Resolved::known(Shape::Opaque {
-                ty: Some(Type::Text),
-                hole: Hole::EnvironmentNetwork,
-            }),
+            EnvField::Id => Resolved::known(Value::Hole(Hole::EnvironmentId)),
+            EnvField::Network => Resolved::known(Value::Hole(Hole::EnvironmentNetwork)),
             EnvField::Profile => match &environment.profile {
                 Some(profile) => Resolved::text(profile),
                 None => {

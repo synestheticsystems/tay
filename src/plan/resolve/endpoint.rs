@@ -13,7 +13,8 @@ use crate::module::{Form, Published, Runs, UnitKind};
 use crate::syntax::expr::{Part, Reference};
 
 use super::{Asker, Fail, Res, Resolver, Scope, ViewProblem};
-use crate::plan::resolve::value::{Bit, Exact, Resolved, Shape};
+use crate::plan::resolve::value::Resolved;
+use crate::value::{Bit, Exact, Value};
 
 /// The host's own address, which a unit on the host reaches another at and
 /// a published port is opened on unless its entry names another.
@@ -42,10 +43,13 @@ impl<'s> Resolver<'s> {
             asker: Asker::of(kind),
         };
         let port = self.resolve(&endpoint.port, own)?;
-        if !matches!(port.form(), Form::Number(_) | Form::Unknown) {
+        if !matches!(Form::of(&port.value), Form::Number(_) | Form::Unknown) {
             return self.fail(
                 endpoint.port.loc,
-                format!("an endpoint's `port` is a number; this is {}", port.shown()),
+                format!(
+                    "an endpoint's `port` is a number; this is {}",
+                    port.value.shown()
+                ),
             );
         }
         let scheme = match &endpoint.scheme {
@@ -60,7 +64,7 @@ impl<'s> Resolver<'s> {
             Some(host) => (self.resolve(host, own)?, port),
             None => self.seen(owner, endpoint, kind, asker, reference, port)?,
         };
-        let mut value = Resolved::known(Shape::Text(Vec::new()));
+        let mut value = Resolved::known(Value::Text(Vec::new()));
         for part in [
             Some(&host),
             Some(&seen_port),
@@ -75,14 +79,14 @@ impl<'s> Resolver<'s> {
         let mut bits = Vec::new();
         match part {
             None => {
-                bits.extend(host.bits());
+                bits.extend(host.value.bits());
                 bits.push(Bit::Text(":".to_string()));
-                bits.extend(seen_port.bits());
+                bits.extend(seen_port.value.bits());
             }
-            Some(Part::Host) => bits.extend(host.bits()),
+            Some(Part::Host) => bits.extend(host.value.bits()),
             Some(Part::Port) => {
                 return Ok(Resolved {
-                    shape: seen_port.shape.clone(),
+                    value: seen_port.value.clone(),
                     ..value
                 });
             }
@@ -96,19 +100,19 @@ impl<'s> Resolver<'s> {
                         ),
                     );
                 };
-                bits.extend(scheme.bits());
+                bits.extend(scheme.value.bits());
                 bits.push(Bit::Text("://".to_string()));
-                bits.extend(host.bits());
+                bits.extend(host.value.bits());
                 if !is_usual_port(scheme, &seen_port) {
                     bits.push(Bit::Text(":".to_string()));
-                    bits.extend(seen_port.bits());
+                    bits.extend(seen_port.value.bits());
                 }
                 if let Some(path) = &path {
-                    bits.extend(path.bits());
+                    bits.extend(path.value.bits());
                 }
             }
         }
-        value.shape = Shape::Text(bits);
+        value.value = Value::Text(bits);
         Ok(value)
     }
 
@@ -131,7 +135,7 @@ impl<'s> Resolver<'s> {
         let not_published = |port: &Resolved| {
             Err(Fail::View(vec![ViewProblem::NotPublished {
                 owner: owner_name.clone(),
-                port: port.shown(),
+                port: port.value.shown(),
                 endpoint: endpoint.loc,
             }]))
         };
@@ -152,7 +156,7 @@ impl<'s> Resolver<'s> {
                     }
                     _ => owner,
                 };
-                let Form::Number(Some(number)) = port.form() else {
+                let Form::Number(Some(number)) = Form::of(&port.value) else {
                     return not_published(&port);
                 };
                 let Some(entry) = self.published(container, number) else {
@@ -165,7 +169,7 @@ impl<'s> Resolver<'s> {
                 {
                     return Err(Fail::View(vec![ViewProblem::NotOpened {
                         owner: owner_name.clone(),
-                        port: port.shown(),
+                        port: port.value.shown(),
                     }]));
                 }
                 let scope = Scope {
@@ -197,7 +201,8 @@ impl<'s> Resolver<'s> {
 /// Whether `port` is the usual one of `scheme`, which a URL leaves out.
 /// Both must be known before start to tell.
 fn is_usual_port(scheme: &Resolved, port: &Resolved) -> bool {
-    let (Some(Exact::Text(scheme)), Some(Exact::Number(port))) = (scheme.exact(), port.exact())
+    let (Some(Exact::Text(scheme)), Some(Exact::Number(port))) =
+        (scheme.value.exact(), port.value.exact())
     else {
         return false;
     };

@@ -18,11 +18,11 @@ use crate::definition::{Choices, Profile, Stack};
 use crate::diagnostic::source::{Loc, Sources};
 use crate::diagnostic::{Diagnostic, Diagnostics};
 
+pub use crate::value::Exact;
 pub use model::{
     Because, GivenLine, Mechanism, OpenedBy, Plan, PlannedUnit, PublishedPort, Readiness, Running,
     Seen, Shown,
 };
-pub use resolve::value::Exact;
 
 use resolve::{Environment, Resolver};
 
