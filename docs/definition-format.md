@@ -4,7 +4,7 @@ A stack's definitions say what the stack is made of and what each part needs. ta
 
 Two rules run through all of it.
 
-- **Strict.** An unknown key, a wrong type, a duplicate name, or a reference to something that does not exist is an error with the file, line and column. So is a YAML tag, a second document in one file, and a file or folder under the units folder that defines nothing. tay reports every error it can find in one run, and starts nothing if there is any.
+- **Strict.** An unknown key, a wrong type, a duplicate name, or a reference to something that does not exist is an error with the file, line and column. So is a YAML tag, a second document in one file, and a file or folder under the units folder that defines nothing. A file or folder whose name begins with a dot is not read at all. tay reports every error it can find in one run, and starts nothing if there is any.
 - **Blind.** The planner knows units, their needs and their values. It never asks which module a unit uses. It hands each module that module's own settings to check, and asks every module the same two questions: where does this unit run, and is it something that runs or something that is made.
 
 Words used here: a **stack** is everything one `tay.yaml` describes. An **environment** is one running copy of a stack. A **unit** is one thing tay brings up. A **module** is the mechanism a unit uses. A **way** is one of several mechanisms a unit may be run by.
@@ -248,7 +248,7 @@ The file is written inside the environment's state folder, at `files/<folder>/<n
 | `kind` | `password`, `bytes` or `keypair` |
 | `length` | For `password`: how many characters, default 32. For `bytes`: how many bytes, default 32 |
 | `encoding` | For `bytes`: `hex` (the default), `base64` (padded) or `base64url` (not padded) |
-| `algorithm` | For `keypair`: `ed25519` or `rsa-2048` |
+| `algorithm` | For `keypair`, and required there: `ed25519` or `rsa-2048` |
 
 A `password` is letters and digits only, so it is safe inside a URL, a JSON string or a shell word. Gives `value` (for `password` and `bytes`), or `public` and `private` (for `keypair`, as PEM text). Everything a `secret` unit gives is secret, except a key pair's `public`.
 
@@ -431,7 +431,7 @@ A profile with `production: true` is checked after every choice is applied, and 
 - a `process` unit, or a `command` unit that runs on the host;
 - a `container` with `build`;
 - a unit with `watch`;
-- a mount whose source is neither under the stack's root nor in the environment's shared folder, and does not begin with a setting's value, written there directly or reached through a value that begins with one.
+- a mount whose source is neither under the stack's root nor in the environment's shared folder, and does not begin with a setting's value, written there directly or reached through a value that begins with one. A source that continues with a value produced by running is refused as well, since where it leads cannot be known before anything starts.
 
 ## Secrets
 
