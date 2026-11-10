@@ -45,6 +45,7 @@ impl Daemon {
     /// decision; then the change is over.
     pub(super) async fn bring_up_plan(&self, change: &Arc<Change>, plan: Plan) {
         let asked = plan.up.clone();
+        let production = plan.production;
         let Some(units) = self.take_in_plan(change, plan).await else {
             return;
         };
@@ -71,18 +72,11 @@ impl Daemon {
         // What runs and the plan no longer has is stopped first, so that
         // nothing it holds is in the way of what the plan brings up.
         engine::stop_unplanned(&self.supervisor).await;
-        for unit in &units {
-            if unit
-                .mechanism
-                .as_ref()
-                .is_some_and(|mechanism| !mechanism.watch.is_empty())
-            {
-                change.say(Event::Notice {
-                    notice: format!(
-                        "`{}` watches files, but watching is not built yet: it will not be run again when they change",
-                        unit.name
-                    ),
-                });
+        // A production profile refuses a unit with `watch`, and nothing on
+        // a server is watched in any case.
+        if !production {
+            for notice in self.supervisor.watch(&units) {
+                change.say(Event::Notice { notice });
             }
         }
         let settled = self

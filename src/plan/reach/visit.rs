@@ -12,7 +12,7 @@ use crate::value::Value;
 
 use super::usage::{OpeningUse, User, Uses};
 use crate::plan::Planner;
-use crate::plan::model::{Because, PlannedMechanism, PlannedUnit, Readiness, Restart, UsedFile};
+use crate::plan::model::{Because, PlannedMechanism, PlannedUnit, Readiness, Restart};
 use crate::plan::resolve::{Asker, Chosen};
 
 /// The attempts a unit that restarts gets when its `restart` does not say.
@@ -133,9 +133,7 @@ impl<'s> Planner<'s> {
             mounts_volumes_of: (description.volume_mounts.iter())
                 .map(|mounted| mounted.unit.name.clone())
                 .collect(),
-            files: (files.into_iter())
-                .map(|(name, path)| UsedFile { name, path })
-                .collect(),
+            files: files.into_values().collect(),
         })
     }
 

@@ -109,10 +109,11 @@ pub struct PlannedMechanism {
 
 /// A file a unit uses that tay knows of: one a unit that is made writes,
 /// named by that unit, or one a command builds, named
-/// `unit.outputs.name`; and its path.
-#[derive(Debug)]
+/// `unit.outputs.name`; the unit that writes or builds it, and its path.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UsedFile {
     pub name: String,
+    pub of: String,
     pub path: Value,
 }
 

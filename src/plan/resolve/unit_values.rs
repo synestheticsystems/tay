@@ -2,6 +2,7 @@
 
 use crate::definition::{GiveValue, reference_errors};
 use crate::module::{ModuleValue, UnitKind};
+use crate::plan::model::UsedFile;
 use crate::plan::resolve::resolved::Resolved;
 use crate::syntax::expr::{Part, Reference, UnitRef};
 use crate::value::{Placeholder, Value};
@@ -122,7 +123,12 @@ impl Resolver<'_> {
             && let Some(writes) = &mechanism.description.writes
         {
             let path = self.resolve(writes, scope)?;
-            value.files.insert(unit.name.name.clone(), path.value);
+            let file = UsedFile {
+                name: unit.name.name.clone(),
+                of: unit.name.name.clone(),
+                path: path.value,
+            };
+            value.files.insert(file.name.clone(), file);
         }
         Ok(value)
     }
@@ -155,9 +161,13 @@ impl Resolver<'_> {
             this.resolve(&output.path, scope)
         })?;
         let mut value = self.host_path(path);
-        let output = format!("{unit_name}.outputs.{name}");
-        value.files.insert(output.clone(), value.value.clone());
-        value.producers.insert(unit_name.clone(), output);
+        let file = UsedFile {
+            name: format!("{unit_name}.outputs.{name}"),
+            of: unit_name.clone(),
+            path: value.value.clone(),
+        };
+        value.producers.insert(unit_name.clone(), file.name.clone());
+        value.files.insert(file.name.clone(), file);
         Ok(value)
     }
 }

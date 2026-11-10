@@ -1,0 +1,29 @@
+format: 1
+stack: watching
+up: [served]
+units:
+  build:
+    doc: Builds a program from each of the sources `one` and `two`, which says what its source says.
+    uses: command
+    watch: [src]
+    with:
+      run: ["${environment.root}/services/build.sh", "${environment.root}/src", "${environment.state}"]
+      outputs:
+        one: "${environment.state}/one"
+        two: "${environment.state}/two"
+  first:
+    doc: Runs the program built from `one`.
+    uses: process
+    with: { command: ["${build.outputs.one}"] }
+  second:
+    doc: Runs the program built from `two`.
+    uses: process
+    with: { command: ["${build.outputs.two}"] }
+  served: { needs: [first, second] }
+
+  ticker:
+    doc: Says what its file says, and is started again when the file changes.
+    uses: process
+    watch: [src/ticker.txt]
+    with:
+      command: [sh, -c, "echo ticks $(cat src/ticker.txt); trap 'exit 0' TERM; sleep 3600 & wait"]

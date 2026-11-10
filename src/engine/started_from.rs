@@ -5,10 +5,11 @@
 //! brought up again is compared with what it would be started from now.
 
 use std::path::Path;
+use std::sync::Arc;
 
 use super::supervisor::Supervisor;
 use crate::disk::{DiskError, write_whole};
-use crate::module::{Fingerprint, Taking, UnitPlace};
+use crate::module::{Fingerprint, Running, Taking, UnitPlace};
 use crate::plan::PlannedUnit;
 
 /// The file in a unit's folder of the state folder that keeps what it was
@@ -45,6 +46,32 @@ pub fn with_files(
             .map_err(|error| error.to_string())?;
     }
     Ok(taking.taken())
+}
+
+/// What changed in what `planned`, which runs, would be started from now
+/// with `running`, from what it was started from, as a person reads it:
+/// `None` when nothing did; why it cannot be told, when it cannot.
+pub async fn changed(
+    supervisor: &Supervisor,
+    planned: &PlannedUnit,
+    running: Arc<dyn Running>,
+) -> Result<Option<String>, String> {
+    let place = supervisor.place(&planned.name);
+    let settings = running
+        .started_from(place.clone())
+        .await
+        .map_err(|failure| failure.to_string())?;
+    let now = with_files(supervisor, planned, settings)?;
+    match kept(&place).map_err(|error| error.to_string())? {
+        Some(kept) => {
+            let changed = kept.changed(&now);
+            Ok((!changed.is_empty()).then(|| format!("{changed} changed")))
+        }
+        // What it was started from is kept as it starts, so a unit that
+        // runs with none kept started before that could be: what it runs
+        // from is not known.
+        None => Ok(Some("what it was started from is not known".to_string())),
+    }
 }
 
 /// Keeps `fingerprint` as what the unit at `place` was started from.

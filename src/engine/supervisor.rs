@@ -1,8 +1,10 @@
 //! The units of an environment as its daemon looks after them: the state of
 //! each, and for each unit that runs, a task of its own on the daemon's
 //! runtime that drives its attempts, checks its readiness for as long as it
-//! runs, restarts it as its policy says, and stops it when asked. Every
-//! change of state is recorded here, and told to the daemon as it happens.
+//! runs, restarts it as its policy says, and stops it when asked; and for
+//! each unit with `watch`, a task that runs it again when its files change.
+//! Every change of state is recorded here, and told to the daemon as it
+//! happens.
 //!
 //! The tasks live as long as what they look after runs, which may be long
 //! after any change that started them, and they end with the daemon, which
@@ -16,10 +18,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tokio::sync::{mpsc, oneshot, watch};
+use tokio::task::AbortHandle;
 
 use super::fill::{self, HostListen, UnitValues};
 use super::state::{State, UnitState};
 use super::units::Units;
+use super::watching;
 use crate::disk::unit_log::UnitLog;
 use crate::disk::{Counts, Environment};
 use crate::module::{
@@ -47,6 +51,8 @@ pub struct Supervisor {
     counts: Counts,
     /// `${host.listen}`, once it has been learnt.
     host_listen: Mutex<HostListen>,
+    /// The task watching the files of each unit with `watch`.
+    watching: Mutex<Vec<AbortHandle>>,
     told: Told,
 }
 
@@ -73,6 +79,7 @@ impl Supervisor {
             host_listen: Mutex::new(Err(
                 "it is learnt when the environment is brought up".to_string()
             )),
+            watching: Mutex::default(),
             told,
         }
     }
@@ -197,10 +204,15 @@ impl Supervisor {
         }
         // A unit started afresh is starting from now, before its task runs,
         // so that no one reads the state it had before.
-        if let Begin::Fresh = begin {
+        let starting = match &begin {
+            Begin::Fresh => Some("attempt 1, starting".to_string()),
+            Begin::Again(because) => Some(format!("attempt 1, starting; {because}")),
+            Begin::UnderWay(_) | Begin::Ended { .. } | Begin::Lost { .. } => None,
+        };
+        if let Some(starting) = starting {
             self.record(
                 &planned.name,
-                UnitState::new(State::Starting, "attempt 1, starting"),
+                UnitState::new(State::Starting, starting),
                 None,
             );
         }
@@ -231,6 +243,33 @@ impl Supervisor {
             supervisor.changes.send_modify(|count| *count += 1);
         });
         tending.insert(planned.name.clone(), UnitTask { ended, stop });
+    }
+
+    /// Watches the files each of `units` that has `watch` names, in place
+    /// of what was watched before, running the unit again when they
+    /// change; why each that cannot be watched is not.
+    pub fn watch(self: &Arc<Self>, units: &[Arc<PlannedUnit>]) -> Vec<String> {
+        self.stop_watching();
+        let watched = units.iter().filter(|planned| {
+            (planned.mechanism.as_ref()).is_some_and(|mechanism| !mechanism.watch.is_empty())
+        });
+        let mut problems = Vec::new();
+        let mut watching = self.watching.lock().expect("the watches are not poisoned");
+        for planned in watched {
+            match watching::watch(self, planned) {
+                Ok(task) => watching.push(tokio::spawn(task).abort_handle()),
+                Err(why) => problems.push(format!("`{}` is not watched: {why}", planned.name)),
+            }
+        }
+        problems
+    }
+
+    /// Stops watching any unit's files.
+    pub fn stop_watching(&self) {
+        let mut watching = self.watching.lock().expect("the watches are not poisoned");
+        for task in watching.drain(..) {
+            task.abort();
+        }
     }
 
     /// Stops `unit`, which runs where `runs` says, and whatever it started,

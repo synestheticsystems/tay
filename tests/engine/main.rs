@@ -26,4 +26,5 @@ mod running;
 mod secrets;
 mod status;
 mod up;
+mod watching;
 mod wipe;

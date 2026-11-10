@@ -33,6 +33,8 @@ enum Pass {
 /// not be stopped, or was left, is recorded `failed` and given back. Why
 /// what runs cannot be told, when it cannot.
 pub async fn take_down(supervisor: &Arc<Supervisor>, detail: &str) -> Result<Vec<Left>, String> {
+    // Nothing is run again for a change while everything is stopped.
+    supervisor.stop_watching();
     let units = supervisor.snapshot();
     let mut left = Vec::new();
     let planned = units

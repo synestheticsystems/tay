@@ -36,6 +36,9 @@ const CHECK_READY: Duration = Duration::from_secs(5);
 pub enum Begin {
     /// Its first attempt, which prepares.
     Fresh,
+    /// Its first attempt, begun because of what this says changed, which
+    /// is said with each state of the attempt.
+    Again(String),
     /// An attempt found under way.
     UnderWay(UnderWay),
     /// Its last attempt, found ended while no daemon ran: its restart
@@ -77,6 +80,9 @@ pub(super) struct Tending {
     /// Why what the attempt was started from could not be kept, said with
     /// each of its states.
     pub(super) start_unkept: Option<String>,
+    /// What changed that it was begun again for, said with each state of
+    /// its first attempt.
+    pub(super) because: Option<String>,
 }
 
 /// Looks after `planned` with `running` from `begin`, telling `supervisor`
@@ -100,6 +106,7 @@ pub async fn tend(
         earlier: None,
         unkept: None,
         start_unkept: None,
+        because: None,
     };
     tending.run(begin).await;
 }
@@ -110,6 +117,10 @@ impl Tending {
         let found = |attempt| self.supervisor.counts.of(&self.planned.name, attempt);
         let (mut attempt, mut watched) = match begin {
             Begin::Fresh => (1, self.attempt(1, None, false).await),
+            Begin::Again(because) => {
+                self.because = Some(because);
+                (1, self.attempt(1, None, false).await)
+            }
             Begin::UnderWay(under_way) => {
                 let count = found(under_way.attempt).unwrap_or_default();
                 self.in_a_row = count.in_a_row;
@@ -172,11 +183,13 @@ impl Tending {
     }
 
     /// What a person is told of attempt `attempt` doing `doing`, with how
-    /// the one before it ended.
+    /// the one before it ended, and of a first attempt begun again, what
+    /// changed.
     pub(super) fn detail(&self, attempt: u32, doing: &str) -> String {
         let mut detail = format!("attempt {attempt}, {doing}");
+        let because = self.because.as_ref().filter(|_| attempt == 1);
         let more = [&self.earlier, &self.unkept, &self.start_unkept];
-        for more in more.into_iter().flatten() {
+        for more in more.into_iter().flatten().chain(because) {
             detail.push_str("; ");
             detail.push_str(more);
         }

@@ -15,6 +15,7 @@ mod supervisor;
 mod take_down;
 mod units;
 mod unplanned;
+mod watching;
 
 pub use bring_up::{Decision, Outdated, bring_up};
 pub use check::{check_now, find_again};

@@ -200,25 +200,10 @@ async fn compared(
     running: Arc<dyn Running>,
     cancel: watch::Receiver<bool>,
 ) -> Compared {
-    let place = supervisor.place(&planned.name);
-    let now = match Arc::clone(&running).started_from(place.clone()).await {
-        Ok(settings) => started_from::with_files(&supervisor, &planned, settings),
-        Err(failure) => Err(failure.to_string()),
-    };
-    let kept = started_from::kept(&place).map_err(|error| error.to_string());
-    let why = match (now, kept) {
-        (Err(why), _) | (_, Err(why)) => return Compared::Unknown(why),
-        (Ok(now), Ok(Some(kept))) => {
-            let changed = kept.changed(&now);
-            if changed.is_empty() {
-                return Compared::Current;
-            }
-            format!("{changed} changed")
-        }
-        // What it was started from is kept as it starts, so a unit that
-        // has none kept started before that could be: what it runs from
-        // is not known.
-        (Ok(_), Ok(None)) => "what it was started from is not known".to_string(),
+    let why = match started_from::changed(&supervisor, &planned, Arc::clone(&running)).await {
+        Ok(None) => return Compared::Current,
+        Ok(Some(why)) => why,
+        Err(why) => return Compared::Unknown(why),
     };
     let again = UnitState::new(State::Starting, format!("{why}, so it is started again"));
     supervisor.record(&planned.name, again, None);

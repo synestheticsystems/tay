@@ -218,6 +218,7 @@ async fn found_again(supervisor: &Arc<Supervisor>) {
     if planned.uses_host_listen {
         supervisor.learn_host_listen(Occasion::FindingAgain).await;
     }
+    let production = planned.production;
     let plan: Vec<Arc<PlannedUnit>> = planned.units.into_iter().map(Arc::new).collect();
     supervisor.take_in(&plan);
     let up = match Intent::read(layout) {
@@ -228,6 +229,12 @@ async fn found_again(supervisor: &Arc<Supervisor>) {
         }
     };
     engine::find_again(supervisor, &plan, up).await;
+    // Nothing on a server is watched.
+    if up && !production {
+        for problem in supervisor.watch(&plan) {
+            log(&problem);
+        }
+    }
     if let Err(why) = engine::find_unplanned(supervisor).await {
         log(&format!(
             "what is left of units the plan does not have cannot be told: {why}"

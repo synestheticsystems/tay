@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
 use crate::diagnostic::source::SourceId;
+use crate::plan::model::UsedFile;
 use crate::value::Value;
 
 /// An entry of a container's `publish` that a value reaches from the host:
@@ -28,10 +29,8 @@ pub struct Resolved {
     /// The units that are made whose values it is built from, each with the
     /// value used.
     pub made: BTreeMap<String, String>,
-    /// The files tay knows of that it is built from, each by name with its
-    /// path: one a unit that is made writes, named by the unit, or one a
-    /// command builds, named `unit.outputs.name`.
-    pub files: BTreeMap<String, Value>,
+    /// The files tay knows of that it is built from, by name.
+    pub files: BTreeMap<String, UsedFile>,
     /// The `publish` entries it reaches from the host: using it opens them.
     pub reached_entries: BTreeSet<ReachedEntry>,
     /// Whether it begins with a setting's value, written there directly or

@@ -244,7 +244,7 @@ impl Pass {
             Begin::Lost { attempt } => Some(format!(
                 "attempt {attempt}, found with no record of how it ended"
             )),
-            Begin::Fresh => None,
+            Begin::Fresh | Begin::Again(_) => None,
         };
         if let Some(found) = found {
             supervisor.record(&planned.name, UnitState::new(State::Starting, found), None);
