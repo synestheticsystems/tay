@@ -1,0 +1,6 @@
+params:
+  dir: {}
+unit:
+  uses: process
+  with: { command: [watch] }
+  watch: ["${params.dir}", "${params.dir}/."]

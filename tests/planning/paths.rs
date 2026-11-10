@@ -109,3 +109,24 @@ fn a_dot_slash_path_in_a_settings_value_is_relative_to_where_the_value_is_writte
         )]
     );
 }
+
+#[test]
+fn a_dot_slash_path_a_templates_parameter_brings_is_relative_to_the_unit_that_writes_it() {
+    // The template puts `dir` in whole, and at the start of text: either
+    // way `./data` is the folder of the unit that gives it.
+    let plan = plan_json("template-paths", &[]);
+    let data = fixture("template-paths")
+        .canonicalize()
+        .unwrap()
+        .join("stack/units/watcher/data");
+    let watched: Vec<&str> = unit(&plan, "watcher")["watch"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|path| path["value"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        watched,
+        [data.display().to_string(), format!("{}/.", data.display())]
+    );
+}

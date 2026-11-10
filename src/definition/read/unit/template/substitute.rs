@@ -67,7 +67,11 @@ fn substitute_text(
         _ => return Some(node.clone()),
     };
     let mut filled = Vec::new();
-    for piece in &pieces {
+    // The text stands where what it begins with was written, in the
+    // template or in a parameter's value, since a path that begins `./` is
+    // relative to that file's folder.
+    let mut begins_at = node.loc;
+    for (index, piece) in pieces.iter().enumerate() {
         let named = match piece {
             Piece::Ref(reference) => param(reference).map(|value| (reference, value)),
             Piece::Lit(_) => None,
@@ -76,6 +80,9 @@ fn substitute_text(
             filled.push(piece.clone());
             continue;
         };
+        if index == 0 {
+            begins_at = value.loc;
+        }
         match &value.kind {
             Kind::Scalar(Scalar::Str(v)) => {
                 match expr::parse_pieces(&v.text, value.loc, &v.placement) {
@@ -108,8 +115,8 @@ fn substitute_text(
         );
         return None;
     };
-    // Each reference keeps the place it was written: in the template, or in
-    // the parameter's value in the unit.
+    // Each reference keeps where it was written: in the template, or in the
+    // parameter's value in the unit.
     let written = filled
         .iter()
         .filter_map(|piece| match piece {
@@ -118,7 +125,7 @@ fn substitute_text(
         })
         .collect();
     Some(Node {
-        loc: node.loc,
+        loc: begins_at,
         kind: Kind::Scalar(Scalar::Str(Str {
             text,
             placement: Placement::References(written),

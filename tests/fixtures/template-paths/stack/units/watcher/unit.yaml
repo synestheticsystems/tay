@@ -1,0 +1,2 @@
+from: watched
+params: { dir: ./data }
