@@ -1,7 +1,8 @@
 //! A machine of its own for each test: a home folder and the XDG folders in
 //! a temporary folder, with the stacks a test brings up copied into it.
 //! Every daemon started on it is stopped when it is dropped, also when the
-//! test fails, so nothing a test starts outlives it.
+//! test fails, and what its environments left in Docker removed, so nothing
+//! a test starts outlives it.
 
 use std::fs;
 use std::io::{BufRead, BufReader};
@@ -12,12 +13,16 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 use tempfile::TempDir;
 
+use crate::docker::Docker;
 use crate::support::{Run, fixture};
 
 pub struct Machine {
     folder: TempDir,
     /// Every stack copied onto it, which it takes down when it is dropped.
     stacks: std::cell::RefCell<Vec<PathBuf>>,
+    /// Docker, for a test that needs it: dropped after the stacks are taken
+    /// down, it removes whatever of their environments is left in it.
+    docker: Option<Docker>,
 }
 
 impl Machine {
@@ -29,7 +34,24 @@ impl Machine {
         Machine {
             folder,
             stacks: std::cell::RefCell::default(),
+            docker: None,
         }
+    }
+
+    /// A machine for a test that needs Docker, which it holds until the
+    /// test ends.
+    pub fn with_docker() -> Machine {
+        let mut machine = Machine::new();
+        machine.docker = Some(Docker::claim(&machine.path("state/tay/environments.json")));
+        // The `docker` command a build runs finds its builder among its
+        // plugins, in the home folder, which is the machine's own: they are
+        // linked there, and whatever a build keeps stays there.
+        if let Some(plugins) = crate::docker::plugins() {
+            let docker = machine.path("home/.docker");
+            fs::create_dir_all(&docker).unwrap();
+            std::os::unix::fs::symlink(plugins, docker.join("cli-plugins")).unwrap();
+        }
+        machine
     }
 
     pub fn path(&self, sub: &str) -> PathBuf {
@@ -71,6 +93,9 @@ impl Machine {
             .env("XDG_DATA_HOME", self.path("data"))
             .env("XDG_RUNTIME_DIR", self.path("run"))
             .stdin(Stdio::null());
+        if let Some(host) = crate::docker::host() {
+            command.env("DOCKER_HOST", host);
+        }
         command
     }
 
@@ -303,6 +328,9 @@ impl Drop for Machine {
             }
             std::thread::sleep(Duration::from_millis(50));
         }
+        // What is left in Docker is found by the machine's list of
+        // environments, so it goes before the machine's folder does.
+        drop(self.docker.take());
     }
 }
 

@@ -45,13 +45,19 @@ fn a_unit_that_cannot_run_fails_saying_why_and_what_needs_it_waits_blocked() {
     // `search` fails at once, and `jobs`, which needs it through `index`,
     // can no longer become ready: `tay up` returns then, naming the
     // failure, its reason, and every unit waiting on it.
-    assert_eq!(
-        up.last_change("search"),
-        "failed tay cannot run a `container` unit yet"
+    let cannot =
+        "its program could not be started: `search-server`: No such file or directory (os error 2)";
+    assert_eq!(up.last_change("search"), format!("failed {cannot}"));
+    assert!(
+        up.stdout.contains(&format!(
+            "tay up: `search` failed: {cannot}\n  the last lines it wrote:\n"
+        )),
+        "{}",
+        up.stdout
     );
     assert!(
         up.stdout.ends_with(
-            "tay up: `search` failed: tay cannot run a `container` unit yet\n  waiting on it: `index`, `jobs`\n"
+            " # attempt 1, command: could not be started: `search-server`: No such file or directory (os error 2)\n  waiting on it: `index`, `jobs`\n"
         ),
         "{}",
         up.stdout
@@ -206,42 +212,6 @@ fn up_with_json_prints_each_event_as_a_json_line_in_schema_1() {
     assert_eq!(
         end["failed"][0]["waiting"],
         serde_json::json!(["index", "jobs"])
-    );
-}
-
-#[test]
-fn the_shop_stack_comes_up_as_far_as_tay_can_bring_it() {
-    let machine = Machine::new();
-    let root = machine.stack("shop");
-    let up = machine.at(&root, "up", &[]);
-    assert_eq!(up.code, 1, "{}{}", up.stdout, up.stderr);
-    assert!(
-        up.stdout.contains("tay up: `database` failed"),
-        "{}",
-        up.stdout
-    );
-    let status = machine.settled(&root);
-    for unit in ["web-port", "api-port", "db-port", "db-password"] {
-        assert!(
-            Machine::state(&status, unit).starts_with("ready "),
-            "{unit}: {status}"
-        );
-    }
-    assert_eq!(
-        Machine::state(&status, "database"),
-        "failed tay cannot run a `container` unit yet"
-    );
-    assert_eq!(
-        Machine::state(&status, "build"),
-        "failed its program could not be started: `build`: No such file or directory (os error 2)"
-    );
-    assert_eq!(
-        Machine::state(&status, "api"),
-        "waiting blocked: `build`, `database` have failed"
-    );
-    assert_eq!(
-        Machine::state(&status, "core"),
-        "waiting blocked: `build`, `database` have failed"
     );
 }
 

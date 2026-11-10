@@ -92,6 +92,7 @@ impl Planner<'_> {
             production: self.production,
             up,
             units,
+            uses_host_listen: self.resolver.host_listen,
         })
     }
 

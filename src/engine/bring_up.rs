@@ -6,7 +6,10 @@
 //! A unit that is made is made on the blocking pool. A unit that runs is
 //! handed to the supervisor, whose task looks after it from then on, and the
 //! loop waits for it to become ready or fail: an attempt that fails and is
-//! followed by one that becomes ready counts as ready.
+//! followed by one that becomes ready counts as ready. A unit that runs
+//! already is asked whether what runs of it was started from other settings
+//! than the plan now gives; if it was, it is replaced, and otherwise joined
+//! as it is.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
@@ -15,11 +18,10 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 use tokio::task::JoinSet;
 
-use super::fill;
 use super::settled::{Settled, Standing};
 use super::state::{State, UnitState};
 use super::supervisor::{Begin, Supervisor};
-use crate::module::{Exists, Made, Operations, UnitKind};
+use crate::module::{Exists, Made, Operations, Running, UnitKind};
 use crate::plan::PlannedUnit;
 
 /// What bringing a plan up comes to for the units it was asked for,
@@ -52,6 +54,7 @@ pub async fn bring_up(
     units: &[Arc<PlannedUnit>],
     asked: &[String],
     decided: &mut (dyn FnMut(Decision) + Send),
+    noticed: &mut (dyn FnMut(String) + Send),
     mut cancel: watch::Receiver<bool>,
 ) -> Option<Decision> {
     let mut bringing = Bringing {
@@ -66,6 +69,10 @@ pub async fn bring_up(
     let mut making = JoinSet::new();
     // The unit each one being made is, by its task.
     let mut making_of = HashMap::new();
+    // What runs already, its settings being compared with the plan's, and
+    // replaced if they changed.
+    let mut comparing = JoinSet::new();
+    let mut comparing_of = HashMap::new();
     let mut changes = supervisor.changes();
     let mut decision = None;
     // A change can be cancelled before it begins, while it is planned.
@@ -78,13 +85,24 @@ pub async fn bring_up(
         while moved {
             moved = bringing.settle_running();
             if !cancelled {
-                for (index, made, in_use) in bringing.start() {
+                let started = bringing.start();
+                for (index, made, in_use) in started.made {
                     moved = true;
                     let supervisor = Arc::clone(supervisor);
                     let unit = units[index].name.clone();
                     let task =
                         making.spawn_blocking(move || made.make(&supervisor.place(&unit), in_use));
                     making_of.insert(task.id(), index);
+                }
+                for (index, running) in started.tended {
+                    moved = true;
+                    let task = comparing.spawn(compared(
+                        Arc::clone(supervisor),
+                        Arc::clone(&units[index]),
+                        running,
+                        cancel.clone(),
+                    ));
+                    comparing_of.insert(task.id(), index);
                 }
                 moved |= bringing.handed;
                 bringing.handed = false;
@@ -100,7 +118,7 @@ pub async fn bring_up(
         }
         // What runs goes on under the supervisor whatever happens here.
         let waits_on_running = !bringing.running.is_empty() && !cancelled;
-        if making.is_empty() && !waits_on_running {
+        if making.is_empty() && comparing.is_empty() && !waits_on_running {
             break;
         }
         tokio::select! {
@@ -119,12 +137,84 @@ pub async fn bring_up(
                     bringing.made(index, made);
                 }
             }
+            Some(joined) = comparing.join_next_with_id() => {
+                let (task, compared) = match joined {
+                    Ok((task, compared)) => (task, compared),
+                    Err(error) => (error.id(), Compared::Unknown(format!("tay failed while comparing its settings: {error}"))),
+                };
+                if let Some(index) = comparing_of.remove(&task) {
+                    if let Compared::Unknown(why) = &compared {
+                        noticed(format!(
+                            "whether `{}` runs from the settings the plan now gives cannot be told, so it is left as it runs: {why}",
+                            units[index].name
+                        ));
+                    }
+                    bringing.compared(index, compared);
+                }
+            }
             changed = changes.changed(), if waits_on_running => if changed.is_err() {
                 break;
             },
         }
     }
     decision
+}
+
+/// What became of a unit that ran already when it was brought up.
+enum Compared {
+    /// It runs from the settings the plan gives, and is joined as it is.
+    Current,
+    /// It ran from other settings, and was started afresh from these.
+    Replaced,
+    /// It ran from other settings, and could not be stopped, as this says.
+    NotStopped(String),
+    /// Whether it runs from these settings cannot be told, as this says, so
+    /// it is joined as it is.
+    Unknown(String),
+}
+
+/// Asks whether `planned`, which runs already, runs from the settings
+/// `running` has, and replaces it if not, unless the change is cancelled
+/// first.
+async fn compared(
+    supervisor: Arc<Supervisor>,
+    planned: Arc<PlannedUnit>,
+    running: Arc<dyn Running>,
+    cancel: watch::Receiver<bool>,
+) -> Compared {
+    let place = supervisor.place(&planned.name);
+    match Arc::clone(&running).outdated(place).await {
+        Ok(false) => Compared::Current,
+        Err(failure) => Compared::Unknown(failure.to_string()),
+        Ok(true) => {
+            let replacing = UnitState::new(
+                State::Starting,
+                "its settings have changed, so what runs of it is replaced",
+            );
+            supervisor.record(&planned.name, replacing, None);
+            replace(&supervisor, &planned, running, &cancel).await
+        }
+    }
+}
+
+/// Stops `planned`, which runs from other settings than `running` has, and
+/// starts it afresh from these, unless the change is cancelled first.
+async fn replace(
+    supervisor: &Arc<Supervisor>,
+    planned: &Arc<PlannedUnit>,
+    running: Arc<dyn Running>,
+    cancel: &watch::Receiver<bool>,
+) -> Compared {
+    match supervisor.stop_to_replace(planned).await {
+        Err(why) => Compared::NotStopped(why),
+        // What is stopped for a change that is then cancelled stays
+        // stopped.
+        Ok(()) if *cancel.borrow() => Compared::Replaced,
+        Ok(()) => {
+            supervisor.tend(planned, running, Begin::Fresh, true);
+            Compared::Replaced
+        }
+    }
 }
 
 /// Waits until `cancel` says to stop; for ever, once nothing can say so.
@@ -150,13 +240,22 @@ struct Bringing<'a> {
     joined: HashSet<usize>,
 }
 
+/// What a pass over the units started: the units that are made, to be made,
+/// each with whether what uses it runs, and the units that run already,
+/// with the operations the plan now gives them, to have their settings compared.
+#[derive(Default)]
+struct Started {
+    made: Vec<(usize, Box<dyn Made>, bool)>,
+    tended: Vec<(usize, Arc<dyn Running>)>,
+}
+
 impl Bringing<'_> {
     /// Starts the units that may start now, and gives those that are made,
-    /// to be made. A group becomes ready at once, a unit that runs is handed
-    /// to the supervisor, and a unit that cannot start yet is recorded
-    /// waiting, or blocked.
-    fn start(&mut self) -> Vec<(usize, Box<dyn Made>, bool)> {
-        let mut made = Vec::new();
+    /// to be made, and those that run already, to have their settings compared. A group
+    /// becomes ready at once, a unit that runs is handed to the supervisor,
+    /// and a unit that cannot start yet is recorded waiting, or blocked.
+    fn start(&mut self) -> Started {
+        let mut started = Started::default();
         // A group made ready can clear the units after it.
         let mut moved = true;
         while moved {
@@ -170,22 +269,14 @@ impl Bringing<'_> {
                 if let Standing::Blocked(failed) = &standing {
                     self.settled.blocked(&planned.name, failed.clone());
                 }
-                // A unit that runs already is joined as it is once what it
-                // needs has settled, so that how those came out is said;
-                // nothing starts it again, and its state is its own.
+                // A unit that runs already has its settings compared once what it needs has
+                // settled, so that how those came out is said: it is joined
+                // as it is, its state its own, unless its settings changed.
                 let tended = self.supervisor.is_tended(&planned.name);
                 if let Some(waiting) = standing.waiting() {
                     if !tended {
                         self.record(index, waiting);
                     }
-                    continue;
-                }
-                if tended {
-                    self.started[index] = true;
-                    self.running.insert(index);
-                    self.joined.insert(index);
-                    self.handed = true;
-                    moved = true;
                     continue;
                 }
                 self.started[index] = true;
@@ -198,15 +289,22 @@ impl Bringing<'_> {
                     continue;
                 };
                 let given = self.supervisor.given();
-                let environment = &self.supervisor.environment;
                 let operations = mechanism
-                    .settings
-                    .fill(&mut |placeholder| fill::fill(placeholder, environment, &given));
+                    .operations(&mut |placeholder| self.supervisor.fill(placeholder, &given));
                 match operations {
+                    // What runs already is compared with the settings the plan
+                    // gives it; one whose settings cannot be filled now is
+                    // joined as it runs.
+                    Ok(Operations::Running(running)) if tended => {
+                        started.tended.push((index, running));
+                    }
+                    _ if tended => self.join(index),
                     Err(why) => self.record(index, UnitState::new(State::Failed, why.to_string())),
                     Ok(Operations::Made(operations)) => {
                         self.record(index, UnitState::new(State::Starting, "making it"));
-                        made.push((index, operations, self.in_use(&planned.name)));
+                        started
+                            .made
+                            .push((index, operations, self.in_use(&planned.name)));
                     }
                     Ok(Operations::Running(running)) => {
                         self.supervisor.tend(&planned, running, Begin::Fresh, true);
@@ -216,7 +314,32 @@ impl Bringing<'_> {
                 }
             }
         }
-        made
+        started
+    }
+
+    /// Joins the unit at `index`, which runs already, as it is: nothing
+    /// starts it again, and its state is its own.
+    fn join(&mut self, index: usize) {
+        self.running.insert(index);
+        self.joined.insert(index);
+        self.handed = true;
+    }
+
+    /// Takes in what became of the unit at `index`, which ran already.
+    fn compared(&mut self, index: usize, compared: Compared) {
+        match compared {
+            Compared::Current | Compared::Unknown(_) => self.join(index),
+            Compared::Replaced => {
+                self.running.insert(index);
+                self.handed = true;
+            }
+            Compared::NotStopped(why) => {
+                let reason = format!(
+                    "its settings have changed, and what runs of it could not be stopped to replace it: {why}"
+                );
+                self.record(index, UnitState::new(State::Failed, reason));
+            }
+        }
     }
 
     /// Whether a unit that runs and uses `unit`'s values runs now, directly

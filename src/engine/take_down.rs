@@ -1,10 +1,11 @@
 //! Taking an environment down: every unit is stopped, in the reverse of the
-//! order the units start in, then whatever runs of a unit the plan does not
-//! have, and then each that runs is checked, so that `tay down` says nothing
-//! is left only once it has seen so. A unit that runs is stopped whatever
-//! its state, from its place alone if no task looks after it; one that is
-//! made is left as it is on disk, to be had again at the next `tay up`, and
-//! is `stopped` while the environment is down.
+//! order the units start in, then whatever is left of a unit the plan does
+//! not have, then what the units share where they run is put away, and
+//! then each unit that runs is checked, so that `tay down` says nothing is
+//! left only once it has seen so. A unit that runs is stopped whatever its
+//! state, from its place alone if no task looks after it; one that is made
+//! is left as it is on disk, to be had again at the next `tay up`, and is
+//! `stopped` while the environment is down.
 
 use std::sync::Arc;
 
@@ -58,26 +59,33 @@ pub async fn take_down(supervisor: &Arc<Supervisor>, detail: &str) -> Result<Vec
         };
         supervisor.record(&unit, state, None);
     }
-    // What runs of a unit the table does not have, as one left by a daemon
-    // that was killed, is stopped from its place alone, and then looked for
-    // again.
+    // What is left of a unit the table does not have, as of one left by a
+    // daemon that was killed, is stopped from its place alone, and then
+    // looked for again.
     let known = |unit: &str| units.state(unit).is_some();
     for pass in [Pass::Stop, Pass::Check] {
-        let found = supervisor
-            .found_running()
-            .map_err(|why| format!("what runs of the environment's units cannot be told: {why}"))?;
+        let found = supervisor.found_left().await.map_err(|why| {
+            format!("what is left of the environment's units cannot be told: {why}")
+        })?;
         for (unit, runs) in found {
             if known(&unit) || left.iter().any(|left| left.unit == unit) {
                 continue;
             }
             let stopped = match pass {
                 Pass::Stop => supervisor.stop(&unit, &runs).await,
-                Pass::Check => Err("something of it still runs after it was stopped".to_string()),
+                Pass::Check => {
+                    Err("something of it is still left after it was stopped".to_string())
+                }
             };
             if let Err(reason) = stopped {
                 left.push(Left { unit, reason });
             }
         }
+    }
+    // What the units share goes once they are stopped; what of it is left
+    // is said under its own name.
+    if let Err((what, reason)) = supervisor.remove_shared().await {
+        left.push(Left { unit: what, reason });
     }
     let planned = units
         .iter()
@@ -89,10 +97,10 @@ pub async fn take_down(supervisor: &Arc<Supervisor>, detail: &str) -> Result<Vec
         if left.iter().any(|left| left.unit == unit) {
             continue;
         }
-        let reason = match supervisor.running_now(&unit, &runs).await {
+        let reason = match supervisor.anything_left(&unit, &runs).await {
             Ok(false) => continue,
-            Ok(true) => "something of it still runs after it was stopped".to_string(),
-            Err(why) => format!("whether anything of it still runs cannot be told: {why}"),
+            Ok(true) => "something of it is still left after it was stopped".to_string(),
+            Err(why) => format!("whether anything of it is still left cannot be told: {why}"),
         };
         supervisor.record(&unit, UnitState::new(State::Failed, reason.clone()), None);
         left.push(Left { unit, reason });

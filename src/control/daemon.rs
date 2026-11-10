@@ -32,6 +32,7 @@ use crate::diagnostic::Diagnostics;
 use crate::diagnostic::source::Sources;
 use crate::disk::{Asked, Counts, DiskError, Environment, Identity, Intent, Layout, Lock, Machine};
 use crate::engine::{self, Supervisor, Told, UnitState};
+use crate::module::Occasion;
 use crate::plan::{self, Plan, PlannedUnit};
 use crate::print;
 
@@ -179,7 +180,7 @@ async fn start(layout: Layout) -> Result<(Arc<Daemon>, UnixListener, Socket), Ca
             going: AtomicBool::new(false),
         }
     });
-    found_again(&daemon.supervisor);
+    found_again(&daemon.supervisor).await;
     Ok((daemon, listener, socket))
 }
 
@@ -188,7 +189,7 @@ async fn start(layout: Layout) -> Result<(Arc<Daemon>, UnixListener, Socket), Ca
 /// found, and each that runs that the plan does not have. What runs is
 /// looked after again whether or not the environment is meant to be up,
 /// and what is made is checked when it is.
-fn found_again(supervisor: &Arc<Supervisor>) {
+async fn found_again(supervisor: &Arc<Supervisor>) {
     let layout = &supervisor.environment.layout;
     let asked = match Asked::read(layout) {
         Ok(asked) => asked,
@@ -211,6 +212,9 @@ fn found_again(supervisor: &Arc<Supervisor>) {
             return;
         }
     };
+    if planned.uses_host_listen {
+        supervisor.learn_host_listen(Occasion::FindingAgain).await;
+    }
     let plan: Vec<Arc<PlannedUnit>> = planned.units.into_iter().map(Arc::new).collect();
     supervisor.take_in(&plan);
     let up = match Intent::read(layout) {
@@ -220,10 +224,10 @@ fn found_again(supervisor: &Arc<Supervisor>) {
             false
         }
     };
-    engine::find_again(supervisor, &plan, up);
-    if let Err(why) = engine::find_unplanned(supervisor) {
+    engine::find_again(supervisor, &plan, up).await;
+    if let Err(why) = engine::find_unplanned(supervisor).await {
         log(&format!(
-            "what runs of units the plan does not have cannot be told: {why}"
+            "what is left of units the plan does not have cannot be told: {why}"
         ));
     }
 }

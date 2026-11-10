@@ -17,13 +17,14 @@ use std::sync::{Arc, Mutex};
 
 use tokio::sync::{mpsc, oneshot, watch};
 
-use super::fill::UnitValues;
+use super::fill::{self, HostListen, UnitValues};
 use super::state::{State, UnitState};
 use super::units::Units;
 use crate::disk::unit_log::UnitLog;
 use crate::disk::{Counts, Environment};
-use crate::module::{self, Running, Runs, UnitKind, UnitPlace, Values};
+use crate::module::{self, Occasion, Running, Runs, UnitKind, UnitPlace, Values};
 use crate::plan::PlannedUnit;
+use crate::value::{Filled, Placeholder, Unfilled};
 
 pub use tending::Begin;
 
@@ -42,6 +43,8 @@ pub struct Supervisor {
     tending: Mutex<HashMap<String, UnitTask>>,
     /// What is counted of each unit's attempts.
     counts: Counts,
+    /// `${host.listen}`, once it has been learnt.
+    host_listen: Mutex<HostListen>,
     told: Told,
 }
 
@@ -65,8 +68,35 @@ impl Supervisor {
             changes: watch::Sender::new(0),
             tending: Mutex::default(),
             counts,
+            host_listen: Mutex::new(Err(
+                "it is learnt when the environment is brought up".to_string()
+            )),
             told,
         }
+    }
+
+    /// Learns `${host.listen}` where units run, on `occasion`.
+    pub async fn learn_host_listen(&self, occasion: Occasion) {
+        let learnt = module::host_listen(&self.environment, occasion)
+            .await
+            .map_err(|failure| failure.to_string());
+        *self
+            .host_listen
+            .lock()
+            .expect("the host's address is not poisoned") = learnt;
+    }
+
+    /// `${host.listen}`, as far as it has been learnt.
+    pub fn host_listen(&self) -> HostListen {
+        self.host_listen
+            .lock()
+            .expect("the host's address is not poisoned")
+            .clone()
+    }
+
+    /// Fills `placeholder` for a unit whose needs have given `given`.
+    pub fn fill(&self, placeholder: &Placeholder, given: &UnitValues) -> Result<Filled, Unfilled> {
+        fill::fill(placeholder, &self.environment, &self.host_listen(), given)
     }
 
     fn units(&self) -> std::sync::MutexGuard<'_, Units> {
@@ -207,24 +237,48 @@ impl Supervisor {
                 return stopped;
             }
         }
-        stop_blocking(runs.clone(), self.place(unit)).await
+        stop_where_it_runs(runs, &self.place(unit)).await
     }
 
-    /// The units of which something runs now, found where units run,
-    /// whether or not the plan has them.
-    pub fn found_running(&self) -> Result<Vec<(String, Runs)>, String> {
-        module::found_running(&self.environment.layout).map_err(|failure| failure.to_string())
+    /// Stops `planned` through the task that looks after it, so that it can
+    /// be started afresh, and waits until that task has ended.
+    pub async fn stop_to_replace(&self, planned: &PlannedUnit) -> Result<(), String> {
+        let Some(runs) = runs(planned) else {
+            return Ok(());
+        };
+        let mut changes = self.changes();
+        self.stop(&planned.name, runs).await?;
+        // The task ends just after it has answered.
+        while self.is_tended(&planned.name) {
+            if changes.changed().await.is_err() {
+                break;
+            }
+        }
+        Ok(())
     }
 
-    /// Whether anything of `unit`, which runs where `runs` says, runs now,
-    /// from its place alone, whatever its settings.
-    pub async fn running_now(&self, unit: &str, runs: &Runs) -> Result<bool, String> {
-        let runs = runs.clone();
-        let place = self.place(unit);
-        tokio::task::spawn_blocking(move || module::running_now(&runs, &place))
+    /// The units of which anything is left, found where units run, whether
+    /// or not the plan has them.
+    pub async fn found_left(&self) -> Result<Vec<(String, Runs)>, String> {
+        module::found_left(&self.environment)
             .await
-            .map_err(|error| format!("tay failed while looking at it: {error}"))?
             .map_err(|failure| failure.to_string())
+    }
+
+    /// Whether anything of `unit`, which runs where `runs` says, is left
+    /// now, from its place alone, whatever its settings.
+    pub async fn anything_left(&self, unit: &str, runs: &Runs) -> Result<bool, String> {
+        module::anything_left(runs, &self.place(unit))
+            .await
+            .map_err(|failure| failure.to_string())
+    }
+
+    /// Removes what the environment's units share where they run, once
+    /// they are stopped; what could not be, by its name, and why.
+    pub async fn remove_shared(&self) -> Result<(), (String, String)> {
+        module::remove_shared(&self.environment)
+            .await
+            .map_err(|left| (left.what, left.why.to_string()))
     }
 
     /// Where `unit` is acted on.
@@ -253,11 +307,10 @@ pub fn runs(planned: &PlannedUnit) -> Option<&Runs> {
     }
 }
 
-/// Stops what of a unit runs, on the blocking pool, since stopping waits
-/// for its processes to end.
-async fn stop_blocking(runs: Runs, place: UnitPlace) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || module::stop(&runs, &place))
+/// Stops what of a unit is left where `runs` says it runs, from its place
+/// alone.
+async fn stop_where_it_runs(runs: &Runs, place: &UnitPlace) -> Result<(), String> {
+    module::stop(runs, place)
         .await
-        .map_err(|error| format!("tay failed while stopping it: {error}"))?
         .map_err(|failure| failure.to_string())
 }

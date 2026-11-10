@@ -307,6 +307,14 @@ fn publish_entries(node: &Node, d: &mut Diagnostics) -> Vec<PublishEntry> {
 }
 
 fn label_key_problem(key: &str) -> Option<String> {
-    (key.is_empty() || key.contains(char::is_whitespace) || key.contains("${"))
-        .then(|| format!("`{key}` is not a label key: written out, with no spaces"))
+    if key.is_empty() || key.contains(char::is_whitespace) || key.contains("${") {
+        return Some(format!(
+            "`{key}` is not a label key: written out, with no spaces"
+        ));
+    }
+    // What carries the labels tay sets decides what tay may touch, so a
+    // definition does not set them.
+    key.starts_with("tay.").then(|| {
+        format!("`{key}` is not a label a definition sets: tay sets the labels that begin `tay.`")
+    })
 }

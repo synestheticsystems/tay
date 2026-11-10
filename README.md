@@ -6,7 +6,7 @@ tay brings a whole stack up from one command and then keeps telling the truth ab
 
 ## Status
 
-tay reads a stack's definitions and plans it: `tay plan` checks the definitions strictly, works out every value known before anything starts, and prints the units that would come up in an order they could start in. `tay up` brings a plan up through the environment's daemon, as far as this version can: it makes ports, secrets and files, and says of each process, container and command that it cannot run one yet. `tay down`, `tay status` and `tay ls` are built; `tay logs` is not. The definitions are written as [docs/definition-format.md](docs/definition-format.md) describes, and the engine as [docs/engine.md](docs/engine.md) does.
+tay reads a stack's definitions and plans it: `tay plan` checks the definitions strictly, works out every value known before anything starts, and prints the units that would come up in an order they could start in. `tay up` brings a plan up through the environment's daemon: it makes ports, secrets and files, runs processes and commands on the host, each under a keeper that outlives the daemon, and runs containers, and commands in them, through Docker. `tay down`, `tay status`, `tay logs` and `tay ls` are built. The definitions are written as [docs/definition-format.md](docs/definition-format.md) describes, and the engine as [docs/engine.md](docs/engine.md) does.
 
 ## Licence
 

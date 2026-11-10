@@ -118,6 +118,16 @@ pub struct PublishEntry {
     pub always: bool,
 }
 
+/// A published port the plan opens, with where on the host it is opened:
+/// what a unit in a container of its own is reached by from the host. Only
+/// such a unit has any.
+#[derive(Clone, Debug)]
+pub struct OpenedPort<V> {
+    pub container_port: i64,
+    pub address: V,
+    pub host_port: V,
+}
+
 /// A file a unit builds, and its path on the host.
 #[derive(Clone, Debug)]
 pub struct Output {

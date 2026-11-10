@@ -45,10 +45,10 @@ impl From<Exit> for ExitCode {
 
 const HELP: &str = "\
 tay (Topology Automation via YAML) brings a stack of host processes and
-containers up in dependency order and reports their state. This version runs
-processes and commands on the host, each under a keeper that outlives the
-daemon, and makes a stack's ports, secrets and files; it cannot run a
-container, or a command in one, yet, and says so of each unit that would.
+containers up in dependency order and reports their state. It runs processes
+and commands on the host, each under a keeper that outlives the daemon, runs
+containers and commands in them through Docker, and makes a stack's ports,
+secrets and files.
 
 Usage:
   tay plan [--root FOLDER] [--profile NAME] [--set PLACE=VALUE]... [--json]

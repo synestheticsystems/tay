@@ -8,11 +8,12 @@ use crate::syntax::names::NameAt;
 use crate::syntax::yaml::Node;
 use crate::value::Filled;
 
+use crate::module::description::OpenedPort;
 use crate::module::description::{
     Description, ModuleGive, ModuleValue, ReadyWithoutCheck, RestartOn, UnitKind,
 };
 use crate::module::operations::Operations;
-use crate::module::settings::{Destination, MapValues, Slot, maybe};
+use crate::module::settings::{Destination, MapValues, Operate, Slot, maybe};
 use crate::module::want::Want;
 use crate::module::{Cx, Module};
 
@@ -73,9 +74,10 @@ impl<V> MapValues for SecretSettings<V> {
     }
 }
 
-impl From<SecretSettings<Filled>> for Operations {
-    fn from(settings: SecretSettings<Filled>) -> Operations {
-        Operations::Made(Box::new(settings))
+/// A unit that is made publishes nothing, so no port is opened for it.
+impl Operate for SecretSettings<Filled> {
+    fn operate(self, _: Vec<OpenedPort<Filled>>) -> Operations {
+        Operations::Made(Box::new(self))
     }
 }
 

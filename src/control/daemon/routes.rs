@@ -136,8 +136,9 @@ fn down(daemon: &Arc<Daemon>) -> Response<Body> {
 async fn status(daemon: &Arc<Daemon>) -> Response<Body> {
     let units = daemon.supervisor.snapshot();
     let environment = Arc::clone(&daemon.environment);
+    let host_listen = daemon.supervisor.host_listen();
     let checked = tokio::task::spawn_blocking(move || {
-        let found = engine::check_now(&units, &environment);
+        let found = engine::check_now(&units, &environment, &host_listen);
         (units, found)
     })
     .await;

@@ -1,7 +1,8 @@
 //! What the engine asks of a unit that runs, once its settings are filled:
-//! a process, a command. An attempt is driven by a future that ends when the
-//! attempt does, and tells the engine each step it comes to, so that the
-//! engine knows what it is doing and when the unit's own program runs.
+//! a process, a container, a command. An attempt is driven by a future that
+//! ends when the attempt does, and tells the engine each step it comes to,
+//! so that the engine knows what it is doing and when the unit's own
+//! program runs.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -19,7 +20,7 @@ pub trait Running: Send + Sync {
     fn start(self: Arc<Self>, place: UnitPlace, attempt: u32, steps: Steps) -> Driving;
 
     /// The unit as a daemon that did not start it finds it.
-    fn found(&self, place: &UnitPlace) -> Result<Found, Failure>;
+    fn found(self: Arc<Self>, place: UnitPlace) -> Finding;
 
     /// Drives an attempt found under way from where it is to its end,
     /// telling `steps` the step it is at first.
@@ -33,7 +34,19 @@ pub trait Running: Send + Sync {
         command: Vec<String>,
         limit: Duration,
     ) -> ReadinessCommand;
+
+    /// Whether what runs of the unit now, which a task looks after, was
+    /// started from other settings than these, so that bringing the unit
+    /// up replaces it.
+    fn outdated(self: Arc<Self>, place: UnitPlace) -> Comparing;
 }
+
+/// A unit being found where it runs.
+pub type Finding = Pin<Box<dyn Future<Output = Result<Found, Failure>> + Send>>;
+
+/// Whether what runs of a unit was started from other settings than it
+/// has, being found out by comparing them.
+pub type Comparing = Pin<Box<dyn Future<Output = Result<bool, Failure>> + Send>>;
 
 /// An attempt being driven: it ends with how the attempt came out.
 pub type Driving = Pin<Box<dyn Future<Output = Outcome> + Send>>;
@@ -54,6 +67,12 @@ pub enum Step {
     /// The unit's own program runs, since this time in milliseconds since
     /// 1970: its readiness is checked from now.
     Running { since: u64 },
+    /// Its readiness as its module judges it, for a unit that writes no
+    /// `ready` and is ready when its module says, as a container is when
+    /// its image's own health check passes: it passes, in these words.
+    Passes(String),
+    /// It does not pass, and why.
+    Fails(String),
 }
 
 /// How an attempt came out. The words of each are what a person is told,

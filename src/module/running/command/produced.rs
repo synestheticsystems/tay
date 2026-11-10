@@ -14,7 +14,6 @@ use serde_json::{Map, Value as Json};
 
 use crate::disk::{DiskError, write_whole};
 use crate::module::operations::{Failure, UnitPlace, Values};
-use crate::module::running::host;
 use crate::syntax::names::NameAt;
 use crate::value::{Exact, Filled};
 
@@ -48,7 +47,11 @@ enum ProducedError {
 
 /// The file the command writes its values to, which `TAY_VALUES` names.
 pub fn file(place: &UnitPlace) -> PathBuf {
-    host::files(place).folder().join(WRITTEN)
+    place
+        .environment
+        .layout
+        .unit_state(&place.unit)
+        .join(WRITTEN)
 }
 
 /// Removes what an earlier step wrote, so that only what the step about to
@@ -106,7 +109,7 @@ pub fn take(place: &UnitPlace, declared: &[(NameAt, bool)]) -> Result<Values, Fa
 
 /// The values kept when the command was last done.
 pub fn kept(place: &UnitPlace, declared: &[(NameAt, bool)]) -> Result<Values, Failure> {
-    let plain = read_kept(&host::files(place).folder().join(KEPT))?;
+    let plain = read_kept(&kept_path(place))?;
     let secret = read_kept(&secrets(place))?;
     values(declared, &plain, &secret)
 }
@@ -150,6 +153,10 @@ fn exact(name: &str, value: &Json) -> Result<Exact, ProducedError> {
     }
 }
 
+fn kept_path(place: &UnitPlace) -> PathBuf {
+    place.environment.layout.unit_state(&place.unit).join(KEPT)
+}
+
 fn secrets(place: &UnitPlace) -> PathBuf {
     place
         .environment
@@ -164,7 +171,12 @@ fn keep(
     plain: &Map<String, Json>,
     secret: &Map<String, Json>,
 ) -> Result<(), ProducedError> {
-    let kept = host::files(place).folder().join(KEPT);
+    let kept = kept_path(place);
+    // A command that runs in a container has nothing of its own on the
+    // host until its values are kept.
+    if let Some(folder) = kept.parent() {
+        fs::create_dir_all(folder).map_err(DiskError::io(folder, "made"))?;
+    }
     write_whole(&kept, json(plain).as_bytes(), 0o644)?;
     let path = secrets(place);
     if secret.is_empty() {

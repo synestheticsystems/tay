@@ -1,6 +1,6 @@
 //! `tay status [UNIT]`: each unit's state, from a check. The daemon makes
 //! the checks; with none running, an environment meant to be up, or with
-//! anything of it running, has one started to find its units, and any other
+//! anything of it left, has one started to find its units, and any other
 //! has every unit stopped.
 
 use std::path::Path;
@@ -10,7 +10,7 @@ use serde_json::json;
 use crate::cli::Exit;
 use crate::cli::args::{Args, Takes, UnitsNamed};
 use crate::cli::stack;
-use crate::control::client::Client;
+use crate::control::client::{Client, ClientError};
 use crate::definition::read::{self, THIS_TAY};
 use crate::diagnostic::Diagnostics;
 use crate::diagnostic::source::Sources;
@@ -111,16 +111,20 @@ fn from_daemon(environment: &Environment, args: &Args) -> Result<Report, Exit> {
         Intent::read(&environment.layout).map_err(|error| disk_problem(COMMAND, &error))?;
     let root = environment.layout.root();
     let id = Some(environment.id.to_string());
-    let found = module::found_running(&environment.layout)
-        .map_err(|failure| problem(COMMAND, Exit::Unreachable, &failure.to_string()))?;
-    let runs = !found.is_empty();
     let status = block_on(COMMAND, async {
         let client = match Client::find(environment).await? {
             Some(client) => client,
-            None if intent == Intent::Down && !runs => return Ok(None),
-            None => Client::ensure(environment).await?,
+            None => {
+                let left = module::found_left(environment)
+                    .await
+                    .map_err(|failure| Unreached::Left(failure.to_string()))?;
+                if intent == Intent::Down && left.is_empty() {
+                    return Ok(None);
+                }
+                Client::ensure(environment).await?
+            }
         };
-        client.status().await.map(Some)
+        Ok(Some(client.status().await?))
     })?;
     match status {
         Ok(Some(status)) => Ok(Report {
@@ -141,7 +145,21 @@ fn from_daemon(environment: &Environment, args: &Args) -> Result<Report, Exit> {
         }),
         // No daemon runs and the environment is down: nothing runs.
         Ok(None) => stopped(root, id, "down", "the environment is down", args),
-        Err(error) => Err(client_problem(COMMAND, &error)),
+        Err(Unreached::Client(error)) => Err(client_problem(COMMAND, &error)),
+        Err(Unreached::Left(why)) => Err(problem(COMMAND, Exit::Unreachable, &why)),
+    }
+}
+
+/// Why no daemon could say how the units stand.
+enum Unreached {
+    Client(ClientError),
+    /// What is left of the environment's units cannot be told.
+    Left(String),
+}
+
+impl From<ClientError> for Unreached {
+    fn from(error: ClientError) -> Unreached {
+        Unreached::Client(error)
     }
 }
 

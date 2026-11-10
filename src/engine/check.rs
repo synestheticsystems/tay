@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use super::fill::{self, UnitValues};
+use super::fill::{self, HostListen, UnitValues};
 use super::settled::{Settled, Standing};
 use super::state::{State, UnitState};
 use super::supervisor::{Begin, Supervisor};
@@ -16,6 +16,7 @@ use super::units::Units;
 use crate::disk::Environment;
 use crate::module::{self, Found, Made, Operations, Outcome, UnitKind, UnitPlace, Values};
 use crate::plan::PlannedUnit;
+use crate::value::{Filled, Placeholder, Unfilled};
 
 /// A unit's state as a check found it.
 pub struct CheckedState {
@@ -28,12 +29,12 @@ pub struct CheckedState {
 /// looked after again, whether or not the environment is meant to be up;
 /// `up` is whether it is, and so whether what is made is checked and
 /// restart policies apply.
-pub fn find_again(supervisor: &Arc<Supervisor>, units: &[Arc<PlannedUnit>], up: bool) {
+pub async fn find_again(supervisor: &Arc<Supervisor>, units: &[Arc<PlannedUnit>], up: bool) {
     let mut pass = Pass::default();
     for planned in units {
         let found = match &planned.mechanism {
             Some(mechanism) if matches!(mechanism.kind, UnitKind::Runs(_)) => {
-                pass.running(supervisor, planned, up)
+                pass.running(supervisor, planned, up).await
             }
             // What is made is left as it is on disk while the environment
             // is down, and is not asked for.
@@ -44,7 +45,11 @@ pub fn find_again(supervisor: &Arc<Supervisor>, units: &[Arc<PlannedUnit>], up: 
                     UnitState::new(State::Ready, "everything it needs is ready"),
                     None,
                 )),
-                None => Some(pass.made(planned, &supervisor.environment)),
+                None => Some(
+                    pass.made(planned, &supervisor.environment, &|placeholder, given| {
+                        supervisor.fill(placeholder, given)
+                    }),
+                ),
             },
         };
         // A unit looked after again is recorded by its task.
@@ -61,7 +66,14 @@ pub fn find_again(supervisor: &Arc<Supervisor>, units: &[Arc<PlannedUnit>], up: 
 /// that is made and was ready is checked again, and a group that was up is
 /// as its needs are. Any other unit is as its state was recorded, which for
 /// a unit that runs is as its task last saw it.
-pub fn check_now(units: &Units, environment: &Arc<Environment>) -> Vec<CheckedState> {
+pub fn check_now(
+    units: &Units,
+    environment: &Arc<Environment>,
+    host_listen: &HostListen,
+) -> Vec<CheckedState> {
+    let fill = |placeholder: &Placeholder, given: &UnitValues| {
+        fill::fill(placeholder, environment, host_listen, given)
+    };
     let mut pass = Pass::default();
     units
         .iter()
@@ -80,7 +92,7 @@ pub fn check_now(units: &Units, environment: &Arc<Environment>) -> Vec<CheckedSt
                     UnitState::new(State::Ready, "everything it needs is ready"),
                     None,
                 ),
-                None => pass.made(planned, environment),
+                None => pass.made(planned, environment, &fill),
             };
             pass.record(planned, &state, &values);
             CheckedState {
@@ -90,6 +102,10 @@ pub fn check_now(units: &Units, environment: &Arc<Environment>) -> Vec<CheckedSt
         })
         .collect()
 }
+
+/// How a pass fills a placeholder of a unit, from what the units before it
+/// gave.
+type Fill<'a> = dyn Fn(&Placeholder, &UnitValues) -> Result<Filled, Unfilled> + 'a;
 
 /// One pass over the units, in their order.
 #[derive(Default)]
@@ -117,20 +133,15 @@ impl Pass {
         standing.waiting()
     }
 
-    /// The unit's operations, its settings filled from what the units
-    /// before it in this pass gave.
-    fn operations(
-        &self,
-        planned: &PlannedUnit,
-        environment: &Environment,
-    ) -> Result<Operations, String> {
+    /// The unit's operations, its settings filled by `fill` from what the
+    /// units before it in this pass gave.
+    fn operations(&self, planned: &PlannedUnit, fill: &Fill<'_>) -> Result<Operations, String> {
         let mechanism = planned
             .mechanism
             .as_ref()
             .expect("only a unit with a mechanism is checked");
         mechanism
-            .settings
-            .fill(&mut |placeholder| fill::fill(placeholder, environment, &self.given))
+            .operations(&mut |placeholder| fill(placeholder, &self.given))
             .map_err(|why| why.to_string())
     }
 
@@ -139,12 +150,13 @@ impl Pass {
         &self,
         planned: &PlannedUnit,
         environment: &Arc<Environment>,
+        fill: &Fill<'_>,
     ) -> (UnitState, Option<Values>) {
         let place = UnitPlace {
             unit: planned.name.clone(),
             environment: Arc::clone(environment),
         };
-        match self.operations(planned, environment) {
+        match self.operations(planned, fill) {
             Err(reason) => (UnitState::new(State::Failed, reason), None),
             Ok(Operations::Made(made)) => made_now(made.as_ref(), &place),
             Ok(Operations::Running(_)) => unreachable!("a unit whose kind is made is made"),
@@ -156,7 +168,7 @@ impl Pass {
     /// how it stands: `None` then. One under way is looked after whatever
     /// its needs are doing; one that is not, and whose need has failed, is
     /// blocked, as it would be were it about to start.
-    fn running(
+    async fn running(
         &mut self,
         supervisor: &Arc<Supervisor>,
         planned: &Arc<PlannedUnit>,
@@ -175,12 +187,14 @@ impl Pass {
             Some(waiting) => Some((waiting.clone(), None)),
             None => Some((state, None)),
         };
-        let running = match self.operations(planned, &supervisor.environment) {
+        let fill =
+            |placeholder: &Placeholder, given: &UnitValues| supervisor.fill(placeholder, given);
+        let running = match self.operations(planned, &fill) {
             Ok(Operations::Running(running)) => running,
             Ok(Operations::Made(_)) => unreachable!("a unit whose kind runs runs"),
-            Err(why) => return unfilled(planned, &place, &why, up, blocked),
+            Err(why) => return unfilled(planned, &place, &why, up, blocked).await,
         };
-        let begin = match running.found(&place) {
+        let begin = match Arc::clone(&running).found(place.clone()).await {
             Err(failure) => return not_running(UnitState::new(State::Failed, failure.to_string())),
             Ok(Found::Never) => {
                 return not_running(UnitState::new(
@@ -243,7 +257,7 @@ impl Pass {
 /// A unit that runs whose settings cannot be filled, so that it cannot be
 /// looked after: if anything of it runs, it is reported so, and `tay down`
 /// still stops it from its place alone.
-fn unfilled(
+async fn unfilled(
     planned: &PlannedUnit,
     place: &UnitPlace,
     why: &str,
@@ -254,10 +268,12 @@ fn unfilled(
     else {
         return None;
     };
-    let state = match module::running_now(runs, place) {
+    let state = match module::anything_left(runs, place).await {
         Ok(true) => UnitState::new(
             State::Failed,
-            format!("it runs, but tay cannot fill its settings to look after it: {why}"),
+            format!(
+                "something of it is left, but tay cannot fill its settings to look after it: {why}"
+            ),
         ),
         Ok(false) if !up => UnitState::new(State::Stopped, "the environment is down"),
         Ok(false) => blocked.unwrap_or_else(|| UnitState::new(State::Failed, why)),

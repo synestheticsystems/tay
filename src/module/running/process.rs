@@ -11,9 +11,10 @@ use crate::value::Filled;
 
 use super::command_line::{COMMAND_LINE, argv, argv_list};
 use super::variables::{Variables, variables};
+use crate::module::description::OpenedPort;
 use crate::module::description::{Description, ReadyWithoutCheck, RestartOn, Runs, UnitKind};
 use crate::module::operations::Operations;
-use crate::module::settings::{Destination, MapValues, Slot, each, maybe};
+use crate::module::settings::{Destination, MapValues, Operate, Slot, each, maybe};
 use crate::module::want::{PathUse, Want};
 use crate::module::{Cx, Module};
 
@@ -66,9 +67,11 @@ impl<V> MapValues for ProcessSettings<V> {
     }
 }
 
-impl From<ProcessSettings<Filled>> for Operations {
-    fn from(settings: ProcessSettings<Filled>) -> Operations {
-        Operations::Running(Arc::new(settings))
+/// A process runs on the host and publishes nothing, so no port is opened
+/// for it.
+impl Operate for ProcessSettings<Filled> {
+    fn operate(self, _: Vec<OpenedPort<Filled>>) -> Operations {
+        Operations::Running(Arc::new(self))
     }
 }
 

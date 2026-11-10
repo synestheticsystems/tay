@@ -143,6 +143,9 @@ pub struct Resolver<'s> {
     /// Every file and argument read, which a path beginning `./` is
     /// relative to the folder of.
     pub sources: &'s mut Sources,
+    /// Whether a value was `${host.listen}`, which is known only once the
+    /// environment is brought up.
+    pub host_listen: bool,
 }
 
 impl<'s> Resolver<'s> {
@@ -157,6 +160,7 @@ impl<'s> Resolver<'s> {
             layered,
             environment,
             sources,
+            host_listen: false,
             d: Diagnostics::default(),
             units: stack
                 .units
@@ -278,7 +282,10 @@ impl<'s> Resolver<'s> {
         match &reference.target {
             Target::Setting(name) => self.setting(name, reference),
             Target::Environment(field) => self.environment_field(*field, reference),
-            Target::HostListen => Ok(Resolved::known(Value::Placeholder(Placeholder::HostListen))),
+            Target::HostListen => {
+                self.host_listen = true;
+                Ok(Resolved::known(Value::Placeholder(Placeholder::HostListen)))
+            }
             Target::Arg(name) => {
                 // An action's arguments were checked against its declaration
                 // while reading, in the unit the reference is written in.

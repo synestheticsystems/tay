@@ -1,6 +1,14 @@
 //! `container`: an image run through Docker, on the environment's network.
+//! Docker is a container's parent, so a container needs no keeper: how it
+//! stands, how it ended, its output and what belongs to the environment
+//! are asked of Docker, through [`docker`].
 
+mod docker;
+mod host;
+mod left;
 mod read;
+mod step;
+mod unit;
 
 use std::sync::Arc;
 
@@ -8,38 +16,38 @@ use crate::syntax::names::NameAt;
 use crate::syntax::yaml::Node;
 use crate::value::Filled;
 
-use super::NotRunnable;
 use super::mounts::{self, Mount};
 use super::variables::Variables;
 use crate::module::description::{
-    Concern, Description, ReadyWithoutCheck, RestartOn, Runs, UnitKind,
+    Concern, Description, OpenedPort, ReadyWithoutCheck, RestartOn, Runs, UnitKind,
 };
-use crate::module::operations::Operations;
-use crate::module::settings::{MapValues, each, each_named, maybe};
+use crate::module::operations::{Operations, UnitPlace};
+use crate::module::settings::{MapValues, Operate, each, each_named, maybe};
 use crate::module::{Cx, Module};
+use unit::ContainerUnit;
+
+pub use host::{HOST_IN_CONTAINERS, Occasion, host_listen};
+pub use left::{anything_left, found_left, remove_shared, stop};
+pub use step::{CommandStep, ContainerStepEnd, FoundOwn, found_own, run_inside, run_own, wait_own};
+pub use unit::check_inside;
 
 pub struct Container;
 
-/// The name the host has inside the environment's containers, which Docker
-/// gives it.
-pub const HOST_IN_CONTAINERS: &str = "host.docker.internal";
-
-/// `${host.listen}`: the address a host process listens on so that this
-/// machine's containers can reach it and other machines cannot. On macOS,
-/// Docker Desktop brings a container's connections to the host's own
-/// address.
-#[cfg(target_os = "macos")]
-pub fn host_listen() -> Result<&'static str, &'static str> {
-    Ok("127.0.0.1")
+/// The container of `unit` in the environment `place` is in:
+/// `tay-<id>-<unit>`, the name a container of a command made for one run
+/// has too.
+pub fn container_name(place: &UnitPlace) -> String {
+    format!("tay-{}-{}", place.environment.id, place.unit)
 }
 
-/// `${host.listen}` elsewhere: the host's address on the environment's
-/// network, which is known once the network exists.
-#[cfg(not(target_os = "macos"))]
-pub fn host_listen() -> Result<&'static str, &'static str> {
-    Err(
-        "on this system it is the host's address on the environment's network, and tay does not make networks yet",
-    )
+/// What tay keeps of how far the output of `place`'s container has been
+/// copied into its log.
+fn copied(place: &UnitPlace) -> std::path::PathBuf {
+    place
+        .environment
+        .layout
+        .unit_state(&place.unit)
+        .join("copied.json")
 }
 
 /// A container's settings, each value a [`Slot`](crate::module::Slot) as written or a [`Value`](crate::value::Value)
@@ -165,12 +173,11 @@ impl<V> MapValues for ContainerSettings<V> {
     }
 }
 
-/// tay cannot run such a unit yet, so its operations fail, saying so, and
-/// what its settings say is not used.
-impl From<ContainerSettings<Filled>> for Operations {
-    fn from(_: ContainerSettings<Filled>) -> Operations {
-        Operations::Running(Arc::new(NotRunnable {
-            what: "a `container` unit",
+impl Operate for ContainerSettings<Filled> {
+    fn operate(self, opened: Vec<OpenedPort<Filled>>) -> Operations {
+        Operations::Running(Arc::new(ContainerUnit {
+            settings: self,
+            opened,
         }))
     }
 }
@@ -325,6 +332,20 @@ mod tests {
         assert_eq!(
             description.settings.slots()[0].want,
             Want::Path(PathUse::Named)
+        );
+    }
+
+    #[test]
+    fn a_label_that_begins_as_tays_own_labels_do_is_refused() {
+        let (_, errors) = check(
+            "container",
+            "image: app\nlabels: { team: core, tay.environment: abc }\n",
+        );
+        assert_eq!(
+            errors,
+            [
+                "2:23: a label: `tay.environment` is not a label a definition sets: tay sets the labels that begin `tay.`"
+            ]
         );
     }
 

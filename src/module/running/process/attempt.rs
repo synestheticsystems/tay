@@ -7,8 +7,10 @@ use std::time::Duration;
 
 use crate::keeper::{Look, Program};
 use crate::module::operations::{
-    Driving, Failure, Found, Outcome, ReadinessCommand, Running, Step, Steps, UnderWay, UnitPlace,
+    Comparing, Driving, Failure, Finding, Found, Outcome, ReadinessCommand, Running, Step, Steps,
+    UnderWay, UnitPlace,
 };
+use crate::module::running::command_line::{filled_argv, shown};
 use crate::module::running::host::{self, StepEnd};
 use crate::value::Filled;
 
@@ -42,29 +44,8 @@ impl Running for ProcessSettings<Filled> {
         })
     }
 
-    fn found(&self, place: &UnitPlace) -> Result<Found, Failure> {
-        Ok(match host::files(place).look()? {
-            Look::Never => Found::Never,
-            Look::Running(record) => Found::UnderWay(UnderWay {
-                attempt: record.attempt,
-                step: record.step,
-            }),
-            Look::Ended(record, ended) => Found::Ended {
-                attempt: record.attempt,
-                outcome: match record.step.as_str() {
-                    COMMAND => host::ending(&StepEnd::Ended(ended), ", while no daemon ran"),
-                    // Nothing went on with the attempt once its daemon had
-                    // gone, and a restart would not prepare.
-                    _ => Outcome::Failed(format!(
-                        "attempt {} was preparing when its daemon ended, and was not started",
-                        record.attempt
-                    )),
-                },
-            },
-            Look::Lost(record) => Found::Lost {
-                attempt: record.attempt,
-            },
-        })
+    fn found(self: Arc<Self>, place: UnitPlace) -> Finding {
+        Box::pin(async move { found(&place) })
     }
 
     fn resume(self: Arc<Self>, place: UnitPlace, under_way: UnderWay, steps: Steps) -> Driving {
@@ -89,6 +70,39 @@ impl Running for ProcessSettings<Filled> {
             host::check(program, limit).await
         })
     }
+
+    /// What restarts a process when its definition changes is not in the
+    /// engine's document yet, so a process that runs is left running.
+    fn outdated(self: Arc<Self>, _: UnitPlace) -> Comparing {
+        Box::pin(async { Ok(false) })
+    }
+}
+
+/// A process as a daemon that did not start it finds it, from its record
+/// and its lock.
+fn found(place: &UnitPlace) -> Result<Found, Failure> {
+    Ok(match host::files(place).look()? {
+        Look::Never => Found::Never,
+        Look::Running(record) => Found::UnderWay(UnderWay {
+            attempt: record.attempt,
+            step: record.step,
+        }),
+        Look::Ended(record, ended) => Found::Ended {
+            attempt: record.attempt,
+            outcome: match record.step.as_str() {
+                COMMAND => host::ending(&StepEnd::Ended(ended), ", while no daemon ran"),
+                // Nothing went on with the attempt once its daemon had
+                // gone, and a restart would not prepare.
+                _ => Outcome::Failed(format!(
+                    "attempt {} was preparing when its daemon ended, and was not started",
+                    record.attempt
+                )),
+            },
+        },
+        Look::Lost(record) => Found::Lost {
+            attempt: record.attempt,
+        },
+    })
 }
 
 impl ProcessSettings<Filled> {
@@ -123,14 +137,14 @@ impl ProcessSettings<Filled> {
             // The engine has stopped listening only once it has dropped
             // the attempt, which then goes no further.
             let _ = steps.send(Step::Before(self.preparing(index)?));
-            let argv = host::argv(&self.prepare[index], "a `prepare` command")?;
+            let argv = filled_argv(&self.prepare[index], "a `prepare` command")?;
             let program = self.program(place, argv)?;
             let end = host::run(&files, attempt, &prepare_step(index), program, None).await?;
             if let Some(failed) = self.prepare_failed(index, &end)? {
                 return Ok(failed);
             }
         }
-        let argv = host::argv(&self.command, "`command`")?;
+        let argv = filled_argv(&self.command, "`command`")?;
         let program = self.program(place, argv)?;
         let end = host::run(&files, attempt, COMMAND, program, Some(steps)).await?;
         Ok(host::ending(&end, ""))
@@ -153,15 +167,15 @@ impl ProcessSettings<Filled> {
             .prepare
             .get(index)
             .ok_or_else(|| UnknownStep(prepare_step(index)))?;
-        let argv = host::argv(words, "a `prepare` command")?;
-        Ok(format!("preparing: {}", host::shown(&argv)))
+        let argv = filled_argv(words, "a `prepare` command")?;
+        Ok(format!("preparing: {}", shown(&argv)))
     }
 
     /// The outcome of the attempt when its `index`th `prepare` command did
     /// not exit with 0: it cannot start until something changes.
     fn prepare_failed(&self, index: usize, end: &StepEnd) -> Result<Option<Outcome>, Failure> {
-        let argv = host::argv(&self.prepare[index], "a `prepare` command")?;
-        let shown = host::shown(&argv);
+        let argv = filled_argv(&self.prepare[index], "a `prepare` command")?;
+        let shown = shown(&argv);
         Ok(match end {
             StepEnd::Ended(ended) if ended.how.succeeded() => None,
             StepEnd::Ended(ended) => Some(Outcome::Failed(format!(

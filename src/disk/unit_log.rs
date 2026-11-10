@@ -160,8 +160,14 @@ pub struct Adding {
 impl Adding {
     /// Writes `text`, as `writer` wrote it, with the time now.
     pub fn write(&mut self, writer: Writer, text: &str) -> Result<(), DiskError> {
+        self.write_at(clock::now_millis(), writer, text)
+    }
+
+    /// Writes `text`, as `writer` wrote it at `millis`, in milliseconds
+    /// since 1970: what a container wrote, at the time Docker kept for it.
+    pub fn write_at(&mut self, millis: u64, writer: Writer, text: &str) -> Result<(), DiskError> {
         let line = Line {
-            time: clock::stamp(clock::now_millis()),
+            time: clock::stamp(millis),
             writer,
             text: text.to_string(),
         };

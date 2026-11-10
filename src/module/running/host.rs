@@ -18,7 +18,7 @@ use crate::keeper::{Ended, Ending, Look, Program, StepFiles};
 use crate::module::operations::{Failure, Outcome, Step, Steps, UnitPlace};
 use crate::value::Filled;
 
-use super::command_line::RunForm;
+use super::command_line::shown;
 use super::variables::Variables;
 
 /// What a program inherits from the environment tay runs in when `inherit`
@@ -30,32 +30,25 @@ const CHECK_LOOK: Duration = Duration::from_millis(50);
 
 #[derive(Debug, thiserror::Error)]
 enum HostError {
-    #[error("{what} holds a secret, which tay never puts in a command line")]
-    SecretInCommandLine { what: &'static str },
     #[error("tay failed while {doing}: {why}")]
     Panicked { doing: &'static str, why: String },
 }
 
-/// The files a unit that runs on the host keeps: in `state/units/<unit>/`,
-/// its lock, its record and the values it produced; in `logs/<unit>/`, its
-/// log.
+/// The files a unit that runs on the host keeps: in its folder of the
+/// state folder, its lock, its record and the values it produced; in
+/// `logs/<unit>/`, its log.
 pub fn files(place: &UnitPlace) -> StepFiles {
     files_of(&place.environment.layout, &place.unit)
 }
 
 fn files_of(layout: &Layout, unit: &str) -> StepFiles {
-    StepFiles::at(units(layout).join(unit), layout.unit_log(unit))
-}
-
-/// `state/units/`: a folder for each unit that runs on the host.
-fn units(layout: &Layout) -> PathBuf {
-    layout.state().join("units")
+    StepFiles::at(layout.unit_state(unit), layout.unit_log(unit))
 }
 
 /// The units of the environment `layout` lays out of which something runs
 /// on the host, from each unit's lock and record, whatever the plan has.
 pub fn found_running(layout: &Layout) -> Result<Vec<String>, Failure> {
-    let folder = units(layout);
+    let folder = layout.units_state();
     let entries = match std::fs::read_dir(&folder) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -113,37 +106,6 @@ pub fn workdir(workdir: Option<&Filled>, place: &UnitPlace) -> Result<PathBuf, F
         Some(workdir) => PathBuf::from(crate::module::operations::text(workdir, "workdir")?),
         None => place.environment.layout.root().to_path_buf(),
     })
-}
-
-/// A program and its arguments, from words with no secret in them, as the
-/// planner sees to.
-pub fn argv(words: &[Filled], what: &'static str) -> Result<Vec<String>, Failure> {
-    words.iter().map(|word| word_of(word, what)).collect()
-}
-
-fn word_of(word: &Filled, what: &'static str) -> Result<String, Failure> {
-    match word.plain() {
-        Some(exact) => Ok(exact.as_text()),
-        None => Err(HostError::SecretInCommandLine { what }.into()),
-    }
-}
-
-/// `run`, `check` or `undo` as a program and its arguments: a list as it
-/// is, and `{ shell: "..." }` run by `/bin/sh -c`.
-pub fn run_form(form: &RunForm<Filled>, what: &'static str) -> Result<Vec<String>, Failure> {
-    match form {
-        RunForm::Argv(words) => argv(words, what),
-        RunForm::Shell(text) => Ok(vec![
-            "/bin/sh".to_string(),
-            "-c".to_string(),
-            word_of(text, what)?,
-        ]),
-    }
-}
-
-/// A command line as a person reads it.
-pub fn shown(argv: &[String]) -> String {
-    format!("`{}`", argv.join(" "))
 }
 
 /// How a step that was waited for ended.
@@ -313,7 +275,7 @@ impl Drop for Checking {
     }
 }
 
-fn panicked(doing: &'static str, error: &tokio::task::JoinError) -> Failure {
+pub fn panicked(doing: &'static str, error: &tokio::task::JoinError) -> Failure {
     HostError::Panicked {
         doing,
         why: error.to_string(),

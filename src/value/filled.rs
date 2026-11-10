@@ -39,11 +39,11 @@ pub enum Unfilled {
         "`${{args.{name}}}` is given when the action is asked for with its arguments, which tay cannot do yet"
     )]
     Argument { name: String },
-    /// A fact of the environment that this tay cannot work out here.
+    /// A fact of the environment that is not known.
     #[error("{reference} cannot be worked out: {why}")]
     Fact {
         reference: &'static str,
-        why: &'static str,
+        why: String,
     },
 }
 

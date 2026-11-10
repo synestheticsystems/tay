@@ -12,11 +12,10 @@ use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
 
-use super::{Supervisor, stop_blocking};
+use super::{Supervisor, stop_where_it_runs};
 use crate::clock;
 use crate::disk::Count;
 use crate::disk::unit_log::UnitLog;
-use crate::engine::fill;
 use crate::engine::readiness::Probe;
 use crate::engine::state::{State, UnitState};
 use crate::module::{
@@ -213,10 +212,9 @@ impl Tending {
         let check = match &mechanism.ready {
             Readiness::Check { check, within } => {
                 let given = self.supervisor.given();
-                let environment = &self.supervisor.environment;
                 let filled = check.try_map(&mut |value| {
                     value
-                        .fill(&mut |placeholder| fill::fill(placeholder, environment, &given))
+                        .fill(&mut |placeholder| self.supervisor.fill(placeholder, &given))
                         .map_err(|why| why.to_string())
                 });
                 let impossible = filled.as_ref().ok().and_then(Probe::impossible);
@@ -241,7 +239,7 @@ impl Tending {
             Readiness::WithoutCheck(_) => None,
         };
         let (steps, mut told) = mpsc::unbounded_channel();
-        let mut driving: Driving = match under_way {
+        let driving: Driving = match under_way {
             None => {
                 self.keep_count(attempt, false);
                 self.record(State::Starting, self.detail(attempt, "starting"), None);
@@ -249,6 +247,7 @@ impl Tending {
             }
             Some(under_way) => Arc::clone(&self.running).resume(place.clone(), under_way, steps),
         };
+        let mut driving = after_its_steps(driving);
         let mut probe: Option<Probe> = None;
         let mut making: Option<CheckUnderWay> = None;
         let mut next_check: Option<Instant> = None;
@@ -267,7 +266,8 @@ impl Tending {
                     let _ = stop.send(self.stop_now().await);
                     return Watched::Stopped;
                 }
-                outcome = &mut driving => return Watched::Came { outcome, ready },
+                // A step the attempt came to is taken in before how it came
+                // out, which follows it.
                 Some(step) = told.recv() => match step {
                     Step::Before(doing) => {
                         self.record(State::Starting, self.detail(attempt, &doing), None);
@@ -293,11 +293,42 @@ impl Tending {
                             self.keep_count(attempt, true);
                             self.record(State::Ready, self.detail(attempt, "running"), None);
                         }
+                        // A unit its module judges was ready when it was
+                        // found again is ready until its module says not.
                         (None, _) => {
-                            self.record(State::Starting, self.detail(attempt, "running"), None);
+                            let (state, doing) = match ready {
+                                true => (State::Ready, "running; ready when it was found again"),
+                                false => (State::Starting, "running"),
+                            };
+                            self.record(state, self.detail(attempt, doing), None);
                         }
                     },
+                    // The module judges readiness only for a unit that
+                    // writes no check; one that writes its own is judged by
+                    // that alone.
+                    Step::Passes(words) if check.is_none() && !passing => {
+                        passing = true;
+                        let again = if ready { " again" } else { "" };
+                        if !ready {
+                            self.keep_count(attempt, true);
+                        }
+                        ready = true;
+                        self.in_a_row = 0;
+                        self.record(State::Ready, self.detail(attempt, &format!("{words}{again}")), None);
+                    }
+                    Step::Fails(why) if check.is_none() => match passing {
+                        true => {
+                            passing = false;
+                            self.record(State::Unready, format!("attempt {attempt}: {why}"), None);
+                        }
+                        false if !ready => {
+                            self.record(State::Starting, self.detail(attempt, &format!("waiting to be ready: {why}")), None);
+                        }
+                        false => {}
+                    },
+                    Step::Passes(_) | Step::Fails(_) => {}
                 },
+                outcome = &mut driving => return Watched::Came { outcome, ready },
                 (made, found) = async { making.as_mut().expect("a check is being made").await }, if making.is_some() => {
                     making = None;
                     made_once = true;
@@ -377,8 +408,19 @@ impl Tending {
             .as_ref()
             .expect("a unit that runs has a mechanism");
         match &mechanism.kind {
-            UnitKind::Runs(runs) => stop_blocking(runs.clone(), place).await,
+            UnitKind::Runs(runs) => stop_where_it_runs(runs, &place).await,
             UnitKind::Made => Ok(()),
         }
     }
+}
+
+/// `driving`, made to wait one turn once it has come out, so that each step
+/// it told of in the same turn as it came out, as one that ends at once
+/// does, is taken in before how it came out.
+fn after_its_steps(driving: Driving) -> Driving {
+    Box::pin(async move {
+        let outcome = driving.await;
+        tokio::task::yield_now().await;
+        outcome
+    })
 }

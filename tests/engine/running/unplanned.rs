@@ -31,7 +31,7 @@ fn a_unit_the_definitions_no_longer_have_is_shown_by_status_until_up_stops_it_an
     assert_eq!(status.code, 1, "{}", status.stdout);
     assert_eq!(
         Machine::state(&status.json(), "leaving"),
-        "failed it runs, and is not in the plan any more: the next `tay up` stops it"
+        "failed it is not in the plan any more, and something of it is left: the next `tay up` stops it"
     );
     assert!(alive(leaving), "status stops nothing");
     let up = machine.at(&root, "up", &[]);

@@ -1,0 +1,205 @@
+format: 1
+stack: boxes
+up: [ticker]
+settings:
+  mode: { default: one, doc: "What the keeper is told, which a test changes to have it replaced." }
+units:
+  ticker:
+    doc: Prints a numbered line a second, for ever.
+    uses: container
+    with:
+      image: busybox:1.36
+      command: [sh, -c, "trap 'exit 0' TERM; i=0; while :; do i=$((i+1)); echo tick $i; sleep 1; done"]
+
+  farewell:
+    doc: Says three lines, then nothing until it is stopped, when it says farewell.
+    uses: container
+    with:
+      image: busybox:1.36
+      command: [sh, -c, "trap 'echo farewell; exit 0' TERM; echo one; echo two; echo three; sleep 3600 & wait"]
+
+  quitter:
+    doc: Exits with 3 a second after it starts, before it is ever ready.
+    uses: container
+    with:
+      image: busybox:1.36
+      command: [sh, -c, "echo starting; sleep 1; echo giving up; exit 3"]
+    ready: { log: "never written", within: 30s }
+    restart: { on: failure, attempts: 2 }
+
+  hungry:
+    doc: Waits for its signal, then takes more memory than it may have.
+    uses: container
+    with:
+      image: busybox:1.36
+      command: [sh, -c, "trap 'exit 0' TERM; echo waiting; until [ -e /signal/eat ]; do sleep 0.2; done; echo eating; exec dd if=/dev/zero of=/dev/null bs=64M count=1"]
+      mounts: [{ from: "${environment.state}/hungry", to: /signal }]
+    restart: { on: never }
+
+  keeper-data:
+    doc: Keeps a count of its starts on its volume, and says it.
+    uses: container
+    with:
+      image: busybox:1.36
+      command: [sh, -c, "date >> /data/starts; echo mode $MODE, start $(wc -l < /data/starts); trap 'exit 0' TERM; sleep 3600 & wait"]
+      env: { MODE: "${settings.mode}" }
+      volumes: { data: /data }
+
+  web-port: { uses: port }
+  web:
+    doc: Serves a page, published on the host because its own check uses it from there.
+    uses: container
+    with:
+      image: busybox:1.36
+      command: [sh, -c, "mkdir -p /www && echo hello from the web box > /www/index.html && trap 'exit 0' TERM; httpd -f -p 8080 -h /www & wait"]
+      publish: { 8080: "${web-port.number}" }
+    ready: { http: "${self.site.url}/", within: 30s }
+    gives:
+      site: { port: 8080, scheme: http }
+
+  quiet-port: { uses: port }
+  quiet:
+    doc: Publishes a port that nothing uses from the host, so it is not opened.
+    uses: container
+    with:
+      image: busybox:1.36
+      command: [sh, -c, "trap 'exit 0' TERM; nc -lk -p 9090 -e cat & wait"]
+      publish: { 9090: "${quiet-port.number}" }
+
+  host-port: { uses: port }
+  host-page:
+    doc: Serves a page on the host, where this machine's containers reach it.
+    uses: process
+    with:
+      command: [python3, -m, http.server, "${host-port.number}", --bind, "${host.listen}", --directory, "${environment.root}/pages"]
+    ready: { http: "${self.page.url}/", within: 30s }
+    gives:
+      page: { port: "${host-port.number}", scheme: http }
+  fetcher:
+    doc: Fetches the host's page from inside a container.
+    uses: container
+    needs: [host-page]
+    with:
+      image: busybox:1.36
+      command: [sh, -c, "wget -qO- ${host-page.page.url}/ && trap 'exit 0' TERM; sleep 3600 & wait"]
+
+  box-port: { uses: port }
+  served:
+    doc: Serves a page inside a container.
+    uses: container
+    with:
+      image: busybox:1.36
+      command: [sh, -c, "mkdir -p /www && echo hello from the box > /www/index.html && trap 'exit 0' TERM; httpd -f -p 80 -h /www & wait"]
+      publish: { 80: "${box-port.number}" }
+    ready: { tcp: "${self.page}", within: 30s }
+    gives:
+      page: { port: 80, scheme: http }
+  fetching:
+    doc: Fetches the box's page from the host.
+    uses: process
+    needs: [served]
+    with:
+      command: [sh, -c, "curl -s ${served.page.url}/; sleep 3600"]
+
+  healthy:
+    doc: Built from a Dockerfile whose health check passes two seconds after it starts.
+    uses: container
+    with:
+      build: { context: ./healthy }
+
+  marked:
+    doc: Ready once a file exists inside it, which a check run inside it looks for.
+    uses: container
+    with:
+      image: busybox:1.36
+      command: [sh, -c, "sleep 2; touch /tmp/marker; echo marked; trap 'exit 0' TERM; sleep 3600 & wait"]
+    ready: { command: [test, -f, /tmp/marker], within: 30s }
+
+  listening:
+    doc: Ready once it says it is listening.
+    uses: container
+    with:
+      image: busybox:1.36
+      command: [sh, -c, "sleep 1; echo now listening; trap 'exit 0' TERM; sleep 3600 & wait"]
+    ready: { log: listening, within: 30s }
+
+  owned:
+    doc: Says who owns its volume, which tay gave to user 4321 when it made it.
+    uses: container
+    with:
+      image: busybox:1.36
+      command: [sh, -c, "echo owner $(stat -c %u /data); trap 'exit 0' TERM; sleep 3600 & wait"]
+      volumes: { data: { to: /data, owner: 4321 } }
+
+  shaped:
+    doc: Says how its container is shaped by the settings Docker is given.
+    uses: container
+    with:
+      image: busybox:1.36
+      entrypoint: [sh, -c]
+      command: ["echo user $(id -u) in $(pwd); touch /made 2>/dev/null && echo root writable || echo root read-only; touch /scratch/x && echo scratch writable; trap 'exit 0' TERM; sleep 3600 & wait"]
+      user: "1234"
+      workdir: /tmp
+      read_only: true
+      tmpfs: [/scratch]
+      security_opt: [no-new-privileges]
+      pids_limit: 64
+      labels: { team: boxes }
+      aliases: [shape]
+
+  password: { uses: secret, with: { kind: password } }
+  guarded:
+    doc: Given a secret through its environment, and nothing else.
+    uses: container
+    with:
+      image: busybox:1.36
+      command: [sh, -c, "test -n \"$PASSWORD\" && echo has a password; trap 'exit 0' TERM; sleep 3600 & wait"]
+      secret_env: { PASSWORD: "${password.value}" }
+
+  squatter:
+    doc: Whose container's name a test gives first to a container tay did not create.
+    uses: container
+    with:
+      image: busybox:1.36
+      command: [sh, -c, "trap 'exit 0' TERM; sleep 3600 & wait"]
+
+  missing-image:
+    doc: From an image whose tag no registry has.
+    uses: container
+    with:
+      image: busybox:tay-test-no-such-tag
+
+  store:
+    doc: A container that commands run in, with the scripts they run.
+    uses: container
+    with:
+      image: busybox:1.36
+      command: [sh, -c, "trap 'exit 0' TERM; sleep 3600 & wait"]
+      mounts: [{ from: services, to: /services }]
+  seeded:
+    doc: Seeds the store once, inside its container, from what it is fed.
+    uses: command
+    with:
+      in: store
+      check: [/services/seeded.sh]
+      run: [/services/seed.sh]
+      stdin: services/seed.txt
+      user: root
+      produces: [seed]
+  stamped:
+    doc: Stamps once, in a container of its own.
+    uses: command
+    with:
+      image: busybox:1.36
+      check: [/services/stamped.sh]
+      run: [/services/stamp.sh]
+      stdin: services/seed.txt
+      mounts: [{ from: services, to: /services }]
+      secret_env: { PASSWORD: "${password.value}" }
+      produces: { stamp: {}, proof: { secret: true } }
+  shown:
+    doc: Says the values the two commands hand on.
+    uses: process
+    with:
+      command: [sh, -c, "echo seed=$SEED stamp=$STAMP; while :; do sleep 1; done"]
+      env: { SEED: "${seeded.seed}", STAMP: "${stamped.stamp}" }

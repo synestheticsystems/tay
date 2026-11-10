@@ -7,6 +7,7 @@ use super::{Daemon, log, planned};
 use crate::control::protocol::{Event, UpRequest};
 use crate::disk::Intent;
 use crate::engine::{self, Decision};
+use crate::module::Occasion;
 use crate::plan::PlannedUnit;
 
 impl Daemon {
@@ -53,16 +54,23 @@ impl Daemon {
             self.fail(&change, &reason);
             return;
         }
+        // `${host.listen}` is learnt where units run before any unit's
+        // settings are filled.
+        if plan.uses_host_listen {
+            self.supervisor
+                .learn_host_listen(Occasion::BringingUp)
+                .await;
+        }
         let units: Vec<Arc<PlannedUnit>> = plan.units.into_iter().map(Arc::new).collect();
         // What runs of a unit set apart that the plan has again, as one a
         // daemon found running that its plan then lacked, is found again
         // where it runs, and not started a second time.
         let returned = self.supervisor.take_in(&units);
-        engine::find_again(&self.supervisor, &returned, true);
-        if let Err(why) = engine::find_unplanned(&self.supervisor) {
+        engine::find_again(&self.supervisor, &returned, true).await;
+        if let Err(why) = engine::find_unplanned(&self.supervisor).await {
             self.fail(
                 &change,
-                &format!("what runs of units the plan does not have cannot be told: {why}"),
+                &format!("what is left of units the plan does not have cannot be told: {why}"),
             );
             return;
         }
@@ -101,11 +109,13 @@ impl Daemon {
             change.say(Event::Up(decision));
             change.close();
         };
+        let mut noticed = |notice: String| change.say(Event::Notice { notice });
         let decided = engine::bring_up(
             &self.supervisor,
             &units,
             &plan.up,
             &mut decided,
+            &mut noticed,
             change.cancelled(),
         )
         .await;

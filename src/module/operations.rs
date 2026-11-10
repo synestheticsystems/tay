@@ -13,7 +13,9 @@ use std::sync::Arc;
 use crate::disk::Environment;
 use crate::value::{Exact, Filled};
 
-pub use attempts::{Driving, Found, Outcome, ReadinessCommand, Running, Step, Steps, UnderWay};
+pub use attempts::{
+    Comparing, Driving, Finding, Found, Outcome, ReadinessCommand, Running, Step, Steps, UnderWay,
+};
 
 /// The operations of one unit, from its filled settings.
 pub enum Operations {
@@ -28,6 +30,16 @@ pub enum Operations {
 pub struct UnitPlace {
     pub unit: String,
     pub environment: Arc<Environment>,
+}
+
+impl UnitPlace {
+    /// Where another unit of the same environment is acted on.
+    pub fn of(&self, unit: &str) -> UnitPlace {
+        UnitPlace {
+            unit: unit.to_string(),
+            environment: Arc::clone(&self.environment),
+        }
+    }
 }
 
 /// The operations of a unit that is made: a port held, a secret generated,
@@ -96,6 +108,15 @@ pub fn text<'v>(value: &'v Filled, setting: &'static str) -> Result<&'v str, Wro
     match value.plain() {
         Some(Exact::Text(text)) => Ok(text),
         _ => Err(wrong(value, setting, "text")),
+    }
+}
+
+/// `setting`'s filled value as one word, text, a number or true or false,
+/// with no secret in it.
+pub fn scalar(value: &Filled, setting: &'static str) -> Result<String, WrongType> {
+    match value.plain() {
+        Some(exact) => Ok(exact.as_text()),
+        None => Err(wrong(value, setting, "text, a number or true or false")),
     }
 }
 

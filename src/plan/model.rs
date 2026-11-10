@@ -7,8 +7,10 @@ mod published;
 mod values;
 
 use crate::definition::Check;
-use crate::module::{Duration, Module, ReadyWithoutCheck, RestartOn, Settings, UnitKind};
-use crate::value::Value;
+use crate::module::{
+    Duration, Module, OpenedPort, Operations, ReadyWithoutCheck, RestartOn, Settings, UnitKind,
+};
+use crate::value::{Filled, Placeholder, Unfilled, Value};
 
 pub use needs::{After, Because, Need};
 pub use published::{OpenedBy, Opener, Opening, PublishedPort};
@@ -25,6 +27,8 @@ pub struct Plan {
     pub up: Vec<String>,
     /// Every unit that comes up, in an order it could start in.
     pub units: Vec<PlannedUnit>,
+    /// Whether a value in the plan is `${host.listen}`.
+    pub uses_host_listen: bool,
 }
 
 #[derive(Debug)]
@@ -55,6 +59,28 @@ pub struct PlannedMechanism {
     /// The ports a unit in a container of its own publishes, each opened or
     /// not.
     pub publishes: Vec<PublishedPort>,
+}
+
+impl PlannedMechanism {
+    /// The unit's operations, from its settings and the ports the plan opens
+    /// for it, every placeholder filled by `fill`; why a value could not be
+    /// filled, when one cannot.
+    pub fn operations(
+        &self,
+        fill: &mut dyn FnMut(&Placeholder) -> Result<Filled, Unfilled>,
+    ) -> Result<Operations, Unfilled> {
+        let mut opened = Vec::new();
+        for published in &self.publishes {
+            if let Some(opening) = &published.opening {
+                opened.push(OpenedPort {
+                    container_port: published.container_port,
+                    address: opening.address.fill(fill)?,
+                    host_port: opening.host_port.fill(fill)?,
+                });
+            }
+        }
+        self.settings.fill(opened, fill)
+    }
 }
 
 #[derive(Debug)]

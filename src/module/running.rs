@@ -11,89 +11,74 @@ mod mounts;
 pub mod process;
 mod variables;
 
-use std::sync::Arc;
-use std::time::Duration;
-
 use super::description::Runs;
-use super::operations::{
-    Driving, Failure, Found, Outcome, ReadinessCommand, Running, Steps, UnderWay, UnitPlace,
-};
-use crate::disk::Layout;
+use super::operations::{Failure, UnitPlace};
+use crate::disk::Environment;
 
-/// Whether anything of a unit that runs where `runs` says is running now,
-/// from its place alone, whatever its settings: what `tay down` asks to
-/// check that nothing is left, and a daemon asks of a unit whose settings it
-/// cannot fill.
-pub fn running_now(runs: &Runs, place: &UnitPlace) -> Result<bool, Failure> {
+/// Whether anything of a unit that runs where `runs` says is left now, from
+/// its place alone, whatever its settings: a process of it that runs, or a
+/// container of it, running or ended, which is the environment's to
+/// remove. What `tay down` asks to check that nothing is left, and a daemon
+/// asks of a unit whose settings it cannot fill.
+pub async fn anything_left(runs: &Runs, place: &UnitPlace) -> Result<bool, Failure> {
     match runs {
         Runs::OnHost => host::running_now(place),
-        // tay runs nothing in a container yet.
-        Runs::OwnContainer | Runs::InsideUnit(_) | Runs::OneOffContainer => Ok(false),
+        Runs::OwnContainer | Runs::OneOffContainer => container::anything_left(place).await,
+        // A command run inside another unit's container leaves nothing of
+        // its own: what it ran in is that unit's.
+        Runs::InsideUnit(_) => Ok(false),
     }
 }
 
-/// The units of the environment `layout` lays out of which something runs
-/// now, found where units run, whether or not the plan has them, and where
-/// each runs: what `tay down` stops beside the units it knows, and what a
-/// command asks before it says that nothing runs where no daemon does.
-pub fn found_running(layout: &Layout) -> Result<Vec<(String, Runs)>, Failure> {
-    // tay runs nothing in a container yet.
-    Ok(host::found_running(layout)?
+/// The units of `environment` of which anything is left, found where units
+/// run, whether or not the plan has them, and where each runs: what
+/// `tay down` stops beside the units it knows, what a daemon reports of the
+/// units its plan does not have, and what a command asks before it says
+/// that nothing runs where no daemon does.
+pub async fn found_left(environment: &Environment) -> Result<Vec<(String, Runs)>, Failure> {
+    let mut found: Vec<(String, Runs)> = host::found_running(&environment.layout)?
         .into_iter()
         .map(|unit| (unit, Runs::OnHost))
-        .collect())
+        .collect();
+    found.extend(container::found_left(environment).await?);
+    Ok(found)
 }
 
-/// Stops what of a unit that runs where `runs` says is running, and
-/// whatever it started in turn, from its place alone, whatever its settings.
-/// It blocks until nothing of it is left.
-pub fn stop(runs: &Runs, place: &UnitPlace) -> Result<(), Failure> {
+/// Stops what of a unit that runs where `runs` says is left, and whatever
+/// it started in turn, from its place alone, whatever its settings, and
+/// waits until nothing of it is left.
+pub async fn stop(runs: &Runs, place: &UnitPlace) -> Result<(), Failure> {
     match runs {
-        Runs::OnHost => host::stop(place),
-        Runs::OwnContainer | Runs::InsideUnit(_) | Runs::OneOffContainer => Ok(()),
+        Runs::OnHost => {
+            let place = place.clone();
+            tokio::task::spawn_blocking(move || host::stop(&place))
+                .await
+                .map_err(|error| host::panicked("stopping it", &error))?
+        }
+        Runs::OwnContainer | Runs::OneOffContainer => container::stop(place).await,
+        // Docker can stop no program run inside a container but by stopping
+        // the container, which is another unit's: such a command goes on
+        // until it ends, or that container stops.
+        Runs::InsideUnit(_) => Ok(()),
     }
 }
 
-/// The operations of a unit tay cannot run yet: each attempt fails, saying
-/// so, and so does finding it again. Containers, and commands that run in
-/// one, are the next part of the engine.
-pub struct NotRunnable {
-    /// What tay cannot run, as in "tay cannot run a `container` unit yet".
-    pub what: &'static str,
+/// Removes what the environment's units share where they run, once each
+/// of them is stopped: its network. Its volumes are kept: they hold its
+/// data.
+pub async fn remove_shared(environment: &Environment) -> Result<(), SharedLeft> {
+    container::remove_shared(environment)
+        .await
+        .map_err(|why| SharedLeft {
+            what: environment.network(),
+            why,
+        })
 }
 
-#[derive(Debug, thiserror::Error)]
-#[error("tay cannot run {0} yet")]
-struct CannotRunYet(&'static str);
-
-impl NotRunnable {
-    fn reason(&self) -> String {
-        CannotRunYet(self.what).to_string()
-    }
-}
-
-impl Running for NotRunnable {
-    fn start(self: Arc<Self>, _: UnitPlace, _: u32, _: Steps) -> Driving {
-        let reason = self.reason();
-        Box::pin(async move { Outcome::Failed(reason) })
-    }
-
-    fn found(&self, _: &UnitPlace) -> Result<Found, Failure> {
-        Err(CannotRunYet(self.what).into())
-    }
-
-    fn resume(self: Arc<Self>, _: UnitPlace, _: UnderWay, _: Steps) -> Driving {
-        let reason = self.reason();
-        Box::pin(async move { Outcome::Failed(reason) })
-    }
-
-    fn readiness_command(
-        self: Arc<Self>,
-        _: UnitPlace,
-        _: Vec<String>,
-        _: Duration,
-    ) -> ReadinessCommand {
-        let reason = self.reason();
-        Box::pin(async move { Err(reason) })
-    }
+/// What the environment's units share that could not be removed, by its
+/// name, and why.
+#[derive(Debug)]
+pub struct SharedLeft {
+    pub what: String,
+    pub why: Failure,
 }

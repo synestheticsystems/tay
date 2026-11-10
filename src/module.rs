@@ -17,15 +17,15 @@ use crate::diagnostic::source::Loc;
 use crate::syntax::yaml::Node;
 
 pub use description::{
-    Concern, Description, ModuleValue, Output, PublishEntry, ReadyWithoutCheck, RestartOn, Runs,
-    UnitKind, VolumeMount,
+    Concern, Description, ModuleValue, OpenedPort, Output, PublishEntry, ReadyWithoutCheck,
+    RestartOn, Runs, UnitKind, VolumeMount,
 };
 pub use operations::{
     Driving, Exists, Found, Made, Operations, Outcome, Running, Step, UnderWay, UnitPlace, Values,
 };
 pub use running::command_line::argv;
-pub use running::container::{HOST_IN_CONTAINERS, host_listen};
-pub use running::{found_running, running_now, stop};
+pub use running::container::{HOST_IN_CONTAINERS, Occasion, host_listen};
+pub use running::{anything_left, found_left, remove_shared, stop};
 pub use settings::{Destination, Settings, Slot};
 pub use want::{Duration, Form, PathUse, Want};
 

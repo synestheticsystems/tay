@@ -50,6 +50,62 @@ pub fn stamp(millis: u64) -> String {
     )
 }
 
+/// A time written in UTC as `2026-11-10T11:56:38.480328673Z`, to the
+/// second or to any fraction of it, as Docker writes the times it keeps, in
+/// nanoseconds since 1970; `None` for text that is not such a time, or one
+/// before 1970.
+pub fn nanos_of(text: &str) -> Option<u64> {
+    let (date, time) = text.strip_suffix('Z')?.split_once('T')?;
+    let number = |text: &str, digits: usize| {
+        (text.len() == digits && text.bytes().all(|byte| byte.is_ascii_digit()))
+            .then(|| text.parse::<u64>().ok())
+            .flatten()
+    };
+    let mut date = date.split('-');
+    let (year, month, day) = (
+        number(date.next()?, 4)?,
+        number(date.next()?, 2)?,
+        number(date.next()?, 2)?,
+    );
+    if date.next().is_some() || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+    let (clock, fraction) = time.split_once('.').unwrap_or((time, ""));
+    let mut clock = clock.split(':');
+    let (hours, minutes, seconds) = (
+        number(clock.next()?, 2)?,
+        number(clock.next()?, 2)?,
+        number(clock.next()?, 2)?,
+    );
+    if clock.next().is_some() || hours > 23 || minutes > 59 || seconds > 60 {
+        return None;
+    }
+    if fraction.len() > 9 || !fraction.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let nanos = format!("{fraction:0<9}").parse::<u64>().ok()?;
+    let days = days_from_civil(year, month, day)?;
+    let seconds = days * 86400 + hours * 3600 + minutes * 60 + seconds;
+    seconds.checked_mul(1_000_000_000)?.checked_add(nanos)
+}
+
+/// The days from 1970-01-01 to a calendar date, by the proleptic Gregorian
+/// calendar, as Howard Hinnant's `days_from_civil` works them out; `None`
+/// before 1970.
+fn days_from_civil(year: u64, month: u64, day: u64) -> Option<u64> {
+    let year = if month <= 2 {
+        year.checked_sub(1)?
+    } else {
+        year
+    };
+    let era = year / 400;
+    let year_of_era = year % 400;
+    let shifted_month = if month > 2 { month - 3 } else { month + 9 };
+    let day_of_year = (153 * shifted_month + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    (era * 146_097 + day_of_era).checked_sub(719_468)
+}
+
 /// The calendar date `days` after 1970-01-01, by the proleptic Gregorian
 /// calendar, as Howard Hinnant's `civil_from_days` works it out.
 fn civil(days: u64) -> (u64, u64, u64) {
@@ -80,5 +136,31 @@ mod tests {
         assert_eq!(utc(951_782_400), "2000-02-29 00:00:00 UTC");
         assert_eq!(utc(1_794_292_971), "2026-11-10 06:42:51 UTC");
         assert_eq!(stamp(1_794_292_971_005), "2026-11-10T06:42:51.005Z");
+    }
+
+    #[test]
+    fn a_time_docker_writes_is_read_to_the_nanosecond() {
+        assert_eq!(
+            nanos_of("2026-11-10T06:42:51.005123456Z"),
+            Some(1_794_292_971_005_123_456)
+        );
+        assert_eq!(
+            nanos_of("2000-02-29T00:00:00Z"),
+            Some(951_782_400_000_000_000)
+        );
+        assert_eq!(nanos_of("1970-01-01T00:00:00.5Z"), Some(500_000_000));
+        // What it writes is what the log's own times say, to the
+        // millisecond.
+        let read = nanos_of(&stamp(1_794_292_971_005)).unwrap();
+        assert_eq!(read / 1_000_000, 1_794_292_971_005);
+        for not in [
+            "2026-11-10 06:42:51Z",
+            "2026-13-10T06:42:51Z",
+            "1969-12-31T23:59:59Z",
+            "2026-11-10T06:42:51.0000000001Z",
+            "2026-11-10T06:42:51+01:00",
+        ] {
+            assert_eq!(nanos_of(not), None, "{not}");
+        }
     }
 }

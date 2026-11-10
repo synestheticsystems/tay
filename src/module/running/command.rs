@@ -1,5 +1,6 @@
-//! `command`: something run once, on the host, inside another unit's
-//! container, or in a container of its own made for the run.
+//! `command`: something run once, on the host under a keeper, inside another
+//! unit's running container, or in a container of its own made for each of
+//! its steps.
 
 mod attempt;
 mod produced;
@@ -12,15 +13,15 @@ use crate::syntax::names::{self, NameAt};
 use crate::syntax::yaml::Node;
 use crate::value::Filled;
 
-use super::NotRunnable;
 use super::command_line::{RunForm, run_form};
 use super::mounts::{self, Mount, mounts};
 use super::variables::{Variables, variables};
 use crate::module::description::{
-    Description, ModuleGive, ModuleValue, Output, ReadyWithoutCheck, RestartOn, Runs, UnitKind,
+    Description, ModuleGive, ModuleValue, OpenedPort, Output, ReadyWithoutCheck, RestartOn, Runs,
+    UnitKind,
 };
 use crate::module::operations::Operations;
-use crate::module::settings::{Destination, MapValues, Slot, each_named, maybe};
+use crate::module::settings::{Destination, MapValues, Operate, Slot, each_named, maybe};
 use crate::module::want::{PathUse, Want};
 use crate::module::{Cx, Module};
 
@@ -46,12 +47,12 @@ const FIELDS: &[&str] = &[
 const FILE_PATH: Destination = Destination::Readable("a file path");
 
 /// A command's settings, each value a [`Slot`] as written or a [`Value`](crate::value::Value)
-/// once resolved. Where it runs, inside another unit's container (`in`) or
-/// not, is in the unit's description.
+/// once resolved. Where it runs is in the unit's description too, for the
+/// planner.
 #[derive(Debug)]
 struct CommandSettings<V> {
-    /// Whether it runs on the host, with neither `in` nor `image`.
-    on_host: bool,
+    /// The unit inside whose container it runs, with `in`.
+    inside: Option<String>,
     run: RunForm<V>,
     /// Exit 0: already done. Exit 1: not done. `None`: run every time.
     check: Option<RunForm<V>>,
@@ -99,7 +100,7 @@ impl<V> MapValues for CommandSettings<V> {
         let stdin = maybe(&self.stdin, f);
         let outputs = each_named(&self.outputs, f);
         Some(CommandSettings {
-            on_host: self.on_host,
+            inside: self.inside.clone(),
             run: run?,
             check: check?,
             undo: undo?,
@@ -116,16 +117,10 @@ impl<V> MapValues for CommandSettings<V> {
     }
 }
 
-/// A command on the host runs under a keeper; tay cannot run one in a
-/// container yet, so its operations fail, saying so.
-impl From<CommandSettings<Filled>> for Operations {
-    fn from(settings: CommandSettings<Filled>) -> Operations {
-        match settings.on_host {
-            true => Operations::Running(Arc::new(settings)),
-            false => Operations::Running(Arc::new(NotRunnable {
-                what: "a `command` unit in a container",
-            })),
-        }
+/// A command publishes nothing, so no port is opened for it.
+impl Operate for CommandSettings<Filled> {
+    fn operate(self, _: Vec<OpenedPort<Filled>>) -> Operations {
+        Operations::Running(Arc::new(self))
     }
 }
 
@@ -277,7 +272,10 @@ fn read(with: Option<&Node>, cx: &mut Cx<'_>) -> Option<(CommandSettings<Slot>, 
         return None;
     }
     let settings = CommandSettings {
-        on_host: !in_container,
+        inside: match &runs {
+            Runs::InsideUnit(unit) => Some(unit.name.clone()),
+            Runs::OnHost | Runs::OwnContainer | Runs::OneOffContainer => None,
+        },
         run: run?,
         check,
         undo,

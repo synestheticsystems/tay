@@ -11,6 +11,7 @@ use crate::syntax::expr::Expr;
 use crate::syntax::yaml::Node;
 use crate::value::{Filled, Placeholder, Unfilled, Value};
 
+use super::description::OpenedPort;
 use super::operations::Operations;
 use super::want::Want;
 
@@ -31,11 +32,21 @@ pub trait WrittenSettings: fmt::Debug {
 /// plan holds for the unit without knowing its module.
 pub trait Settings: fmt::Debug + Send + Sync {
     /// The unit's operations, from these settings with every placeholder
-    /// filled by `fill`; why a value could not be filled, when one cannot.
+    /// filled by `fill`, and the ports the plan opens for it, filled
+    /// already; why a value could not be filled, when one cannot.
     fn fill(
         &self,
+        opened: Vec<OpenedPort<Filled>>,
         fill: &mut dyn FnMut(&Placeholder) -> Result<Filled, Unfilled>,
     ) -> Result<Operations, Unfilled>;
+}
+
+/// A module's own settings for one unit with every value filled, made into
+/// the unit's operations.
+pub trait Operate {
+    /// The unit's operations, with the ports the plan opens for it, which
+    /// only a unit in a container of its own has.
+    fn operate(self, opened: Vec<OpenedPort<Filled>>) -> Operations;
 }
 
 /// A module's settings, of any stage, which can be rebuilt with each value
@@ -81,10 +92,11 @@ where
 impl<S> Settings for S
 where
     S: MapValues<Value = Value> + fmt::Debug + Send + Sync,
-    S::With<Filled>: Into<Operations>,
+    S::With<Filled>: Operate,
 {
     fn fill(
         &self,
+        opened: Vec<OpenedPort<Filled>>,
         fill: &mut dyn FnMut(&Placeholder) -> Result<Filled, Unfilled>,
     ) -> Result<Operations, Unfilled> {
         let mut unfilled = None;
@@ -96,7 +108,7 @@ where
             }
         });
         match (filled, unfilled) {
-            (Some(filled), _) => Ok(filled.into()),
+            (Some(filled), _) => Ok(filled.operate(opened)),
             (None, Some(why)) => Err(why),
             (None, None) => unreachable!("settings are left unfilled only by a value that was not"),
         }

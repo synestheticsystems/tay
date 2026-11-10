@@ -62,6 +62,17 @@ impl Layout {
         self.state().join("asked")
     }
 
+    /// `state/units/`: a folder for each unit that runs.
+    pub fn units_state(&self) -> PathBuf {
+        self.state().join("units")
+    }
+
+    /// `state/units/<unit>/`: what tay keeps of `unit`, a unit that runs:
+    /// its lock, its record, the values it produced.
+    pub fn unit_state(&self, unit: &str) -> PathBuf {
+        self.units_state().join(unit)
+    }
+
     /// `state/attempts.json`: what the daemon counts of each unit's attempts.
     pub fn attempts(&self) -> PathBuf {
         self.state().join("attempts.json")

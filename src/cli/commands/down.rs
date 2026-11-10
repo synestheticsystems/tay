@@ -49,9 +49,9 @@ pub fn run(args: Args) -> Exit {
             (Some(client), _) => client,
             (None, Err(error)) => return disk_problem(COMMAND, &error),
             (None, Ok(intent)) => {
-                // What runs with no daemon, as it may when one was killed
-                // while it took the environment down, is found by one.
-                let runs = match module::found_running(&environment.layout) {
+                // What is left with no daemon, as it may be when one was
+                // killed while it took the environment down, is found by one.
+                let runs = match module::found_left(&environment).await {
                     Ok(found) => !found.is_empty(),
                     Err(failure) => {
                         return problem(COMMAND, Exit::Unreachable, &failure.to_string());

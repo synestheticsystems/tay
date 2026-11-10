@@ -7,13 +7,14 @@ units:
     uses: file
     with: { content: "port: ${site-port.number}\n" }
   site:
-    doc: The site's server, which tay cannot run yet.
+    doc: The site's server, which is not on this machine.
     uses: process
     needs: [site-config]
     with: { command: [serve, "${site-config.path}"] }
   search:
-    uses: container
-    with: { image: example/search:1 }
+    doc: The search server, which is not on this machine either.
+    uses: process
+    with: { command: [search-server] }
   index:
     uses: command
     needs: [search]
