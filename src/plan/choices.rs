@@ -74,9 +74,9 @@ pub fn check_up_given(stack: &Stack, layered: &Layered, d: &mut Diagnostics) {
 }
 
 /// Each setting the profile requires must be given a value that is not
-/// empty by a choice that counts: the profile, the environment's file or a
-/// `--set`. The stack's default does not count, nor does the personal file,
-/// which says what one person wants rather than what the profile needs.
+/// empty by one of the choices the format counts for it: the profile, the
+/// environment's file or a `--set`, the last of these that gives one. The
+/// stack's default is not among them, nor is the personal file.
 pub fn check_required(
     stack: &Stack,
     profile: &Profile,

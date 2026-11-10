@@ -85,7 +85,8 @@ impl<'n> WayFields<'n> {
     }
 }
 
-/// Reads a unit that is not made from a template, or a template's own unit.
+/// Reads a unit written out, or one a template makes, once the
+/// parameters are in place.
 pub fn read_fields(name: NameAt, fields: &Fields<'_>, d: &mut Diagnostics) -> Unit {
     let errors_before = d.len();
     let doc = fields

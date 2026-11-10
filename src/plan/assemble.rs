@@ -12,7 +12,7 @@ use crate::module::{Runs, UnitKind};
 use super::Planner;
 use super::model::{After, Need, OpenedPort, Plan, PublishedPort};
 use super::order::{self, Edge, EdgeKind};
-use super::reach::visit::Visit;
+use super::reach::visit::{OpenedAt, Visit};
 use super::reach::{Reached, opened_ports};
 
 impl Planner<'_> {
@@ -84,7 +84,7 @@ impl Planner<'_> {
                 for (entry, used) in published.iter().zip(visit.published) {
                     let opened = match used {
                         None => None,
-                        Some((address, host_port)) => {
+                        Some(OpenedAt { address, host_port }) => {
                             let mut by = openers
                                 .remove(&(name(unit), entry.container_port))
                                 .unwrap_or_default();

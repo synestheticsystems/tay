@@ -16,7 +16,7 @@ use super::model::Shown;
 use super::resolve::Asker;
 use super::resolve::endpoint::LOOPBACK;
 use usage::{User, Uses};
-use visit::Visit;
+use visit::{OpenedAt, Visit};
 
 /// The published ports something in the plan opens, by container unit and
 /// container port.
@@ -140,7 +140,7 @@ impl Planner<'_> {
                     None => Some(Shown::word(LOOPBACK)),
                 };
                 let visit = &mut reached.visits[index].1;
-                visit.published[entry_index] = Some((address, host_port));
+                visit.published[entry_index] = Some(OpenedAt { address, host_port });
                 let added = visit::add_needs(&mut visit.needs, unit, uses.needs);
                 visit.opens.extend(uses.opens);
                 let visit = &reached.visits[index].1;

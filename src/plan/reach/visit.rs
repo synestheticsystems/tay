@@ -41,10 +41,17 @@ pub struct Visit {
     pub after: Vec<(usize, Loc)>,
     /// The published ports of other units, or its own, that its uses open.
     pub opens: Vec<Opening>,
-    /// For each of its own published ports, the address and host port it is
-    /// opened at, once something opens it and its values are used; an
-    /// error in them has been reported.
-    pub published: Vec<Option<(Option<Shown>, Option<Shown>)>>,
+    /// For each of its own published ports, where it is opened, once
+    /// something opens it and its values are used.
+    pub published: Vec<Option<OpenedAt>>,
+}
+
+/// Where a published port is opened on the host. `None` for a value that
+/// could not be used, which has been reported.
+#[derive(Clone)]
+pub struct OpenedAt {
+    pub address: Option<Shown>,
+    pub host_port: Option<Shown>,
 }
 
 impl Planner<'_> {
