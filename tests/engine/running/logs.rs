@@ -189,21 +189,33 @@ fn logs_of_every_unit_followed_takes_in_a_unit_that_begins_to_write() {
             root.to_str().unwrap(),
         ],
     );
-    command.stdout(Stdio::piped());
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut follow = command.spawn().unwrap();
     let mut lines = BufReader::new(follow.stdout.take().unwrap())
         .lines()
         .map(Result::unwrap);
     assert!(lines.by_ref().any(|line| named(&line).1 == "web"));
-    let up = machine.at(&root, "up", &["reporter"]);
+    // The web is named again, so that it goes on ticking.
+    let up = machine.at(&root, "up", &["web", "reporter"]);
     assert_eq!(up.code, 0, "{}{}", up.stdout, up.stderr);
     // The web ticks five times a second, so this waits about a minute at
     // most.
+    let mut read = Vec::new();
     let reported = lines.by_ref().take(300).any(|line| {
         let (_, unit, rest) = named(&line);
-        unit == "reporter" && rest == "| variable MODE=fast"
+        let reported = unit == "reporter" && rest == "| variable MODE=fast";
+        read.push(line);
+        reported
     });
-    assert!(reported, "a line of `reporter` was given once it wrote one");
+    if !reported {
+        let _ = follow.kill();
+        let said = follow.wait_with_output().unwrap();
+        panic!(
+            "a line of `reporter` was given:\n{}\n{}",
+            read.join("\n"),
+            String::from_utf8_lossy(&said.stderr)
+        );
+    }
     drop(lines);
     let ended = crate::harness::eventually(Duration::from_secs(10), || {
         matches!(follow.try_wait(), Ok(Some(_)))
