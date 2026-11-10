@@ -22,9 +22,12 @@ use std::sync::Mutex;
 
 use bollard::errors::Error as ApiError;
 
+use crate::disk::DiskError;
+
 pub use container::runs;
 pub use image::Build;
 pub use io::{Exec, Exited, copy_output};
+pub use network::OurNetwork;
 pub use ours::{OurContainer, Owner};
 
 /// Docker, at its socket.
@@ -47,6 +50,12 @@ pub enum DockerError {
     Refused { doing: String, why: String },
     #[error("{what} exists, and tay did not create it, so tay leaves it alone")]
     Foreign { what: String },
+    #[error(transparent)]
+    Disk(#[from] DiskError),
+    #[error(
+        "what remained of its output could not be copied, so its container is kept, stopped: {0}"
+    )]
+    Uncopied(Box<DockerError>),
     #[error("{0}")]
     Other(String),
 }
@@ -78,23 +87,6 @@ impl Docker {
         let docker = Docker { api, socket };
         *found = Some(docker.clone());
         Ok(docker)
-    }
-
-    /// Docker, if tay can reach it: `None` when nothing listens where its
-    /// configuration points, or its configuration points nowhere tay talks
-    /// to, since tay has made nothing in a Docker it cannot reach and a
-    /// Docker that does not run runs no container.
-    pub async fn if_running() -> Result<Option<Docker>, DockerError> {
-        let docker = match Docker::connect() {
-            Ok(docker) => docker,
-            Err(DockerError::Unreachable { .. } | DockerError::Endpoint(_)) => return Ok(None),
-            Err(error) => return Err(error),
-        };
-        match docker.api.ping().await {
-            Ok(_) => Ok(Some(docker)),
-            Err(error) if unreachable(&error) => Ok(None),
-            Err(error) => Err(docker.failed("answer")(error)),
-        }
     }
 
     /// What became of a request that was `doing` something, as Docker said

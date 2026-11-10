@@ -1,6 +1,8 @@
 //! The machine's list of the environments tay knows: the folder of each and
 //! the ports it keeps. The list is read freely, since it is only ever
-//! replaced whole, and changed by one command at a time, under its lock.
+//! replaced whole, and changed by one command at a time, under its lock. An
+//! environment leaves it only when nothing of it is left: no folder, no
+//! daemon, and nothing where its units run.
 
 use std::io;
 use std::os::unix::net::UnixStream;
@@ -24,6 +26,10 @@ pub struct Listed {
     pub folder: PathBuf,
     /// The port numbers it keeps.
     pub ports: Vec<u16>,
+    /// Whether a module has made something of it outside the host, where
+    /// its units run, which may be left there whatever its folder holds.
+    #[serde(default)]
+    pub made_outside: bool,
 }
 
 /// The list, held under its lock while it is changed.
@@ -48,14 +54,13 @@ impl List {
     }
 
     /// The list, locked so that this command alone changes it until the
-    /// list is dropped. An environment of which nothing is left leaves it.
+    /// list is dropped.
     pub fn lock(machine: &Machine) -> Result<List, DiskError> {
         let path = machine.list();
         let folder = machine.state.clone();
         std::fs::create_dir_all(&folder).map_err(DiskError::io(&folder, "made"))?;
         let lock = Lock::take(&machine.list_lock())?;
-        let mut environments = List::read(machine)?;
-        environments.retain(|listed| something_left(listed, machine));
+        let environments = List::read(machine)?;
         Ok(List {
             environments,
             path,
@@ -63,26 +68,39 @@ impl List {
         })
     }
 
-    /// The list, with every environment of which nothing is left taken
-    /// off it, when no other command is changing it; as it is otherwise.
-    pub fn known(machine: &Machine) -> Result<Vec<Listed>, DiskError> {
-        let folder = &machine.state;
-        std::fs::create_dir_all(folder).map_err(DiskError::io(folder, "made"))?;
-        let Some(lock) = Lock::try_take(&machine.list_lock())? else {
-            return List::read(machine);
-        };
-        let mut environments = List::read(machine)?;
-        let listed = environments.len();
-        environments.retain(|listed| something_left(listed, machine));
-        if environments.len() != listed {
-            List {
-                environments: environments.clone(),
-                path: machine.list(),
-                _lock: lock,
-            }
-            .save()?;
+    /// The environments of which nothing is left that this machine's
+    /// folders can tell: no folder, and no daemon that answers. Whether
+    /// anything of one is left where its units run is for the caller to
+    /// find out, before it [forgets](List::forget) it.
+    pub fn without_folder_or_daemon(machine: &Machine) -> Result<Vec<Listed>, DiskError> {
+        Ok(List::read(machine)?
+            .into_iter()
+            .filter(|listed| !something_left(listed, machine))
+            .collect())
+    }
+
+    /// Takes each environment of `gone`, of which nothing is left where its
+    /// units run, off the list, unless its folder or its daemon has come
+    /// back meanwhile, and unless another command is changing the list.
+    pub fn forget(machine: &Machine, gone: &[Id]) -> Result<(), DiskError> {
+        if gone.is_empty() {
+            return Ok(());
         }
-        Ok(environments)
+        let Some(lock) = Lock::try_take(&machine.list_lock())? else {
+            return Ok(());
+        };
+        let mut list = List {
+            environments: List::read(machine)?,
+            path: machine.list(),
+            _lock: lock,
+        };
+        let before = list.environments.len();
+        list.environments
+            .retain(|listed| !gone.contains(&listed.id) || something_left(listed, machine));
+        match list.environments.len() == before {
+            true => Ok(()),
+            false => list.save(),
+        }
     }
 
     pub fn environments(&self) -> &[Listed] {
@@ -109,6 +127,19 @@ impl List {
         Ok(changed)
     }
 
+    /// Notes that the environment `id` has made something outside the host;
+    /// whether that changed the list. The environment must be in it.
+    pub fn note_made_outside(&mut self, id: &Id) -> Result<bool, DiskError> {
+        let listed = self
+            .environments
+            .iter_mut()
+            .find(|listed| listed.id == *id)
+            .ok_or_else(|| DiskError::NotListed { id: id.to_string() })?;
+        let changed = !listed.made_outside;
+        listed.made_outside = true;
+        Ok(changed)
+    }
+
     /// Writes the list as it now is.
     pub fn save(&self) -> Result<(), DiskError> {
         let file = ListFile {
@@ -119,10 +150,11 @@ impl List {
     }
 }
 
-/// Whether anything of an environment is left: its folder, or its daemon,
-/// which answers on its socket until it has stopped everything it started.
-/// A folder that is missing alone does not take an environment off the
-/// list, since its daemon may still be stopping what runs.
+/// Whether anything of an environment is left that this machine's folders
+/// can tell: its folder, or its daemon, which answers on its socket until
+/// it has stopped everything it started. A folder that is missing alone
+/// does not take an environment off the list, since its daemon may still be
+/// stopping what runs, and its containers, volumes or network may be left.
 fn something_left(listed: &Listed, machine: &Machine) -> bool {
     listed.folder.exists() || UnixStream::connect(machine.socket(listed.id.as_str())).is_ok()
 }

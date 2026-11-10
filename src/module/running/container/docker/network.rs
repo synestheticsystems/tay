@@ -3,10 +3,12 @@
 //! with them by `tay down`. It belongs to the environment, not to any
 //! unit, so it carries the environment's label alone.
 
-use bollard::models::NetworkCreateRequest;
-use bollard::query_parameters::InspectNetworkOptions;
+use std::collections::HashMap;
 
-use super::ours::{Owner, is_ours};
+use bollard::models::NetworkCreateRequest;
+use bollard::query_parameters::{InspectNetworkOptions, ListNetworksOptionsBuilder};
+
+use super::ours::{ENVIRONMENT, Owner, is_ours};
 use super::{Docker, DockerError, conflict, missing};
 
 /// The environment's network, which carries its label.
@@ -81,6 +83,24 @@ impl Docker {
         self.network(environment, name).await?.ok_or_else(|| {
             DockerError::Other(format!("the network `{name}` was made and is gone at once"))
         })
+    }
+
+    /// The names of the networks that are `environment`'s.
+    pub async fn networks(&self, environment: &str) -> Result<Vec<String>, DockerError> {
+        let filters = HashMap::from([("label", vec![format!("{ENVIRONMENT}={environment}")])]);
+        let options = ListNetworksOptionsBuilder::default()
+            .filters(&filters)
+            .build();
+        let listed = self
+            .api
+            .list_networks(Some(options))
+            .await
+            .map_err(self.failed("list the environment's networks"))?;
+        Ok(listed
+            .into_iter()
+            .filter(|network| is_ours(network.labels.as_ref(), environment))
+            .filter_map(|network| network.name)
+            .collect())
     }
 
     /// Removes `network`. Docker refuses while a container is on it, which

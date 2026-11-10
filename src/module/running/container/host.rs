@@ -44,7 +44,7 @@ pub async fn host_listen(environment: &Environment, occasion: Occasion) -> Resul
     let docker = Docker::connect()?;
     let (id, name) = (environment.id.as_str(), environment.network());
     let network = match occasion {
-        Occasion::BringingUp => Some(docker.make_network(id, &name).await?),
+        Occasion::BringingUp => Some(super::left::make_network(&docker, environment).await?),
         Occasion::FindingAgain => docker.network(id, &name).await?,
     };
     match network.and_then(|network| network.gateway) {

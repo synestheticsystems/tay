@@ -1,7 +1,8 @@
 //! `tay ls`: the environments on this machine, from the machine's list,
 //! each with its folder, whether it is meant to be up, its daemon if one
-//! answers, and the ports it keeps. The environment the command is run in
-//! is marked.
+//! answers, and the ports it keeps, once each environment of which nothing
+//! is left has been taken off it. The environment the command is run in is
+//! marked.
 
 use std::path::Path;
 
@@ -13,11 +14,11 @@ use crate::cli::stack;
 use crate::control::client::Client;
 use crate::control::protocol;
 use crate::definition::read::THIS_TAY;
-use crate::disk::{Environment, Intent, Layout, List, Listed, Machine};
+use crate::disk::{DiskError, Environment, Intent, Layout, List, Listed, Machine};
 use crate::print::out;
 
 use super::plan::print_json;
-use super::{block_on, disk_problem, machine, problem};
+use super::{block_on, disk_problem, forget_what_is_gone, machine, problem};
 
 pub const TAKES: Takes = Takes {
     command: "tay ls",
@@ -59,23 +60,27 @@ pub fn run(args: Args) -> Exit {
         Ok(machine) => machine,
         Err(exit) => return exit,
     };
-    let listed = match List::known(&machine) {
-        Ok(listed) => listed,
-        Err(error) => return disk_problem(COMMAND, &error),
-    };
     let lines = block_on(COMMAND, async {
+        let untold = forget_what_is_gone(&machine).await?;
         let mut lines = Vec::new();
-        for listed in listed {
+        for listed in List::read(&machine)? {
             let current = current.as_deref() == Some(listed.folder.as_path());
-            lines.push(line(listed, &machine, current).await);
+            let mut line = line(listed, &machine, current).await;
+            if let Some((_, why)) = untold.iter().find(|(id, _)| *id == line.listed.id) {
+                line.problems.push(format!(
+                    "whether anything of it is left where its units run cannot be told: {why}"
+                ));
+            }
+            lines.push(line);
         }
-        lines
+        Ok::<_, DiskError>(lines)
     });
     match lines {
-        Ok(lines) => {
+        Ok(Ok(lines)) => {
             print(&lines, args.json);
             Exit::Done
         }
+        Ok(Err(error)) => disk_problem(COMMAND, &error),
         Err(exit) => exit,
     }
 }

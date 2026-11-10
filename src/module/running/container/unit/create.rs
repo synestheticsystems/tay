@@ -18,8 +18,7 @@ use crate::module::description::OpenedPort;
 use crate::module::operations::{self, Failure, UnitPlace};
 use crate::module::running::command_line::filled_argv;
 use crate::module::running::container::docker::ours::SETTINGS;
-use crate::module::running::container::{ContainerSettings, host};
-use crate::module::running::mounts::{Mount as Mounted, Source};
+use crate::module::running::container::{ContainerSettings, host, mounted, volume_name};
 use crate::value::Filled;
 
 /// A container's settings, as Docker takes them.
@@ -40,13 +39,6 @@ pub struct Creation {
 pub struct ImageHere {
     pub name: String,
     pub id: String,
-}
-
-/// The volume `volume` of `unit` in the environment of `place`:
-/// `tay-<id>-<unit>.<volume>`, which no volume of another unit can be
-/// named, since a unit's name holds no `.`.
-pub fn volume_name(place: &UnitPlace, unit: &str, volume: &str) -> String {
-    format!("tay-{}-{unit}.{volume}", place.environment.id)
 }
 
 /// The container of `settings`, for the unit at `place`, from `image`, on
@@ -241,32 +233,6 @@ fn fingerprint(
         "create": body,
     })
     .to_string()
-}
-
-/// A mount, as Docker takes it: a folder or file on the host, made as a
-/// folder first where tay is to make it, or another unit's volume.
-pub fn mounted(mount: &Mounted<Filled>, place: &UnitPlace) -> Result<Mount, Failure> {
-    let read_only = match &mount.readonly {
-        Some(readonly) => operations::boolean(readonly, "mounts")?,
-        None => true,
-    };
-    let target = Some(operations::text(&mount.to, "mounts")?.to_string());
-    Ok(match &mount.source {
-        Source::Host(from) => Mount {
-            typ: Some(MountType::BIND),
-            source: Some(operations::text(from, "mounts")?.to_string()),
-            target,
-            read_only: Some(read_only),
-            ..Mount::default()
-        },
-        Source::Volume(volume) => Mount {
-            typ: Some(MountType::VOLUME),
-            source: Some(volume_name(place, &volume.unit.name, &volume.volume.name)),
-            target,
-            read_only: Some(read_only),
-            ..Mount::default()
-        },
-    })
 }
 
 #[cfg(test)]

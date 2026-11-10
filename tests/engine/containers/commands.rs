@@ -65,6 +65,13 @@ fn commands_in_a_container_check_then_run_hand_on_their_values_and_leave_no_cont
         serde_json::from_str::<serde_json::Value>(&kept).unwrap()["proof"],
         "32"
     );
+    // The files they wrote their values to are not left in the store.
+    let store = super::name(&machine, &root, "store");
+    let kept = crate::docker::docker(&["exec", &store, "ls", "/tmp"]);
+    assert!(
+        kept.contains("seed") && !kept.contains("tay-values"),
+        "{kept}"
+    );
     // Nothing is left of the container the stamp was made in; `store` is
     // the only container.
     let [containers, _, _] = labelled(&machine, &root);

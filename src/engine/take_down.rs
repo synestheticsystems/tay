@@ -1,6 +1,6 @@
 //! Taking an environment down: every unit is stopped, in the reverse of the
 //! order the units start in, then whatever is left of a unit the plan does
-//! not have, then what the units share where they run is put away, and
+//! not have, then what the units share where they run is removed, and
 //! then each unit that runs is checked, so that `tay down` says nothing is
 //! left only once it has seen so. A unit that runs is stopped whatever its
 //! state, from its place alone if no task looks after it; one that is made
@@ -54,7 +54,7 @@ pub async fn take_down(supervisor: &Arc<Supervisor>, detail: &str) -> Result<Vec
                     unit: unit.clone(),
                     reason: reason.clone(),
                 });
-                UnitState::new(State::Failed, format!("could not be stopped: {reason}"))
+                UnitState::new(State::Failed, format!("something of it is left: {reason}"))
             }
         };
         supervisor.record(&unit, state, None);

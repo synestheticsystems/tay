@@ -13,7 +13,7 @@ mod variables;
 
 use super::description::Runs;
 use super::operations::{Failure, UnitPlace};
-use crate::disk::Environment;
+use crate::disk::{Environment, Listed};
 
 /// Whether anything of a unit that runs where `runs` says is left now, from
 /// its place alone, whatever its settings: a process of it that runs, or a
@@ -81,4 +81,11 @@ pub async fn remove_shared(environment: &Environment) -> Result<(), SharedLeft> 
 pub struct SharedLeft {
     pub what: String,
     pub why: Failure,
+}
+
+/// Whether anything of the environment `listed` is left where its units
+/// run that its folder cannot tell: a container, a volume or a network of
+/// it.
+pub async fn anything_left_of_environment(listed: &Listed) -> Result<bool, Failure> {
+    container::anything_left_of_environment(listed).await
 }

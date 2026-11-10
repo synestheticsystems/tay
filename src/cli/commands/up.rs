@@ -12,7 +12,7 @@ use crate::control::protocol::UpRequest;
 use crate::disk::{Environment, Layout};
 
 use super::plan::{no_stack, options, planned};
-use super::{block_on, client_problem, disk_problem, machine, problem};
+use super::{block_on, client_problem, disk_problem, forget_what_is_gone, machine, problem};
 
 pub const TAKES: Takes = Takes {
     command: "tay up",
@@ -41,15 +41,23 @@ pub fn run(args: Args) -> Exit {
         Ok(machine) => machine,
         Err(exit) => return exit,
     };
-    let environment = match Environment::establish(&Layout::of(&root), &machine) {
-        Ok(environment) => environment,
-        Err(error) => return disk_problem(COMMAND, &error),
-    };
     let request = UpRequest {
         asked: options.asked,
         home: options.home,
     };
     let ended = block_on(COMMAND, async {
+        // What is gone leaves the machine's list before this environment
+        // is put in it, so that the ports it kept are free again. One that
+        // stays because whether anything of it is left cannot be told is
+        // said so by `tay ls`.
+        let established = match forget_what_is_gone(&machine).await {
+            Ok(_) => Environment::establish(&Layout::of(&root), &machine),
+            Err(error) => Err(error),
+        };
+        let environment = match established {
+            Ok(environment) => environment,
+            Err(error) => return disk_problem(COMMAND, &error),
+        };
         let client = match Client::ensure(&environment).await {
             Ok(client) => client,
             Err(error) => return client_problem(COMMAND, &error),

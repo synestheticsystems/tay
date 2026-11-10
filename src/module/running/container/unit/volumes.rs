@@ -9,10 +9,9 @@
 
 use bollard::models::{ContainerCreateBody, HostConfig, Mount, MountType};
 
-use super::create::volume_name;
 use crate::module::operations::{self, Failure, UnitPlace};
 use crate::module::running::container::docker::{Docker, DockerError, Owner};
-use crate::module::running::container::{ContainerSettings, container_name};
+use crate::module::running::container::{ContainerSettings, container_name, volume_name};
 use crate::module::running::mounts::Source;
 use crate::value::Filled;
 

@@ -2,10 +2,12 @@
 //! unit's, when it is missing, and used only once it is found to carry the
 //! environment's label. `tay down` keeps them: they hold the data.
 
-use bollard::models::VolumeCreateRequest;
-use bollard::query_parameters::RemoveVolumeOptions;
+use std::collections::HashMap;
 
-use super::ours::{Owner, is_ours};
+use bollard::models::VolumeCreateRequest;
+use bollard::query_parameters::{ListVolumesOptionsBuilder, RemoveVolumeOptions};
+
+use super::ours::{ENVIRONMENT, Owner, is_ours};
 use super::{Docker, DockerError, missing};
 
 impl Docker {
@@ -70,5 +72,25 @@ impl Docker {
             Err(error) if missing(&error) => Ok(false),
             Err(error) => Err(self.failed(format!("look at the volume `{name}`"))(error)),
         }
+    }
+
+    /// The names of the volumes that are `environment`'s.
+    pub async fn volumes(&self, environment: &str) -> Result<Vec<String>, DockerError> {
+        let filters = HashMap::from([("label", vec![format!("{ENVIRONMENT}={environment}")])]);
+        let options = ListVolumesOptionsBuilder::default()
+            .filters(&filters)
+            .build();
+        let listed = self
+            .api
+            .list_volumes(Some(options))
+            .await
+            .map_err(self.failed("list the environment's volumes"))?;
+        Ok(listed
+            .volumes
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|volume| is_ours(Some(&volume.labels), environment))
+            .map(|volume| volume.name)
+            .collect())
     }
 }

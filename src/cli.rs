@@ -81,10 +81,10 @@ remembered one for the same place, and units named replace those remembered.
 tay down stops everything the environment runs, checks that nothing is left,
 and says so; its daemon exits. tay status prints each unit's state, from a
 check made now, each unit that runs and is not in the plan any more, and what
-the environment remembers being asked for. tay logs
-prints what a unit wrote, each line with its time, and tay's notes of where
-each attempt starts and how it ended. tay ls prints the environments tay
-knows on this machine, and marks with * the one it is run in.
+the environment remembers being asked for. tay logs prints what a unit wrote,
+each line with its time, and tay's notes of where each attempt starts and how
+it ended. tay ls prints the environments tay knows on this machine, and marks
+with * the one it is run in.
 
 Options:
   --root FOLDER       look for tay.yaml from FOLDER instead of the current one

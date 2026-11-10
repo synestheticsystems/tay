@@ -15,12 +15,12 @@ use bollard::models::{
 
 use super::docker::ours::{ATTEMPT, STEP};
 use super::docker::{Docker, Exec, Exited, OurContainer, Owner, copy_output, runs};
+use super::ended::Ended;
 use super::host::host_entries;
-use super::left::remove_copied;
-use super::unit::{Ended, mounted};
-use super::{container_name, copied};
+use super::left::{make_network, remove_copied};
+use super::{container_name, copied, make_mount_folders, mounted, unit_log};
 use crate::clock;
-use crate::disk::unit_log::{Adding, UnitLog, Writer};
+use crate::disk::unit_log::{Adding, Writer};
 use crate::disk::{DiskError, write_whole};
 use crate::module::operations::{Failure, Step as Told, Steps, UnitPlace};
 use crate::module::running::mounts::Mount;
@@ -107,7 +107,7 @@ pub async fn run_inside(
     };
     let inside = inside_values(place, &step);
     step.env.push(format!("TAY_VALUES={inside}"));
-    let mut log = log(place)?;
+    let mut log = unit_log(place)?;
     note(
         &mut log,
         &step,
@@ -149,9 +149,10 @@ pub async fn run_inside(
         Err(error) => ContainerStepEnd::NotStarted(error.to_string()),
     };
     note(&mut log, &step, &ended.how())?;
-    fetch(&docker, &container, &inside, values).await?;
+    let fetched = fetch(&docker, &container, &inside, values).await;
     // What it wrote may be a secret, which is not left in another unit's
-    // container. An image with no `rm` keeps the file, and the log says so.
+    // container, whether or not it could be fetched. An image with no `rm`
+    // keeps the file, and the log says so.
     let removing = [String::from("rm"), "-f".to_string(), inside.clone()];
     let removed = Exec {
         argv: &removing,
@@ -175,6 +176,7 @@ pub async fn run_inside(
             ),
         )?;
     }
+    fetched?;
     Ok(ended)
 }
 
@@ -193,9 +195,7 @@ pub async fn run_own(
 ) -> Result<ContainerStepEnd, Failure> {
     let docker = Docker::connect()?;
     let id = place.environment.id.as_str();
-    let network = docker
-        .make_network(id, &place.environment.network())
-        .await?;
+    let network = make_network(&docker, &place.environment).await?;
     if docker.image_id(image).await?.is_none() {
         // The engine has stopped listening only once it has dropped the
         // attempt, which then goes no further.
@@ -207,11 +207,12 @@ pub async fn run_own(
         docker.pull(image, None, &mut progress).await?;
     }
     let name = container_name(place);
-    let mut log = log(place)?;
+    let mut log = unit_log(place)?;
     if let Some((left, _)) = docker.container(id, &name).await? {
         remove_copied(&docker, place, left, &mut log).await?;
     }
     step.env.push(format!("TAY_VALUES={OWN_VALUES}"));
+    make_mount_folders(mounts, place)?;
     let mounts = mounts
         .iter()
         .map(|mount| mounted(mount, place))
@@ -302,7 +303,7 @@ pub async fn wait_own(
             since: clock::now_millis(),
         });
     }
-    let mut log = log(place)?;
+    let mut log = unit_log(place)?;
     waited(&docker, place, container, values, &mut log).await
 }
 
@@ -335,7 +336,7 @@ pub async fn found_own(place: &UnitPlace, values: &Path) -> Result<FoundOwn, Fai
         _ if runs(&inspected) => return Ok(FoundOwn::UnderWay { attempt, step }),
         _ => {}
     }
-    let mut log = log(place)?;
+    let mut log = unit_log(place)?;
     let ended = waited(&docker, place, container, values, &mut log).await?;
     Ok(FoundOwn::Ended {
         attempt,
@@ -398,10 +399,6 @@ impl ContainerStepEnd {
             ContainerStepEnd::NotStarted(why) => format!("could not be started: {why}"),
         }
     }
-}
-
-fn log(place: &UnitPlace) -> Result<Adding, Failure> {
-    Ok(UnitLog::at(place.environment.layout.unit_log(&place.unit)).open()?)
 }
 
 /// Notes in the command's log what its step did, as the keeper of a step on

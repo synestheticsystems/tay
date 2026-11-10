@@ -44,6 +44,8 @@ fn what_tay_creates_carries_the_environments_label_and_a_container_answers_to_it
     );
     assert_eq!(volumes, [format!("tay-{id}-keeper-data.data")]);
     assert_eq!(networks, [network]);
+    // The machine's list notes that Docker holds something of it.
+    assert_eq!(machine.list()["environments"][0]["made_outside"], true);
 }
 
 #[test]
@@ -185,4 +187,43 @@ fn nothing_without_the_environments_label_is_touched_even_with_a_name_like_tays(
     assert_eq!(after["State"]["Running"], true);
     assert!(eventually(Duration::from_secs(10), || inspect(&network).is_none()));
     drop(foreign);
+}
+
+#[test]
+fn an_environment_leaves_the_machines_list_only_when_nothing_of_it_is_left_in_docker() {
+    let machine = Machine::with_docker();
+    let root = machine.stack("containers");
+    assert_eq!(machine.at(&root, "up", &["keeper-data"]).code, 0);
+    assert_eq!(machine.at(&root, "down", &[]).code, 0);
+    let id = machine.id(&root);
+    std::fs::remove_dir_all(&root).unwrap();
+    // Its volume is kept, so it stays, its folder missing.
+    let ls = machine.tay(&machine.path("home"), &["ls"]);
+    assert!(
+        ls.stdout.contains(&id) && ls.stdout.contains("its folder is missing"),
+        "{}",
+        ls.stdout
+    );
+    docker(&["volume", "rm", &format!("tay-{id}-keeper-data.data")]);
+    let ls = machine.tay(&machine.path("home"), &["ls"]);
+    assert_eq!(ls.stdout, "tay knows no environment on this machine.\n");
+}
+
+#[test]
+fn an_environment_that_never_ran_a_container_never_asks_docker() {
+    let machine = Machine::new();
+    let root = machine.stack("waiting");
+    // Docker's configuration points where nothing answers, and tay talks
+    // to no Docker there.
+    let tay = |command: &str| {
+        let mut run = machine.command(&root, &[command, "--root", root.to_str().unwrap()]);
+        run.env("DOCKER_HOST", "tcp://127.0.0.1:9");
+        machine.run(run)
+    };
+    for command in ["up", "status", "down", "ls"] {
+        let run = tay(command);
+        assert_eq!(run.code, 0, "{command}: {}{}", run.stdout, run.stderr);
+    }
+    let list = machine.list();
+    assert_eq!(list["environments"][0]["made_outside"], false, "{list}");
 }

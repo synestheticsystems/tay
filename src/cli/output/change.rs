@@ -116,7 +116,7 @@ impl Printer {
             Event::Down { left } => {
                 for left in left {
                     out(&format!(
-                        "{command}: `{}` could not be stopped: {}\n",
+                        "{command}: `{}` is left: {}\n",
                         left.unit, left.reason
                     ));
                 }

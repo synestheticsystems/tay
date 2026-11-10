@@ -8,9 +8,9 @@
 //! many lines of that very time were copied, since Docker gives output only
 //! from a whole second on. It is written as each line is copied, but at
 //! most every so often while a container prints, and then once it has gone
-//! quiet for that long; so copying that stops, as when the daemon is killed
-//! or the copying is dropped to stop the container, copies again at most
-//! what was printed in that while.
+//! quiet for that long, and when the copying is dropped, as it is to stop
+//! the container; so only a daemon that is killed copies again, at most what
+//! was printed in that while.
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -91,9 +91,13 @@ pub async fn copy_output(
     copied: &Path,
     follow: bool,
 ) -> Result<(), DockerError> {
-    let disk = |error: DiskError| DockerError::Other(error.to_string());
-    let mut kept = Copied::of(copied, container).map_err(disk)?;
-    let since = i32::try_from(kept.at / 1_000_000_000).unwrap_or(i32::MAX);
+    let mut copying = Copying {
+        kept: Copied::of(copied, container)?,
+        path: copied,
+        last_kept: None,
+        unkept: false,
+    };
+    let since = i32::try_from(copying.kept.at / 1_000_000_000).unwrap_or(i32::MAX);
     let options = LogsOptionsBuilder::default()
         .follow(follow)
         .stdout(true)
@@ -104,20 +108,11 @@ pub async fn copy_output(
     let mut output = docker.api.logs(&container.id, Some(options));
     // The time of the line read last, and how many lines of it were read.
     let (mut at, mut nth) = (0, 0);
-    // When where the copying has come to was last kept, and whether lines
-    // have been copied since.
-    let mut last_kept: Option<Instant> = None;
-    let mut unkept = false;
     loop {
-        // Where the copying has come to is kept at once, unless it was kept
-        // a moment ago; then once that moment has passed, whether or not
-        // more lines come.
-        let next_keep = last_kept.map_or_else(Instant::now, |last| last + KEEP);
         let said = tokio::select! {
             said = output.next() => said,
-            () = tokio::time::sleep_until(next_keep.into()), if unkept => {
-                kept.keep(copied).map_err(disk)?;
-                (last_kept, unkept) = (Some(Instant::now()), false);
+            () = tokio::time::sleep_until(copying.next_keep().into()), if copying.unkept => {
+                copying.keep()?;
                 continue;
             }
         };
@@ -149,23 +144,57 @@ pub async fn copy_output(
                 Some(time) => (at, nth) = (time, 1),
                 None => nth += 1,
             }
-            if kept.has(at, nth) {
+            if copying.kept.has(at, nth) {
                 continue;
             }
-            log.write_at(at / 1_000_000, Writer::Unit, text.trim_end_matches('\r'))
-                .map_err(disk)?;
-            (kept.at, kept.lines) = (at, nth);
-            unkept = true;
+            log.write_at(at / 1_000_000, Writer::Unit, text.trim_end_matches('\r'))?;
+            (copying.kept.at, copying.kept.lines) = (at, nth);
+            copying.unkept = true;
         }
-        if unkept && last_kept.is_none_or(|last| last.elapsed() >= KEEP) {
-            kept.keep(copied).map_err(disk)?;
-            (last_kept, unkept) = (Some(Instant::now()), false);
+        if copying.unkept && Instant::now() >= copying.next_keep() {
+            copying.keep()?;
         }
     }
-    if unkept {
-        kept.keep(copied).map_err(disk)?;
+    if copying.unkept {
+        copying.keep()?;
     }
     Ok(())
+}
+
+/// A copying under way: where it has come to, and whether that is kept.
+struct Copying<'a> {
+    kept: Copied,
+    path: &'a Path,
+    /// When where it had come to was last kept.
+    last_kept: Option<Instant>,
+    /// Whether lines have been copied since.
+    unkept: bool,
+}
+
+impl Copying<'_> {
+    /// When where it has come to is kept next: at once, unless it was kept
+    /// a moment ago, and then once that moment has passed.
+    fn next_keep(&self) -> Instant {
+        self.last_kept.map_or_else(Instant::now, |last| last + KEEP)
+    }
+
+    fn keep(&mut self) -> Result<(), DiskError> {
+        self.kept.keep(self.path)?;
+        (self.last_kept, self.unkept) = (Some(Instant::now()), false);
+        Ok(())
+    }
+}
+
+impl Drop for Copying<'_> {
+    /// A copying dropped before it ends, as one is to stop its container,
+    /// keeps where it came to, so that the next copies on from there. If
+    /// that cannot be written, the next copies again at most a moment's
+    /// lines, which is all that is lost by not saying so.
+    fn drop(&mut self) {
+        if self.unkept {
+            let _ = self.keep();
+        }
+    }
 }
 
 #[cfg(test)]

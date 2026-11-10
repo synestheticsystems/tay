@@ -154,6 +154,7 @@ impl Environment {
                 id: environment.id.clone(),
                 folder: root.to_path_buf(),
                 ports: Vec::new(),
+                made_outside: false,
             }),
         }
         list.save()?;

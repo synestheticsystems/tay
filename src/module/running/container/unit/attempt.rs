@@ -7,23 +7,26 @@
 //! until it ends. A daemon that did not start it finds it by its name and
 //! the environment's label.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::time::Duration;
 
 use bollard::models::ContainerStateStatusEnum;
 
 use super::create::{self, ImageHere};
-use super::ended::Ended;
 use super::readiness::judge;
 use super::{ContainerUnit, volumes};
 use crate::clock;
-use crate::disk::unit_log::{Adding, UnitLog, Writer};
+use crate::disk::unit_log::{Adding, Writer};
 use crate::module::operations::{self, Failure, Found, Outcome, Step, Steps, UnderWay, UnitPlace};
 use crate::module::running::container::docker::ours::{ATTEMPT, SETTINGS};
 use crate::module::running::container::docker::{
     Build, Docker, DockerError, OurContainer, Owner, copy_output, runs,
 };
-use crate::module::running::container::left::remove_copied;
-use crate::module::running::container::{Image, container_name, copied};
+use crate::module::running::container::ended::Ended;
+use crate::module::running::container::left::{make_network, remove_copied};
+use crate::module::running::container::{
+    Image, container_name, copied, make_mount_folders, unit_log,
+};
 
 /// The step of a container's attempt, in a daemon's words: the container
 /// runs.
@@ -31,7 +34,12 @@ const RUNS: &str = "container";
 
 /// How long a container's output that ended while it goes on is waited
 /// for before it is asked for again.
-const AGAIN: std::time::Duration = std::time::Duration::from_millis(500);
+const AGAIN: Duration = Duration::from_millis(500);
+
+/// How many times watching a container that fails is begun again, and how
+/// long after each failure.
+const WATCH_TRIES: u32 = 5;
+const WATCH_AGAIN: Duration = Duration::from_secs(2);
 
 #[derive(Debug, thiserror::Error)]
 enum AttemptError {
@@ -50,13 +58,11 @@ impl ContainerUnit {
     ) -> Result<Outcome, Failure> {
         let docker = Docker::connect()?;
         let id = place.environment.id.as_str();
-        let network = docker
-            .make_network(id, &place.environment.network())
-            .await?;
-        let mut log = log(place)?;
+        let network = make_network(&docker, &place.environment).await?;
+        let mut log = unit_log(place)?;
         let image = self.image(&docker, place, steps, &mut log).await?;
         volumes::make(&docker, &self.settings, place, &image.name).await?;
-        self.make_mount_folders(place)?;
+        make_mount_folders(&self.settings.mounts, place)?;
         let name = container_name(place);
         if let Some((left, _)) = docker.container(id, &name).await? {
             remove_copied(&docker, place, left, &mut log).await?;
@@ -179,35 +185,14 @@ impl ContainerUnit {
             .ok_or_else(|| AttemptError::NoImage(name.clone()))?;
         Ok(ImageHere { name, id })
     }
-
-    /// Makes as a folder each host path mounted that is missing and lies
-    /// where tay may make it: in the environment's own folder, or the
-    /// folder its stack's environments share.
-    fn make_mount_folders(&self, place: &UnitPlace) -> Result<(), Failure> {
-        let own = place.environment.layout.folder();
-        let shared = crate::disk::shared_folders();
-        for mount in &self.settings.mounts {
-            let crate::module::running::mounts::Source::Host(from) = &mount.source else {
-                continue;
-            };
-            let from = PathBuf::from(operations::text(from, "mounts")?);
-            let tay_makes = from.starts_with(&own)
-                || shared
-                    .as_ref()
-                    .is_some_and(|shared| from.starts_with(shared));
-            if tay_makes && !from.exists() {
-                std::fs::create_dir_all(&from)
-                    .map_err(crate::disk::DiskError::io(&from, "made"))?;
-            }
-        }
-        Ok(())
-    }
 }
 
 /// Watches `container`, which runs attempt `attempt`, until it ends: its
 /// output is copied into `log`, and its own health judged, for as long as it
-/// runs. One that can no longer be watched is stopped, so that no
-/// container is left with nothing looking after it.
+/// runs. Watching that fails, as it does while Docker restarts, is begun
+/// again from where it stopped, a few times; a container that cannot be
+/// watched for that long is stopped, so that none is left with nothing
+/// looking after it, and the attempt has ended.
 pub(super) async fn watched(
     docker: &Docker,
     place: &UnitPlace,
@@ -216,33 +201,7 @@ pub(super) async fn watched(
     steps: &Steps,
     log: &mut Adding,
 ) -> Result<Outcome, Failure> {
-    let failure = match watch(docker, place, container, attempt, steps, log).await {
-        Ok(outcome) => return Ok(outcome),
-        Err(failure) => failure,
-    };
-    // An attempt that could no longer be watched has ended, and its
-    // `restart` decides what follows; one whose container cannot be stopped
-    // cannot be started again.
-    Ok(match crate::module::running::container::stop(place).await {
-        Ok(()) => Outcome::Ended {
-            failed: true,
-            detail: format!("could no longer be watched, and was stopped: {failure}"),
-        },
-        Err(why) => Outcome::Failed(format!(
-            "attempt {attempt} could no longer be watched ({failure}), and its container could not be stopped: {why}"
-        )),
-    })
-}
-
-async fn watch(
-    docker: &Docker,
-    place: &UnitPlace,
-    container: &OurContainer,
-    attempt: u32,
-    steps: &Steps,
-    log: &mut Adding,
-) -> Result<Outcome, Failure> {
-    let Some(mut inspected) = docker.inspect(container).await? else {
+    let Some(inspected) = docker.inspect(container).await? else {
         return Ok(gone());
     };
     let since = inspected
@@ -254,6 +213,42 @@ async fn watch(
     // The engine has stopped listening only once it has dropped the
     // attempt, which then goes no further.
     let _ = steps.send(Step::Running { since });
+    let mut failed = 0;
+    let failure = loop {
+        match watch(docker, place, container, attempt, steps, log).await {
+            Ok(outcome) => return Ok(outcome),
+            Err(failure) if failed == WATCH_TRIES => break failure,
+            Err(_) => {
+                failed += 1;
+                tokio::time::sleep(WATCH_AGAIN).await;
+            }
+        }
+    };
+    // Its `restart` decides what follows; one whose container cannot be
+    // stopped cannot be started again.
+    Ok(match crate::module::running::container::stop(place).await {
+        Ok(()) => Outcome::Ended {
+            failed: true,
+            detail: format!("could no longer be watched, and was stopped: {failure}"),
+        },
+        Err(why) => Outcome::Failed(format!(
+            "attempt {attempt} could no longer be watched ({failure}), and its container could not be stopped: {why}"
+        )),
+    })
+}
+
+/// Watches `container` once, until it ends or watching it fails.
+async fn watch(
+    docker: &Docker,
+    place: &UnitPlace,
+    container: &OurContainer,
+    attempt: u32,
+    steps: &Steps,
+    log: &mut Adding,
+) -> Result<Outcome, Failure> {
+    let Some(mut inspected) = docker.inspect(container).await? else {
+        return Ok(gone());
+    };
     let copied = copied(place);
     while runs(&inspected) {
         // Docker ends the output it gives once the container stops.
@@ -303,7 +298,7 @@ pub(super) async fn found(place: &UnitPlace) -> Result<Found, Failure> {
             step: RUNS.to_string(),
         }));
     }
-    let mut log = log(place)?;
+    let mut log = unit_log(place)?;
     copy_output(&docker, &container, &mut log, &copied(place), false).await?;
     let created = matches!(
         inspected.state.as_ref().and_then(|state| state.status),
@@ -331,11 +326,6 @@ pub(super) fn gone() -> Outcome {
         failed: true,
         detail: "its container was removed by something other than tay".to_string(),
     }
-}
-
-/// The unit's log, opened to be added to.
-pub(super) fn log(place: &UnitPlace) -> Result<Adding, Failure> {
-    Ok(UnitLog::at(place.environment.layout.unit_log(&place.unit)).open()?)
 }
 
 fn note(log: &mut Adding, text: &str) -> Result<(), Failure> {

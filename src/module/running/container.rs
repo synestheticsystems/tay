@@ -4,30 +4,36 @@
 //! are asked of Docker, through [`docker`].
 
 mod docker;
+mod ended;
 mod host;
 mod left;
 mod read;
 mod step;
 mod unit;
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
+use bollard::models::{Mount as DockerMount, MountType};
+
+use crate::disk::DiskError;
+use crate::disk::unit_log::{Adding, UnitLog};
 use crate::syntax::names::NameAt;
 use crate::syntax::yaml::Node;
 use crate::value::Filled;
 
-use super::mounts::{self, Mount};
+use super::mounts::{self, Mount, Source};
 use super::variables::Variables;
 use crate::module::description::{
     Concern, Description, OpenedPort, ReadyWithoutCheck, RestartOn, Runs, UnitKind,
 };
-use crate::module::operations::{Operations, UnitPlace};
+use crate::module::operations::{self, Failure, Operations, UnitPlace};
 use crate::module::settings::{MapValues, Operate, each, each_named, maybe};
 use crate::module::{Cx, Module};
 use unit::ContainerUnit;
 
 pub use host::{HOST_IN_CONTAINERS, Occasion, host_listen};
-pub use left::{anything_left, found_left, remove_shared, stop};
+pub use left::{anything_left, anything_left_of_environment, found_left, remove_shared, stop};
 pub use step::{CommandStep, ContainerStepEnd, FoundOwn, found_own, run_inside, run_own, wait_own};
 pub use unit::check_inside;
 
@@ -38,6 +44,66 @@ pub struct Container;
 /// has too.
 pub fn container_name(place: &UnitPlace) -> String {
     format!("tay-{}-{}", place.environment.id, place.unit)
+}
+
+/// The volume `volume` of `unit` in the environment of `place`:
+/// `tay-<id>-<unit>.<volume>`, which no volume of another unit can be
+/// named, since a unit's name holds no `.`.
+pub fn volume_name(place: &UnitPlace, unit: &str, volume: &str) -> String {
+    format!("tay-{}-{unit}.{volume}", place.environment.id)
+}
+
+/// A mount, as Docker takes it: a folder or file on the host, or another
+/// unit's volume.
+pub fn mounted(mount: &Mount<Filled>, place: &UnitPlace) -> Result<DockerMount, Failure> {
+    let read_only = match &mount.readonly {
+        Some(readonly) => operations::boolean(readonly, "mounts")?,
+        None => true,
+    };
+    let target = Some(operations::text(&mount.to, "mounts")?.to_string());
+    Ok(match &mount.source {
+        Source::Host(from) => DockerMount {
+            typ: Some(MountType::BIND),
+            source: Some(operations::text(from, "mounts")?.to_string()),
+            target,
+            read_only: Some(read_only),
+            ..DockerMount::default()
+        },
+        Source::Volume(volume) => DockerMount {
+            typ: Some(MountType::VOLUME),
+            source: Some(volume_name(place, &volume.unit.name, &volume.volume.name)),
+            target,
+            read_only: Some(read_only),
+            ..DockerMount::default()
+        },
+    })
+}
+
+/// Makes as a folder each host path `mounts` mount that is missing and
+/// lies where tay may make it: in the environment's own folder, or the
+/// folder its stack's environments share.
+fn make_mount_folders(mounts: &[Mount<Filled>], place: &UnitPlace) -> Result<(), Failure> {
+    let own = place.environment.layout.folder();
+    let shared = crate::disk::shared_folders();
+    for mount in mounts {
+        let Source::Host(from) = &mount.source else {
+            continue;
+        };
+        let from = PathBuf::from(operations::text(from, "mounts")?);
+        let tay_makes = from.starts_with(&own)
+            || shared
+                .as_ref()
+                .is_some_and(|shared| from.starts_with(shared));
+        if tay_makes && !from.exists() {
+            std::fs::create_dir_all(&from).map_err(DiskError::io(&from, "made"))?;
+        }
+    }
+    Ok(())
+}
+
+/// The log of `place`'s unit, opened to be added to.
+fn unit_log(place: &UnitPlace) -> Result<Adding, Failure> {
+    Ok(UnitLog::at(place.environment.layout.unit_log(&place.unit)).open()?)
 }
 
 /// What tay keeps of how far the output of `place`'s container has been

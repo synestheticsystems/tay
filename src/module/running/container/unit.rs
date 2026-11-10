@@ -1,12 +1,11 @@
 //! A container unit: its settings filled, and the ports the plan opens for
 //! it, run through Docker. Each attempt runs in a container created for it,
 //! as [`attempt`] says; its readiness is judged as [`readiness`] says; and
-//! once it ends Docker says how, as [`ended`] words it. Its `restart`
+//! once it ends Docker says how, as [`Ended`](super::ended::Ended) words it. Its `restart`
 //! decides what follows, as for a process.
 
 mod attempt;
 mod create;
-mod ended;
 mod readiness;
 mod volumes;
 
@@ -14,18 +13,16 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use super::docker::Docker;
-use super::{ContainerSettings, container_name};
+use super::{ContainerSettings, container_name, unit_log};
 use crate::module::description::OpenedPort;
 use crate::module::operations::{
     Comparing, Driving, Failure, Finding, Outcome, ReadinessCommand, Running, Steps, UnderWay,
     UnitPlace,
 };
 use crate::value::Filled;
-use attempt::{found, gone, log, watched};
+use attempt::{found, gone, watched};
 use create::ImageHere;
 
-pub use create::mounted;
-pub use ended::Ended;
 pub use readiness::check_inside;
 
 /// A container unit, its settings filled, and the ports the plan opens for
@@ -58,7 +55,7 @@ impl Running for ContainerUnit {
                 let Some((container, _)) = found else {
                     return Ok(gone());
                 };
-                let mut log = log(&place)?;
+                let mut log = unit_log(&place)?;
                 watched(
                     &docker,
                     &place,

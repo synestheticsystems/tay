@@ -85,7 +85,8 @@ pub enum Event {
     /// `tay up` was stopped before it came to anything, by what is
     /// said, as a person reads it.
     Cancelled { by: String },
-    /// The end of `tay down`: what could not be stopped.
+    /// The end of `tay down`: what is left, as it could not be stopped or
+    /// removed.
     Down { left: Vec<Left> },
     /// The change could not be made, and why.
     Problem { problem: String },
