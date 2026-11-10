@@ -210,10 +210,7 @@ pub fn made_from(
             .unwrap_or_default()
     };
     let (needs, after) = (names("needs", d), names("after", d));
-    let doc = fields
-        .get("doc")
-        .and_then(|node| fields::text(node, "`doc`", d))
-        .map(str::to_string);
+    let doc = fields.get("doc").and_then(|node| unit::doc(node, d));
     if !template.readable || d.len() != errors_before {
         return unit::unreadable(name);
     }

@@ -27,7 +27,8 @@ pub fn argv(node: &Node, what: &str, d: &mut Diagnostics) -> Option<Vec<Slot>> {
     Some(words)
 }
 
-/// A list of words for a command line, which may be empty.
+/// A list of words for a command line, which may be empty, as an
+/// entrypoint that clears an image's own is.
 pub fn words(node: &Node, what: &str, d: &mut Diagnostics) -> Option<Vec<Slot>> {
     let Some(items) = node.as_seq() else {
         d.error(

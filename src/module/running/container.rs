@@ -7,7 +7,7 @@ use crate::syntax::names::{self, NameAt};
 use crate::syntax::yaml::{Kind, Node, Scalar};
 use crate::value::Value;
 
-use super::common::{Mount, Variables, argv, mounts, variables};
+use super::common::{Mount, Variables, argv, mounts, variables, words};
 use crate::module::description::{
     Concern, Description, Published, ReadyWithoutCheck, RestartOn, Runs, UnitKind,
 };
@@ -54,7 +54,7 @@ struct ContainerSettings<V> {
     image: Image<V>,
     /// `None`: the image's own.
     command: Option<Vec<V>>,
-    /// `None`: the image's own.
+    /// `None`: the image's own. Empty: none.
     entrypoint: Option<Vec<V>>,
     variables: Variables<V>,
     volumes: Vec<Volume<V>>,
@@ -270,11 +270,13 @@ fn read(with: Option<&Node>, cx: &mut Cx<'_>) -> Option<Read> {
             (None, None)
         }
     };
-    let [command, entrypoint] = ["command", "entrypoint"].map(|list| {
-        settings
-            .get(list)
-            .and_then(|node| argv(node, &format!("`{list}`"), d))
-    });
+    let command = settings
+        .get("command")
+        .and_then(|node| argv(node, "`command`", d));
+    // An empty entrypoint clears the image's own.
+    let entrypoint = settings
+        .get("entrypoint")
+        .and_then(|node| words(node, "`entrypoint`", d));
     let variables = variables(&settings, d);
     let volumes = settings
         .get("volumes")
@@ -607,6 +609,14 @@ mod tests {
             description.settings.slots()[0].want,
             Want::Path(PathUse::Named)
         );
+    }
+
+    #[test]
+    fn an_empty_entrypoint_clears_the_images_own_and_an_empty_command_is_an_error() {
+        let read = settings("image: app\nentrypoint: []\n");
+        assert!(read.entrypoint.is_some_and(|words| words.is_empty()));
+        let (_, errors) = check("container", "image: app\ncommand: []\n");
+        assert_eq!(errors, ["2:10: `command` must name a program"]);
     }
 
     #[test]

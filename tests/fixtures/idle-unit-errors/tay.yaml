@@ -12,3 +12,8 @@ units:
       api: { port: abc, scheme: 5, path: v1 }
       other: { port: 70000, host: [a, list] }
   counted: { uses: process, with: { command: [c] }, restart: { attempts: -3 } }
+  described:
+    doc: |
+      The first line.
+      2. b: uses secret, is made
+    uses: port

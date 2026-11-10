@@ -90,10 +90,7 @@ impl<'n> WayFields<'n> {
 /// parameters are in place.
 pub fn read_fields(name: NameAt, fields: &Fields<'_>, d: &mut Diagnostics) -> Unit {
     let errors_before = d.len();
-    let doc = fields
-        .get("doc")
-        .and_then(|node| fields::text(node, "`doc`", d))
-        .map(str::to_string);
+    let doc = fields.get("doc").and_then(|node| doc(node, d));
     let is_action = fields
         .get("action")
         .and_then(|node| fields::boolean(node, "`action`", d))
@@ -138,6 +135,19 @@ pub fn read_fields(name: NameAt, fields: &Fields<'_>, d: &mut Diagnostics) -> Un
         },
         _ => unreadable(name),
     }
+}
+
+/// A unit's `doc`: one line saying what it is for.
+pub fn doc(node: &Node, d: &mut Diagnostics) -> Option<String> {
+    let text = fields::text(node, "`doc`", d)?;
+    if text.contains(['\n', '\r']) {
+        d.error(
+            node.loc,
+            "`doc` is one line saying what the unit is for; this one has more",
+        );
+        return None;
+    }
+    Some(text.to_string())
 }
 
 fn group(fields: &Fields<'_>, d: &mut Diagnostics) -> Body {

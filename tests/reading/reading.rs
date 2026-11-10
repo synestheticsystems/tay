@@ -51,6 +51,8 @@ fn a_unit_file_that_does_not_parse_stops_the_plan_and_no_unit_is_skipped() {
 
 #[test]
 fn folders_and_files_that_define_no_unit_are_errors_rather_than_skipped() {
+    // `.hidden.yaml`, which is not YAML, and the folder `.cache` are not
+    // read at all: a name beginning with a dot is no definition.
     let run = plan("undefined-entries", &[]);
     assert_eq!(run.code, 2);
     assert_eq!(
@@ -95,6 +97,8 @@ fn a_units_own_fields_are_checked_as_written_whether_or_not_it_comes_up() {
             "tay.yaml:13:22: this must be a port number from 1 to 65535; this is 70000",
             "tay.yaml:13:35: a value is text, a whole number or true or false; this is a list",
             "tay.yaml:14:74: this must be a whole number above 0; this is -3",
+            // A `doc` printed over two lines would read as part of the plan.
+            "tay.yaml:17:7: `doc` is one line saying what the unit is for; this one has more",
         ]
     );
 }
