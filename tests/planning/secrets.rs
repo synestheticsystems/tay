@@ -1,8 +1,6 @@
 //! Secrets: where they may go, and that nothing secret is ever printed.
 
-mod support;
-
-use support::{given, plan, plan_json, unit};
+use crate::support::{given, plan, plan_json, unit};
 
 /// The value of the secret setting, in the fixture's `.tay/choices.yaml`.
 const LICENCE: &str = "LICENCE-VALUE-0451";

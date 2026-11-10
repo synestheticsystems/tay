@@ -1,10 +1,8 @@
 //! Actions: units that run only when asked for by name, and the arguments
 //! they may be asked with.
 
-mod support;
-
+use crate::support::{given, plan, plan_json, unit, unit_names};
 use serde_json::json;
-use support::{given, plan, plan_json, unit, unit_names};
 
 #[test]
 fn an_actions_arguments_print_as_placeholders() {

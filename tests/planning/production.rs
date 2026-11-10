@@ -1,15 +1,13 @@
 //! A production profile refuses, naming each unit, what the format lists:
 //! checked after every choice, so a choice made with `--set` is refused too.
 
-mod support;
-
-use support::{plan, plan_json, unit};
+use crate::support::{plan, plan_json, unit};
 
 #[test]
 fn the_same_stack_plans_in_a_profile_that_is_not_production() {
     let plan = plan_json("production", &[]);
     assert_eq!(plan["production"], false);
-    let src = support::fixture("production")
+    let src = crate::support::fixture("production")
         .canonicalize()
         .unwrap()
         .join("src");

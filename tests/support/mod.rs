@@ -1,6 +1,6 @@
 //! Running the `tay` binary against the fixture stacks in `tests/fixtures`.
 
-// Each test file uses its own share of these helpers.
+// Each test binary uses its own share of these helpers.
 #![allow(dead_code)]
 
 use std::path::{Path, PathBuf};

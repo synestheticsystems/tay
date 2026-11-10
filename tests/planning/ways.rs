@@ -1,8 +1,6 @@
 //! Units with more than one way to run, and which way each runs.
 
-mod support;
-
-use support::{plan, plan_json, unit};
+use crate::support::{plan, plan_json, unit};
 
 #[test]
 fn run_default_chooses_the_way_of_that_name() {

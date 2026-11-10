@@ -1,9 +1,7 @@
 //! A tay too old for the definitions stops with the version it would need,
 //! before reading anything it might not know.
 
-mod support;
-
-use support::plan;
+use crate::support::plan;
 
 #[test]
 fn definitions_that_require_a_newer_tay_exit_3_with_the_version_needed() {

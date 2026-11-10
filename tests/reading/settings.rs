@@ -1,8 +1,6 @@
 //! Settings: declared, typed, set, used, and secret.
 
-mod support;
-
-use support::{given, plan, plan_json, unit};
+use crate::support::{given, plan, plan_json, unit};
 
 #[test]
 fn undeclared_settings_and_wrong_types_are_errors() {

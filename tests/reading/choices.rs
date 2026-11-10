@@ -2,9 +2,7 @@
 //! environment's file and `--set`, later ones winning; and what a choice
 //! must give.
 
-mod support;
-
-use support::{fixture, given, plan_json, plan_with_home, unit, unit_names};
+use crate::support::{fixture, given, plan_json, plan_with_home, unit, unit_names};
 
 fn plan(args: &[&str]) -> serde_json::Value {
     let mut all = args.to_vec();
@@ -68,7 +66,7 @@ fn tay_yaml_gives_up_and_run_when_no_later_place_does() {
 
 #[test]
 fn no_place_giving_up_is_an_error() {
-    let run = support::plan("no-up", &[]);
+    let run = crate::support::plan("no-up", &[]);
     assert_eq!(run.code, 2);
     assert_eq!(
         run.errors(),

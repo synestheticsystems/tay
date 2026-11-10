@@ -1,9 +1,7 @@
 //! Reading definitions strictly: each error at its file, line and column, all
 //! of them in one run, and nothing skipped.
 
-mod support;
-
-use support::plan;
+use crate::support::plan;
 
 #[test]
 fn every_error_in_a_stack_is_reported_in_one_run_at_its_place() {

@@ -1,12 +1,10 @@
 //! What `tay plan` prints for a sound stack, in full, so that any change to
 //! the text or to the JSON schema is noticed.
 
-mod support;
-
 use std::fs;
 use std::path::Path;
 
-use support::{fixture, plan};
+use crate::support::{fixture, plan};
 
 /// The output with the fixture's absolute path, which differs between
 /// machines, written as `<root>`.

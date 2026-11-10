@@ -1,10 +1,8 @@
 //! An address depends on who asks: the view of an endpoint follows where the
 //! unit that uses it runs, unless the reference asks for one.
 
-mod support;
-
+use crate::support::{given, plan, plan_json, unit, unit_names};
 use serde_json::json;
-use support::{given, plan, plan_json, unit, unit_names};
 
 /// The words of a unit's readiness command, as resolved for that unit.
 fn probe(plan: &serde_json::Value, name: &str) -> Vec<String> {
@@ -190,7 +188,7 @@ fn a_published_port_is_opened_only_for_a_use_from_the_host_or_always_and_otherwi
         given(box_unit, "quiet")["from_host"],
         json!({ "unreachable": "its port 9090 is published, but nothing in the plan opens it on the host" })
     );
-    let text = support::plan("published", &[]).stdout;
+    let text = crate::support::plan("published", &[]).stdout;
     assert!(text.contains(
         "   publishes 8080 at 127.0.0.1:<port: box-port>, opened for box (its readiness check), web (on the host)\n"
     ));

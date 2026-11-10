@@ -1,10 +1,8 @@
 //! Values and references: types kept or made text, values known before start
 //! against values produced by running, and circles.
 
-mod support;
-
+use crate::support::{given, plan, plan_json, unit, unit_names};
 use serde_json::json;
-use support::{given, plan, plan_json, unit, unit_names};
 
 #[test]
 fn a_whole_string_reference_keeps_its_type_and_one_inside_text_becomes_text() {
@@ -50,10 +48,12 @@ fn references_to_the_environment_and_the_host() {
     // The folder is named after the stack, so the label is empty.
     assert_eq!(text("label"), "");
     assert_eq!(text("profile"), "dev");
-    let root = support::fixture("value-types").canonicalize().unwrap();
+    let root = crate::support::fixture("value-types")
+        .canonicalize()
+        .unwrap();
     assert_eq!(text("state"), format!("{}/.tay/state", root.display()));
     assert_eq!(text("logs"), format!("{}/.tay/logs", root.display()));
-    let home = support::fixture("homes/none");
+    let home = crate::support::fixture("homes/none");
     assert_eq!(
         text("shared"),
         format!("{}/.local/share/tay/value-types", home.display())

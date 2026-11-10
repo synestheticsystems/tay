@@ -1,9 +1,7 @@
 //! Units made from templates: parameters required, defaulted, or not
 //! declared, and of any YAML value.
 
-mod support;
-
-use support::{given, plan, plan_json, unit};
+use crate::support::{given, plan, plan_json, unit};
 
 #[test]
 fn a_default_fills_a_parameter_the_unit_does_not_give() {

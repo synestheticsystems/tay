@@ -1,14 +1,12 @@
 //! The command line: finding the stack, the verbs that exist, and that
 //! planning writes nothing.
 
-mod support;
-
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use support::{fixture, plan, tay};
+use crate::support::{fixture, plan, tay};
 
 fn home() -> PathBuf {
     fixture("homes/none")

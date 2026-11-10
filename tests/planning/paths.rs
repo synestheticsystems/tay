@@ -2,10 +2,8 @@
 //! written in, any other relative one to the stack's root, and the value a
 //! unit gives for one is the whole path.
 
-mod support;
-
+use crate::support::{fixture, given, plan, plan_json, unit};
 use serde_json::json;
-use support::{fixture, given, plan, plan_json, unit};
 
 fn root() -> String {
     fixture("paths")

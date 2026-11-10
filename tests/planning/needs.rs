@@ -2,10 +2,8 @@
 //! inside, and a value it uses of a unit that is made; and the order that
 //! follows.
 
-mod support;
-
+use crate::support::{plan, plan_json, unit, unit_names};
 use serde_json::json;
-use support::{plan, plan_json, unit, unit_names};
 
 #[test]
 fn using_a_value_of_a_unit_that_is_made_brings_it_in_and_is_a_need() {
