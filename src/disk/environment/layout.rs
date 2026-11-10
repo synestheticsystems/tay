@@ -15,6 +15,10 @@ pub struct Layout {
 }
 
 impl Layout {
+    /// The folder under `logs/` that holds the daemon's own log, which no
+    /// unit may be named, so that no unit's log is put in it.
+    pub const DAEMON_LOGS: &str = "tay";
+
     /// The layout of the environment whose stack's root is `root`.
     pub fn of(root: &Path) -> Layout {
         Layout {
@@ -91,6 +95,6 @@ impl Layout {
 
     /// The daemon's own log.
     pub fn daemon_log(&self) -> PathBuf {
-        self.logs().join("tay").join("daemon.log")
+        self.logs().join(Layout::DAEMON_LOGS).join("daemon.log")
     }
 }

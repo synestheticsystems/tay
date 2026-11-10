@@ -148,17 +148,21 @@ pub fn places<'s>(
     (places, every_file_parsed)
 }
 
-/// Unit names are unique across the stack, and none is a name references use.
+/// Unit names are unique across the stack, and none is a name references
+/// use, or the name of the folder of tay's own log.
 fn unique_units(units: Vec<Unit>, d: &mut Diagnostics) -> Vec<Unit> {
     let mut kept: Vec<Unit> = Vec::new();
     for unit in units {
-        if RESERVED_UNIT_NAMES.contains(&unit.name.name.as_str()) {
+        let name = unit.name.name.as_str();
+        let reserved = match name {
+            Layout::DAEMON_LOGS => Some("it names tay's own log"),
+            _ if RESERVED_UNIT_NAMES.contains(&name) => Some("references use it"),
+            _ => None,
+        };
+        if let Some(why) = reserved {
             d.error(
                 unit.name.loc,
-                format!(
-                    "`{}` cannot be a unit's name: references use it",
-                    unit.name.name
-                ),
+                format!("`{name}` cannot be a unit's name: {why}"),
             );
             continue;
         }
