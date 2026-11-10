@@ -20,9 +20,10 @@
 //! group.
 
 mod group;
-mod launch;
+mod process;
 mod record;
-mod started;
+mod step;
+mod stopping;
 
 use std::ffi::OsString;
 use std::io::{BufRead, BufReader, PipeReader, Read};
@@ -38,10 +39,11 @@ use rustix::io::{FdFlags, fcntl_setfd};
 
 use crate::clock;
 use crate::disk::DiskError;
-use crate::unit_log::{Adding, LONGEST_LINE, UnitLog, Writer};
+use crate::disk::unit_log::{Adding, LONGEST_LINE, UnitLog, Writer};
 
-pub use launch::{Look, Program, UnitFiles};
-pub use record::{Ended, Exit, Process, Record};
+pub use process::RecordedProcess;
+pub use record::{Ended, Ending, Record};
+pub use step::{Look, Program, StepFiles};
 
 use group::Group;
 
@@ -50,8 +52,8 @@ use group::Group;
 /// ever.
 const DRAIN: Duration = Duration::from_secs(1);
 
-/// What `tay keep` is asked to keep.
-struct Asked {
+/// What `tay keep` is given: the program, and where to keep it.
+struct Arguments {
     /// The open file the unit's lock is held on, inherited from the daemon.
     lock: RawFd,
     record: PathBuf,
@@ -64,26 +66,26 @@ struct Asked {
 /// Runs the keeper. Its exit code says only whether it could keep the
 /// program; how the program ended is in the record.
 pub fn keep(args: impl Iterator<Item = OsString>) -> ExitCode {
-    let Some(asked) = read_args(args) else {
+    let Some(arguments) = read_args(args) else {
         return ExitCode::from(2);
     };
     // SAFETY: the daemon started the keeper with the lock's file open at
     // this number, and nothing in the keeper closes it: it is held until
     // the keeper ends.
-    let lock = unsafe { BorrowedFd::borrow_raw(asked.lock) };
+    let lock = unsafe { BorrowedFd::borrow_raw(arguments.lock) };
     // The child must not hold the unit's lock, or the lock would say a step
     // runs after its keeper ended.
     if fcntl_setfd(lock, FdFlags::CLOEXEC).is_err() {
         return ExitCode::from(2);
     }
-    match run(&asked) {
+    match run(&arguments) {
         Ok(()) => ExitCode::SUCCESS,
         Err(_) => ExitCode::FAILURE,
     }
 }
 
 /// `--lock FD --record FILE --log FOLDER --name NAME -- PROGRAM ARGS...`.
-fn read_args(mut args: impl Iterator<Item = OsString>) -> Option<Asked> {
+fn read_args(mut args: impl Iterator<Item = OsString>) -> Option<Arguments> {
     let (mut lock, mut record, mut log, mut name) = (None, None, None, None);
     loop {
         let flag = args.next()?;
@@ -105,7 +107,7 @@ fn read_args(mut args: impl Iterator<Item = OsString>) -> Option<Asked> {
     if argv.is_empty() {
         return None;
     }
-    Some(Asked {
+    Some(Arguments {
         lock: lock?,
         record: record?,
         log: log?,
@@ -114,44 +116,47 @@ fn read_args(mut args: impl Iterator<Item = OsString>) -> Option<Asked> {
     })
 }
 
-fn run(asked: &Asked) -> Result<(), DiskError> {
-    let mut record = Record::read(&asked.record)?.ok_or_else(|| DiskError::Unexpected {
-        path: asked.record.clone(),
+fn run(arguments: &Arguments) -> Result<(), DiskError> {
+    let mut record = Record::read(&arguments.record)?.ok_or_else(|| DiskError::Unexpected {
+        path: arguments.record.clone(),
         found: "nothing".to_string(),
         wanted: "the record the daemon writes before it starts a keeper",
     })?;
     record.keeper = Some(this_process());
-    record.write(&asked.record)?;
-    let log = Arc::new(Mutex::new(asked.log.open()?));
-    let shown = asked.argv.join(" ");
-    note(&log, &format!("{}: starting `{shown}`", asked.name));
-    let started = start(&asked.argv);
+    record.write(&arguments.record)?;
+    let log = Arc::new(Mutex::new(arguments.log.open()?));
+    let shown = arguments.argv.join(" ");
+    note(&log, &format!("{}: starting `{shown}`", arguments.name));
+    let started = start(&arguments.argv);
     let (mut child, output) = match started {
         Ok(started) => started,
         Err(error) => {
-            let exit = Exit::NotStarted {
-                why: format!("`{}`: {error}", asked.argv[0]),
+            let how = Ending::NotStarted {
+                why: format!("`{}`: {error}", arguments.argv[0]),
             };
-            note(&log, &format!("{}: {exit}", asked.name));
+            note(&log, &format!("{}: {how}", arguments.name));
             record.ended = Some(Ended {
                 at: clock::now_millis(),
-                exit,
+                how,
             });
-            return record.write(&asked.record);
+            return record.write(&arguments.record);
         }
     };
-    let leader = process(child.id());
+    let leader = RecordedProcess::of(child.id());
     record.child = Some(leader);
-    if let Err(error) = record.write(&asked.record) {
+    if let Err(error) = record.write(&arguments.record) {
         // A child the record does not name would be lost to every daemon,
-        // so it is not left running.
-        let _ = child.kill();
+        // so it is not left running, nor anything it started. It is not yet
+        // waited for, so its group is its own.
+        if let Some(group) = rustix::process::Pid::from_raw(leader.pid) {
+            let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
+        }
         let _ = child.wait();
         note(
             &log,
             &format!(
                 "{}: stopped, since its record cannot be written: {error}",
-                asked.name
+                arguments.name
             ),
         );
         return Err(error);
@@ -164,30 +169,30 @@ fn run(asked: &Asked) -> Result<(), DiskError> {
         let _ = drained.send(());
     });
     let status = child.wait();
-    let exit = match status {
+    let how = match status {
         Ok(status) => match (status.code(), status.signal()) {
-            (Some(code), _) => Exit::Code { code },
-            (None, Some(signal)) => Exit::Signal { signal },
-            (None, None) => Exit::NotStarted {
+            (Some(code), _) => Ending::Code { code },
+            (None, Some(signal)) => Ending::Signal { signal },
+            (None, None) => Ending::NotStarted {
                 why: "the system said neither how it exited nor what ended it".to_string(),
             },
         },
-        Err(error) => Exit::NotStarted {
+        Err(error) => Ending::NotStarted {
             why: format!("it could not be waited for: {error}"),
         },
     };
     record.ended = Some(Ended {
         at: clock::now_millis(),
-        exit: exit.clone(),
+        how: how.clone(),
     });
-    let recorded = record.write(&asked.record);
+    let recorded = record.write(&arguments.record);
     // Nothing the child started outlives it: what is left of its group is
     // what tay would otherwise lose track of.
     let left = Group::led_by(leader).stop();
     // The keeper may end before the last lines are read, when a process
     // that left the group holds the pipe.
     let _ = lines_read.recv_timeout(DRAIN);
-    note(&log, &format!("{}: {exit}", asked.name));
+    note(&log, &format!("{}: {how}", arguments.name));
     match left {
         Ok(true) => {}
         Ok(false) => note(
@@ -202,18 +207,9 @@ fn run(asked: &Asked) -> Result<(), DiskError> {
     recorded
 }
 
-/// A process the keeper knows: itself, or its child before it is waited for.
-fn process(pid: u32) -> Process {
-    let pid = i32::try_from(pid).expect("the system's process numbers fit in an i32");
-    Process {
-        pid,
-        started: started::started(pid),
-    }
-}
-
 /// The keeper itself, as its record says it.
-fn this_process() -> Process {
-    process(std::process::id())
+fn this_process() -> RecordedProcess {
+    RecordedProcess::of(std::process::id())
 }
 
 /// Starts `argv` as the keeper's child, leading a process group of its own,
@@ -247,8 +243,12 @@ fn copy_lines(output: PipeReader, log: &Mutex<Adding>) {
             .take(LONGEST_LINE as u64)
             .read_until(b'\n', &mut line);
         match read {
-            Ok(0) | Err(_) => return,
+            Ok(0) => return,
             Ok(_) => {}
+            Err(error) => {
+                note(log, &format!("what it prints cannot be read: {error}"));
+                return;
+            }
         }
         if line.last() == Some(&b'\n') {
             line.pop();

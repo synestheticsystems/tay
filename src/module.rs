@@ -25,7 +25,7 @@ pub use operations::{
 };
 pub use running::command_line::argv;
 pub use running::container::{HOST_IN_CONTAINERS, host_listen};
-pub use running::{running_now, stop};
+pub use running::{found_running, running_now, stop};
 pub use settings::{Destination, Settings, Slot};
 pub use want::{Duration, Form, PathUse, Want};
 

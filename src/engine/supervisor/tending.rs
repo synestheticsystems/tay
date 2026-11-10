@@ -17,6 +17,7 @@ use tokio::time::Instant;
 use super::{Supervisor, stop_blocking};
 use crate::clock;
 use crate::diagnostic::quoted_list;
+use crate::disk::unit_log::UnitLog;
 use crate::engine::fill;
 use crate::engine::readiness::Probe;
 use crate::engine::state::{State, UnitState};
@@ -24,7 +25,6 @@ use crate::module::{
     Driving, Outcome, ReadyWithoutCheck, RestartOn, Running, Step, UnderWay, UnitKind, Values,
 };
 use crate::plan::{PlannedUnit, Readiness};
-use crate::unit_log::UnitLog;
 
 /// How long a unit waits before it is started again, so that one that ends
 /// at once does not start and end for ever without a pause.

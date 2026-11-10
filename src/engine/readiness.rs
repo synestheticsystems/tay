@@ -15,8 +15,8 @@ use tokio::net::TcpStream;
 
 use crate::clock;
 use crate::definition::Check;
+use crate::disk::unit_log::{Following, Line, UnitLog, Writer};
 use crate::module::{Running, UnitPlace};
-use crate::unit_log::{Following, Line, UnitLog, Writer};
 use crate::value::Filled;
 
 /// A readiness check, with its values filled.

@@ -11,7 +11,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::keeper::{Exit, Look, Program};
+use crate::keeper::{Ending, Look, Program};
 use crate::module::operations::{
     self, Checking, Driving, Failure, Found, Outcome, Running, Step, Steps, UnderWay, UnitPlace,
 };
@@ -171,10 +171,10 @@ impl CommandSettings<Filled> {
     /// What follows a check that ended so.
     fn checked(&self, end: &StepEnd) -> Checked {
         match end {
-            StepEnd::Ended(ended) => match &ended.exit {
-                Exit::Code { code: 0 } => Checked::Done,
-                Exit::Code { code: 1 } => Checked::NotDone,
-                exit @ Exit::NotStarted { .. } => {
+            StepEnd::Ended(ended) => match &ended.how {
+                Ending::Code { code: 0 } => Checked::Done,
+                Ending::Code { code: 1 } => Checked::NotDone,
+                exit @ Ending::NotStarted { .. } => {
                     Checked::Outcome(Outcome::Failed(format!("its check {exit}")))
                 }
                 _ => Checked::Outcome(Outcome::Failed(format!(
@@ -185,6 +185,7 @@ impl CommandSettings<Filled> {
             StepEnd::Lost => Checked::Outcome(Outcome::Failed(
                 "its check ended with no record of how: its keeper was lost".to_string(),
             )),
+            StepEnd::Gone => Checked::Outcome(Outcome::Failed(host::GONE.to_string())),
         }
     }
 
@@ -192,7 +193,7 @@ impl CommandSettings<Filled> {
     /// how it ended.
     fn ran(&self, place: &UnitPlace, end: &StepEnd, after: &str) -> Result<Outcome, Failure> {
         match end {
-            StepEnd::Ended(ended) if ended.exit.succeeded() => {
+            StepEnd::Ended(ended) if ended.how.succeeded() => {
                 self.done(place, "done: it ran and exited with 0")
             }
             _ => Ok(match host::ending(end, after) {

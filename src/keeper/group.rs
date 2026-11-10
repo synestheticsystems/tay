@@ -8,8 +8,7 @@ use std::time::{Duration, Instant};
 use rustix::io::Errno;
 use rustix::process::{Pid, Signal, kill_process_group, test_kill_process_group};
 
-use super::record::Process;
-use super::started::started;
+use super::process::{RecordedProcess, started};
 
 /// How long a group has to end once it is asked to, before what is left of
 /// it is killed.
@@ -24,11 +23,11 @@ const LOOK: Duration = Duration::from_millis(50);
 /// The process group a recorded process leads.
 #[derive(Clone, Copy, Debug)]
 pub struct Group {
-    leader: Process,
+    leader: RecordedProcess,
 }
 
 impl Group {
-    pub fn led_by(leader: Process) -> Group {
+    pub fn led_by(leader: RecordedProcess) -> Group {
         Group { leader }
     }
 

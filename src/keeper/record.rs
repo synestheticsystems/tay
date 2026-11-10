@@ -14,6 +14,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use super::process::RecordedProcess;
 use crate::disk::{DiskError, write_whole};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -25,34 +26,24 @@ pub struct Record {
     /// When the daemon began the step, in milliseconds since 1970.
     pub begun: u64,
     /// The keeper, once it has written itself.
-    pub keeper: Option<Process>,
+    pub keeper: Option<RecordedProcess>,
     /// The program the keeper started, which leads a process group of its
     /// own.
-    pub child: Option<Process>,
+    pub child: Option<RecordedProcess>,
     pub ended: Option<Ended>,
-}
-
-/// A process, as a number and when it started: what tells it from another
-/// process given the same number later.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Process {
-    pub pid: i32,
-    /// As [`super::started`] tells it; `None` when it could not be told,
-    /// and then no process is taken to be this one.
-    pub started: Option<u64>,
 }
 
 /// How the keeper's child ended, and when, in milliseconds since 1970.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Ended {
     pub at: u64,
-    pub exit: Exit,
+    pub how: Ending,
 }
 
-/// How a program ended.
+/// How a program ended: its exit code or the signal that ended it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "how", rename_all = "snake_case")]
-pub enum Exit {
+#[serde(tag = "by", rename_all = "snake_case")]
+pub enum Ending {
     /// It exited with this code.
     Code { code: i32 },
     /// A signal ended it.
@@ -61,22 +52,22 @@ pub enum Exit {
     NotStarted { why: String },
 }
 
-impl Exit {
+impl Ending {
     /// Whether the program did what it was run for: it exited with 0.
     pub fn succeeded(&self) -> bool {
-        matches!(self, Exit::Code { code: 0 })
+        matches!(self, Ending::Code { code: 0 })
     }
 }
 
-impl fmt::Display for Exit {
+impl fmt::Display for Ending {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Exit::Code { code } => write!(f, "exited with {code}"),
-            Exit::Signal { signal } => match signal_name(*signal) {
+            Ending::Code { code } => write!(f, "exited with {code}"),
+            Ending::Signal { signal } => match signal_name(*signal) {
                 Some(name) => write!(f, "was killed by signal {signal} ({name})"),
                 None => write!(f, "was killed by signal {signal}"),
             },
-            Exit::NotStarted { why } => write!(f, "could not be started: {why}"),
+            Ending::NotStarted { why } => write!(f, "could not be started: {why}"),
         }
     }
 }
@@ -132,13 +123,13 @@ mod tests {
 
     #[test]
     fn an_exit_says_how_the_program_ended() {
-        assert_eq!(Exit::Code { code: 7 }.to_string(), "exited with 7");
+        assert_eq!(Ending::Code { code: 7 }.to_string(), "exited with 7");
         assert_eq!(
-            Exit::Signal { signal: 9 }.to_string(),
+            Ending::Signal { signal: 9 }.to_string(),
             "was killed by signal 9 (KILL)"
         );
-        assert!(Exit::Code { code: 0 }.succeeded());
-        assert!(!Exit::Signal { signal: 15 }.succeeded());
+        assert!(Ending::Code { code: 0 }.succeeded());
+        assert!(!Ending::Signal { signal: 15 }.succeeded());
     }
 
     #[test]
@@ -150,14 +141,14 @@ mod tests {
             attempt: 2,
             step: "run".to_string(),
             begun: 1_794_292_971_005,
-            keeper: Some(Process {
+            keeper: Some(RecordedProcess {
                 pid: 41,
                 started: Some(1),
             }),
             child: None,
             ended: Some(Ended {
                 at: 1_794_292_972_000,
-                exit: Exit::NotStarted {
+                how: Ending::NotStarted {
                     why: "No such file or directory".to_string(),
                 },
             }),

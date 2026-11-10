@@ -1,5 +1,5 @@
 //! What tay keeps on disk: each environment's `.tay/` folder in the stack's
-//! root, and per machine, the list of environments tay knows with the ports
+//! root, the logs of its units among it, and per machine, the list of environments tay knows with the ports
 //! each keeps, the folder a stack's environments share, and the short
 //! folders their daemons' sockets are in. What a module keeps in an
 //! environment's state folder is the module's own: the ports, the secrets
@@ -8,6 +8,7 @@
 mod environment;
 mod lock;
 mod machine;
+pub mod unit_log;
 mod whole;
 
 use std::io;

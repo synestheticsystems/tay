@@ -1,6 +1,29 @@
-//! When a process started: a number that tells a process tay recorded from
-//! another process the system gives the same number later, so that tay never
-//! signals a process it did not start.
+//! A process as a record holds it: its number, and when it started, which
+//! tells it from another process the system gives the same number later, so
+//! that tay never signals a process it did not start.
+
+use serde::{Deserialize, Serialize};
+
+/// A process, as a number and when it started.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecordedProcess {
+    pub pid: i32,
+    /// As [`started`] tells it; `None` when it could not be told, and then
+    /// no process is taken to be this one.
+    pub started: Option<u64>,
+}
+
+impl RecordedProcess {
+    /// The process `pid`, which must not have been waited for, so that its
+    /// number is its own.
+    pub fn of(pid: u32) -> RecordedProcess {
+        let pid = i32::try_from(pid).expect("the system's process numbers fit in an i32");
+        RecordedProcess {
+            pid,
+            started: started(pid),
+        }
+    }
+}
 
 /// When the process `pid` started; `None` when there is no such process,
 /// or this account may not know.
@@ -44,7 +67,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_process_has_a_start_of_its_own_and_one_that_has_gone_has_none() {
+    fn a_process_that_runs_has_a_start_and_one_that_has_gone_has_none() {
         let mut first = std::process::Command::new("sleep")
             .arg("5")
             .spawn()
@@ -57,6 +80,7 @@ mod tests {
         let (one, two) = (started(pid(&first)), started(pid(&second)));
         assert!(one.is_some() && two.is_some());
         assert_eq!(started(pid(&first)), one, "it does not change");
+        assert_eq!(RecordedProcess::of(first.id()).started, one);
         first.kill().unwrap();
         second.kill().unwrap();
         let gone = pid(&first);

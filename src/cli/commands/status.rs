@@ -16,7 +16,7 @@ use crate::diagnostic::Diagnostics;
 use crate::diagnostic::source::Sources;
 use crate::disk::{Asked, Environment, Identity, Intent, Layout};
 use crate::engine::State;
-use crate::keeper::UnitFiles;
+use crate::module;
 use crate::print::out;
 
 use super::plan::{no_stack, options, planned, print_json};
@@ -111,8 +111,9 @@ fn from_daemon(environment: &Environment, args: &Args) -> Result<Report, Exit> {
         Intent::read(&environment.layout).map_err(|error| disk_problem(COMMAND, &error))?;
     let root = environment.layout.root();
     let id = Some(environment.id.to_string());
-    let runs = UnitFiles::anything_runs(&environment.layout)
-        .map_err(|error| disk_problem(COMMAND, &error))?;
+    let found = module::found_running(&environment.layout)
+        .map_err(|failure| problem(COMMAND, Exit::Unreachable, &failure.to_string()))?;
+    let runs = !found.is_empty();
     let status = block_on(COMMAND, async {
         let client = match Client::find(environment).await? {
             Some(client) => client,

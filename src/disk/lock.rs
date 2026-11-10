@@ -44,6 +44,37 @@ impl Lock {
         }
     }
 
+    /// The lock on `path`, tried again while another holds it, for as long
+    /// as `limit`; `None` if another holds it still.
+    pub fn try_take_within(path: &Path, limit: Duration) -> Result<Option<Lock>, DiskError> {
+        let until = Instant::now() + limit;
+        loop {
+            if let Some(lock) = Lock::try_take(path)? {
+                return Ok(Some(lock));
+            }
+            if Instant::now() >= until {
+                return Ok(None);
+            }
+            std::thread::sleep(RETRY);
+        }
+    }
+
+    /// Whether another holds the lock on `path`. Looking takes a shared
+    /// lock for a moment, which other looks share, so that looking keeps
+    /// the lock from another only for that moment.
+    pub fn is_held(path: &Path) -> Result<bool, DiskError> {
+        let file = match OpenOptions::new().read(true).open(path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(DiskError::io(path, "opened to be looked at")(error)),
+        };
+        match flock(&file, FlockOperation::NonBlockingLockShared) {
+            Ok(()) => Ok(false),
+            Err(Errno::WOULDBLOCK) => Ok(true),
+            Err(errno) => Err(DiskError::io(path, "locked")(errno.into())),
+        }
+    }
+
     /// The lock on `path`, waited for while another holds it, for as long
     /// as [`WAIT`].
     pub fn take(path: &Path) -> Result<Lock, DiskError> {
@@ -91,10 +122,29 @@ mod tests {
         assert!(Lock::try_take(&path).unwrap().is_none());
         assert!(held.is_at(&path));
         drop(held);
-        let again = Lock::try_take(&path)
+        // A process started meanwhile by another test holds every open file
+        // of this one until it runs its program, so the lock may stay held
+        // for that moment.
+        let again = Lock::try_take_within(&path, Duration::from_secs(1))
             .unwrap()
             .expect("the lock is free again");
         std::fs::remove_file(&path).unwrap();
         assert!(!again.is_at(&path));
+    }
+
+    #[test]
+    fn looking_at_a_lock_says_whether_another_holds_it_and_keeps_it_from_none() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("a.lock");
+        assert!(!Lock::is_held(&path).unwrap(), "no file, no holder");
+        let held = Lock::try_take(&path).unwrap().unwrap();
+        assert!(Lock::is_held(&path).unwrap());
+        drop(held);
+        // A look holds nothing once it has looked.
+        assert!(
+            Lock::try_take_within(&path, Duration::from_secs(1))
+                .unwrap()
+                .is_some()
+        );
     }
 }

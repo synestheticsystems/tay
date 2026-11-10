@@ -17,5 +17,4 @@ mod module;
 mod plan;
 mod print;
 mod syntax;
-mod unit_log;
 mod value;

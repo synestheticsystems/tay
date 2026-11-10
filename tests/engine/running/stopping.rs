@@ -70,4 +70,28 @@ fn when_the_environments_folder_disappears_the_daemon_stops_everything_it_starte
         machine.processes()
     );
     assert!(!crate::harness::alive(daemon));
+    // Nothing was started again, into a folder made anew.
+    assert!(!root.join(".tay").exists());
+}
+
+#[test]
+fn a_readiness_command_under_way_is_stopped_with_its_unit() {
+    let machine = Machine::new();
+    let root = machine.stack("checks");
+    let up = machine.spawn_up(&root, &["hanging"]);
+    let checks = || {
+        machine
+            .processes()
+            .into_iter()
+            .filter(|pid| crate::harness::command_of(*pid).contains("hang.sh"))
+            .count()
+    };
+    assert!(crate::harness::eventually(
+        Duration::from_secs(20),
+        || checks() > 0
+    ));
+    let down = machine.at(&root, "down", &[]);
+    assert_eq!(down.code, 0, "{}", down.stdout);
+    up.finish();
+    assert_eq!(checks(), 0, "the check went with its unit");
 }

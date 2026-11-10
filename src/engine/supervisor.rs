@@ -20,9 +20,9 @@ use super::fill::UnitValues;
 use super::state::{State, UnitState};
 use super::units::Units;
 use crate::disk::Environment;
+use crate::disk::unit_log::UnitLog;
 use crate::module::{self, Running, Runs, UnitKind, UnitPlace, Values};
 use crate::plan::PlannedUnit;
-use crate::unit_log::UnitLog;
 
 pub use tending::Begin;
 
@@ -181,6 +181,18 @@ impl Supervisor {
             return Ok(());
         };
         stop_blocking(runs.clone(), self.place(&planned.name)).await
+    }
+
+    /// The units of which something runs now, found where units run,
+    /// whether or not the plan has them.
+    pub fn found_running(&self) -> Result<Vec<(String, Runs)>, String> {
+        module::found_running(&self.environment.layout).map_err(|failure| failure.to_string())
+    }
+
+    /// Stops what runs of `unit`, which the plan does not have, from its
+    /// place alone, where `runs` says it runs.
+    pub async fn stop_unplanned(&self, unit: &str, runs: Runs) -> Result<(), String> {
+        stop_blocking(runs, self.place(unit)).await
     }
 
     /// Whether anything of `planned` runs now, from its place alone,

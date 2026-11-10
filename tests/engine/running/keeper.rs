@@ -68,9 +68,13 @@ fn a_second_start_of_a_unit_that_runs_is_refused() {
     );
     assert_eq!(child(&root, "api"), api);
     assert!(alive(api), "the one that ran is left as it was");
+    let web = child(&root, "web");
     let down = machine.at(&root, "down", &[]);
     assert_eq!(down.code, 0, "{}", down.stdout);
     assert!(!alive(api), "`tay down` stops it all the same");
+    // And what runs of a unit the plan does not have at all.
+    assert!(!alive(web));
+    assert!(machine.processes().is_empty(), "{:?}", machine.processes());
 }
 
 /// Holds the lock on the machine's list of environments, through which
@@ -154,7 +158,6 @@ fn the_daemon_killed_at_any_point_of_a_start_leaves_nothing_the_next_daemon_does
         Moment::KeeperWritten,
         Moment::ChildStarted,
     ];
-    let mut seen = Vec::new();
     for moment in moments {
         let machine = Machine::new();
         let root = machine.stack("services");
@@ -200,7 +203,6 @@ fn the_daemon_killed_at_any_point_of_a_start_leaves_nothing_the_next_daemon_does
             runs,
             "killed {at}: `ticking` is `{state}`, and a process of it runs: {runs}"
         );
-        seen.push((moment, at, state));
         let down = machine.at(&root, "down", &[]);
         assert_eq!(down.code, 0, "killed {at}: {}", down.stdout);
         assert!(
@@ -208,5 +210,4 @@ fn the_daemon_killed_at_any_point_of_a_start_leaves_nothing_the_next_daemon_does
             "killed {at}: something is left"
         );
     }
-    eprintln!("killed at: {seen:?}");
 }

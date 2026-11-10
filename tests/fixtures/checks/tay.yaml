@@ -53,3 +53,8 @@ units:
     with:
       command: ["python3", "${environment.root}/services/serve.py", "${fixed-port.number}"]
     ready: { tcp: "127.0.0.1:${fixed-port.number}", within: 20s }
+  hanging:
+    doc: Checked by a command that never ends.
+    uses: process
+    with: { command: ["${environment.root}/services/slow.sh", "300"] }
+    ready: { command: ["${environment.root}/services/hang.sh"], within: 1m }

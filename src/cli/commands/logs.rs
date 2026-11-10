@@ -11,10 +11,10 @@ use crate::cli::args::{Args, Takes, UnitsNamed};
 use crate::cli::stack;
 use crate::clock;
 use crate::disk::Layout;
+use crate::disk::unit_log::{Line, UnitLog};
 use crate::module::Duration as Written;
 use crate::print::out_while_read;
 use crate::syntax::names;
-use crate::unit_log::{Line, UnitLog};
 
 use super::{disk_problem, problem};
 

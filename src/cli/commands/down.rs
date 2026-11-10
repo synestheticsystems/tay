@@ -10,7 +10,7 @@ use crate::cli::stack;
 use crate::control::client::Client;
 use crate::control::protocol::Event;
 use crate::disk::{Environment, Identity, Intent, Layout};
-use crate::keeper::UnitFiles;
+use crate::module;
 
 use super::plan::no_stack;
 use super::{block_on, client_problem, disk_problem, machine, problem};
@@ -51,9 +51,11 @@ pub fn run(args: Args) -> Exit {
             (None, Ok(intent)) => {
                 // What runs with no daemon, as it may when one was killed
                 // while it took the environment down, is found by one.
-                let runs = match UnitFiles::anything_runs(&environment.layout) {
-                    Ok(runs) => runs,
-                    Err(error) => return disk_problem(COMMAND, &error),
+                let runs = match module::found_running(&environment.layout) {
+                    Ok(found) => !found.is_empty(),
+                    Err(failure) => {
+                        return problem(COMMAND, Exit::Unreachable, &failure.to_string());
+                    }
                 };
                 if intent == Intent::Down && !runs {
                     return nothing_runs(args.json);

@@ -1,9 +1,10 @@
 //! Taking an environment down: every unit is stopped, in the reverse of the
-//! order the units start in, and then each that runs is checked, so that
-//! `tay down` says nothing is left only once it has seen so. A unit that
-//! runs is stopped whatever its state, from its place alone if no task looks
-//! after it; one that is made is left as it is on disk, to be had again at
-//! the next `tay up`, and is `stopped` while the environment is down.
+//! order the units start in, then whatever runs of a unit the plan does not
+//! have, and then each that runs is checked, so that `tay down` says nothing
+//! is left only once it has seen so. A unit that runs is stopped whatever
+//! its state, from its place alone if no task looks after it; one that is
+//! made is left as it is on disk, to be had again at the next `tay up`, and
+//! is `stopped` while the environment is down.
 
 use std::sync::Arc;
 
@@ -17,6 +18,14 @@ use crate::module::UnitKind;
 pub struct Left {
     pub unit: String,
     pub reason: String,
+}
+
+/// What is done with what is found to run of a unit the plan does not
+/// have.
+#[derive(Clone, Copy)]
+enum Pass {
+    Stop,
+    Check,
 }
 
 /// Stops each unit `supervisor` knows, recording each as stopped, with
@@ -46,6 +55,34 @@ pub async fn take_down(supervisor: &Arc<Supervisor>, detail: &str) -> Vec<Left> 
             }
         };
         supervisor.record(&planned.name, state, None);
+    }
+    // What runs of a unit the plan does not have, as one left from before
+    // a change of what was asked for, is stopped from its place alone, and
+    // then looked for again.
+    let known = |unit: &str| units.iter().any(|known| known.planned.name == unit);
+    for pass in [Pass::Stop, Pass::Check] {
+        let found = match supervisor.found_running() {
+            Ok(found) => found,
+            Err(why) => {
+                left.push(Left {
+                    unit: "the environment".to_string(),
+                    reason: format!("what runs of its units cannot be told: {why}"),
+                });
+                break;
+            }
+        };
+        for (unit, runs) in found {
+            if known(&unit) || left.iter().any(|left| left.unit == unit) {
+                continue;
+            }
+            let stopped = match pass {
+                Pass::Stop => supervisor.stop_unplanned(&unit, runs).await,
+                Pass::Check => Err("something of it still runs after it was stopped".to_string()),
+            };
+            if let Err(reason) = stopped {
+                left.push(Left { unit, reason });
+            }
+        }
     }
     for known in units.iter() {
         let planned = &known.planned;

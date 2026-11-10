@@ -1,45 +1,39 @@
-//! The daemon's side of a keeper: starting one for a step of a unit under
-//! the unit's lock, looking at the lock and the record to find a step again,
-//! waiting for a step to end, and stopping it.
+//! The daemon's side of a keeper: the files a unit's steps are kept with,
+//! starting a keeper for a step under the unit's lock, looking at the lock
+//! and the record to find a step again, and waiting for a step to end.
 //!
 //! The order of a start closes every gap: the daemon writes the step to the
 //! unit's record, takes the unit's lock, and starts the keeper, which
 //! inherits the lock. The lock is held without a gap from before the keeper
 //! exists until it ends, and the system releases it if the keeper dies.
 
-use std::collections::HashMap;
 use std::fs::{DirBuilder, File};
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd};
 use std::os::unix::fs::DirBuilderExt;
 use std::os::unix::process::CommandExt;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use rustix::io::{FdFlags, fcntl_setfd};
 
-use super::group::{GRACE, Group};
-use super::record::{Ended, Process, Record};
+use super::group::Group;
+use super::record::{Ended, Record};
+use super::stopping;
 use crate::clock;
-use crate::disk::{DiskError, Layout, Lock};
-use crate::unit_log::UnitLog;
+use crate::disk::unit_log::UnitLog;
+use crate::disk::{DiskError, Lock};
 
 /// How often a daemon looks at a step under way for its end.
-const LOOK: Duration = Duration::from_millis(250);
+pub(super) const LOOK: Duration = Duration::from_millis(250);
 
-/// How long a keeper has to write its child once it is started, before a
-/// step that is stopped is taken to have none.
-const WRITES_CHILD: Duration = Duration::from_secs(2);
+/// How long a start waits for a lock that a look holds for a moment.
+const LOOKED_AT: Duration = Duration::from_millis(200);
 
-/// How long a keeper has to end once its child's group is gone.
-const ENDS: Duration = Duration::from_secs(3);
-
-/// What one unit that runs on the host keeps: in `state/units/<unit>/`, its
-/// lock and its record, readable by this account only; in `logs/<unit>/`,
-/// its log.
+/// The files the steps of one unit are kept with: a folder for its lock and
+/// its record, readable by this account only, and its log.
 #[derive(Clone, Debug)]
-pub struct UnitFiles {
+pub struct StepFiles {
     folder: PathBuf,
     pub log: UnitLog,
 }
@@ -90,6 +84,8 @@ pub enum LaunchError {
     Spawn(std::io::Error),
     #[error("its keeper did not end once its processes were stopped")]
     KeeperStays,
+    #[error("its folder `{}` cannot be made, since the folder it is in has gone", .0.display())]
+    FolderGone(PathBuf),
     #[error("processes of its group {group} were left after they were killed")]
     GroupStays { group: i32 },
     #[error("its processes cannot be signalled: {0}")]
@@ -98,43 +94,22 @@ pub enum LaunchError {
     Disk(#[from] DiskError),
 }
 
-impl UnitFiles {
-    pub fn of(layout: &Layout, unit: &str) -> UnitFiles {
-        UnitFiles {
-            folder: units(layout).join(unit),
-            log: UnitLog::at(layout.unit_log(unit)),
+impl StepFiles {
+    /// The files kept in `folder`, the log in `log`.
+    pub fn at(folder: PathBuf, log: PathBuf) -> StepFiles {
+        StepFiles {
+            folder,
+            log: UnitLog::at(log),
         }
     }
 
-    /// Whether anything of any unit of the environment `layout` lays out
-    /// runs, from what each unit's lock and record say: what a command asks
-    /// before it says nothing runs where no daemon does.
-    pub fn anything_runs(layout: &Layout) -> Result<bool, DiskError> {
-        let folder = units(layout);
-        let entries = match std::fs::read_dir(&folder) {
-            Ok(entries) => entries,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-            Err(error) => return Err(DiskError::io(folder, "read")(error)),
-        };
-        for entry in entries {
-            let entry = entry.map_err(DiskError::io(&folder, "read"))?;
-            let Some(unit) = entry.file_name().to_str().map(str::to_string) else {
-                continue;
-            };
-            if UnitFiles::of(layout, &unit).anything_left()? {
-                return Ok(true);
-            }
-        }
-        Ok(false)
-    }
-
-    /// The unit's own folder in the state folder, where what it produces is
-    /// kept beside its lock and record.
+    /// The folder of the lock and the record, where what the unit produces
+    /// is kept beside them.
     pub fn folder(&self) -> &PathBuf {
         &self.folder
     }
 
-    fn lock(&self) -> PathBuf {
+    pub(super) fn lock(&self) -> PathBuf {
         self.folder.join("lock")
     }
 
@@ -142,13 +117,22 @@ impl UnitFiles {
         self.folder.join("record.json")
     }
 
-    /// Makes the unit's folder, for this account alone.
-    pub fn make(&self) -> Result<(), DiskError> {
-        DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(&self.folder)
-            .map_err(DiskError::io(&self.folder, "made"))
+    /// Makes the folder, for this account alone, and the one it is in, but
+    /// no folder above: a step is never begun in an environment whose
+    /// folder has gone, which would make it again.
+    fn make(&self) -> Result<(), LaunchError> {
+        let above = self.folder.parent().expect("the folder is in a folder");
+        for folder in [above, self.folder.as_path()] {
+            match DirBuilder::new().mode(0o700).create(folder) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    return Err(LaunchError::FolderGone(self.folder.clone()));
+                }
+                Err(error) => return Err(DiskError::io(folder, "made")(error).into()),
+            }
+        }
+        Ok(())
     }
 
     /// The unit's step as its lock and its record say now.
@@ -156,13 +140,12 @@ impl UnitFiles {
         if !self.folder.exists() {
             return Ok(Look::Never);
         }
-        // Taking the lock to look at it holds it no longer than this.
-        let held = Lock::try_take(&self.lock())?.is_none();
+        let held = Lock::is_held(&self.lock())?;
         let record = Record::read(&self.record())?;
         Ok(match (held, record) {
             (true, Some(record)) => {
                 if let Some(child) = record.child {
-                    remember(&self.folder, child);
+                    stopping::remember(&self.folder, child);
                 }
                 Look::Running(record)
             }
@@ -221,8 +204,9 @@ impl UnitFiles {
         };
         self.make()?;
         // While a keeper holds the lock the record is its to write, so the
-        // lock is tried, and let go, before the record is written.
-        if Lock::try_take(&self.lock())?.is_none() {
+        // lock is tried, and let go, before the record is written. A look
+        // holds it for a moment only.
+        if Lock::try_take_within(&self.lock(), LOOKED_AT)?.is_none() {
             return Err(LaunchError::Running);
         }
         let record = Record {
@@ -234,7 +218,7 @@ impl UnitFiles {
             ended: None,
         };
         record.write(&self.record())?;
-        let lock = Lock::try_take(&self.lock())?.ok_or(LaunchError::Running)?;
+        let lock = Lock::try_take_within(&self.lock(), LOOKED_AT)?.ok_or(LaunchError::Running)?;
         let binary = std::env::current_exe().map_err(LaunchError::NoBinary)?;
         let lock_fd = lock.as_fd().as_raw_fd();
         let mut command = Command::new(binary);
@@ -304,96 +288,4 @@ impl UnitFiles {
             }
         }
     }
-
-    /// Stops what of the unit runs: the step under way, by its child's
-    /// group, and what is left of the group of a step whose keeper was lost,
-    /// or whose record has gone with the environment's folder. Waits until
-    /// the keeper has ended and nothing of the group is left. It blocks, for
-    /// as long as the group takes to end.
-    pub fn stop(&self) -> Result<(), LaunchError> {
-        let child = match self.look()? {
-            Look::Ended(..) => None,
-            Look::Never => seen(&self.folder),
-            Look::Lost(record) => record.child,
-            Look::Running(record) => match record.child {
-                Some(child) => Some(child),
-                None => self.wait_for_child()?,
-            },
-        };
-        if let Some(child) = child
-            && !Group::led_by(child).stop().map_err(LaunchError::Signal)?
-        {
-            return Err(LaunchError::GroupStays { group: child.pid });
-        }
-        self.keeper_ended()?;
-        forget(&self.folder);
-        Ok(())
-    }
-
-    /// The child of the step under way once its keeper has written it,
-    /// waited for a while; `None` when the step ends meanwhile, or its keeper
-    /// writes none.
-    fn wait_for_child(&self) -> Result<Option<Process>, LaunchError> {
-        let until = Instant::now() + WRITES_CHILD;
-        loop {
-            match self.look()? {
-                Look::Running(Record {
-                    child: Some(child), ..
-                })
-                | Look::Lost(Record {
-                    child: Some(child), ..
-                }) => return Ok(Some(child)),
-                Look::Running(_) if Instant::now() < until => std::thread::sleep(LOOK),
-                _ => return Ok(None),
-            }
-        }
-    }
-
-    /// Waits until the unit's lock is free: its keeper has ended.
-    fn keeper_ended(&self) -> Result<(), LaunchError> {
-        let until = Instant::now() + ENDS + GRACE;
-        while matches!(self.look()?, Look::Running(_)) {
-            if Instant::now() >= until {
-                return Err(LaunchError::KeeperStays);
-            }
-            std::thread::sleep(LOOK);
-        }
-        Ok(())
-    }
-}
-
-/// `state/units/`: a folder for each unit that runs on the host.
-fn units(layout: &Layout) -> PathBuf {
-    layout.state().join("units")
-}
-
-/// The child of each unit's step under way, as this daemon last saw it in
-/// the unit's record, by the unit's folder: what it stops when the
-/// environment's folder, and the records in it, have gone while the stack
-/// runs.
-fn children() -> &'static Mutex<HashMap<PathBuf, Process>> {
-    static CHILDREN: OnceLock<Mutex<HashMap<PathBuf, Process>>> = OnceLock::new();
-    CHILDREN.get_or_init(Mutex::default)
-}
-
-fn remember(folder: &Path, child: Process) {
-    children()
-        .lock()
-        .expect("the children seen are not poisoned")
-        .insert(folder.to_path_buf(), child);
-}
-
-fn seen(folder: &Path) -> Option<Process> {
-    children()
-        .lock()
-        .expect("the children seen are not poisoned")
-        .get(folder)
-        .copied()
-}
-
-fn forget(folder: &Path) {
-    children()
-        .lock()
-        .expect("the children seen are not poisoned")
-        .remove(folder);
 }

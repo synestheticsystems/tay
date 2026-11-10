@@ -164,7 +164,7 @@ impl ProcessSettings<Filled> {
         let argv = host::argv(&self.prepare[index], "a `prepare` command")?;
         let shown = host::shown(&argv);
         Ok(match end {
-            StepEnd::Ended(ended) if ended.exit.succeeded() => None,
+            StepEnd::Ended(ended) if ended.how.succeeded() => None,
             StepEnd::Ended(ended) => Some(Outcome::Failed(format!(
                 "{shown}, which it prepares with, {}",
                 host::ended_words(ended)
@@ -172,6 +172,7 @@ impl ProcessSettings<Filled> {
             StepEnd::Lost => Some(Outcome::Failed(format!(
                 "{shown}, which it prepares with, ended with no record of how: its keeper was lost"
             ))),
+            StepEnd::Gone => Some(Outcome::Failed(host::GONE.to_string())),
         })
     }
 }
