@@ -8,8 +8,8 @@ use std::collections::HashMap;
 use bollard::errors::Error as ApiError;
 use bollard::models::{ContainerCreateBody, ContainerInspectResponse, ContainerStateStatusEnum};
 use bollard::query_parameters::{
-    CreateContainerOptionsBuilder, EventsOptionsBuilder, InspectContainerOptions,
-    ListContainersOptionsBuilder, RemoveContainerOptionsBuilder, StopContainerOptionsBuilder,
+    CreateContainerOptionsBuilder, InspectContainerOptions, ListContainersOptionsBuilder,
+    RemoveContainerOptionsBuilder, StopContainerOptionsBuilder,
 };
 use futures_util::StreamExt;
 
@@ -19,10 +19,6 @@ use super::{Docker, DockerError, conflict, missing, without_secrets};
 /// How long a container is given to stop before Docker kills it, as long
 /// as a process is given.
 const STOP: i32 = 5;
-
-/// How long after Docker says a container stopped it is given to say that
-/// it was killed for memory, which it learns apart from the end.
-const MEMORY_KILL_SAID: u64 = 3;
 
 impl Docker {
     /// The container named `name` and what Docker says of it, when there is
@@ -190,40 +186,6 @@ impl Docker {
                 .failed(format!("remove the container of `{}`", container.unit()))(
                 error
             )),
-        }
-    }
-
-    /// Whether Docker says `container`, which started at `started`, in
-    /// nanoseconds since 1970, was killed for memory. Docker learns of a
-    /// memory kill apart from the container's end, and on Linux may say it
-    /// only after it has said the container stopped, so its events are
-    /// read for a moment past now.
-    pub async fn killed_for_memory(
-        &self,
-        container: &OurContainer,
-        started: u64,
-    ) -> Result<bool, DockerError> {
-        let filters = HashMap::from([
-            ("type", vec!["container"]),
-            ("container", vec![container.id.as_str()]),
-            ("event", vec!["oom"]),
-        ]);
-        let options = EventsOptionsBuilder::default()
-            .since(&format!(
-                "{}.{:09}",
-                started / 1_000_000_000,
-                started % 1_000_000_000
-            ))
-            .until(&(crate::clock::now() + MEMORY_KILL_SAID).to_string())
-            .filters(&filters)
-            .build();
-        match self.api.events(Some(options)).next().await {
-            Some(Ok(_)) => Ok(true),
-            None => Ok(false),
-            Some(Err(error)) => Err(self.failed(format!(
-                "read Docker's events for the container of `{}`",
-                container.unit()
-            ))(error)),
         }
     }
 

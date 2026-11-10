@@ -28,11 +28,11 @@ units:
     restart: { on: failure, attempts: 2 }
 
   hungry:
-    doc: Waits for its signal, then takes more memory than it may have.
+    doc: Waits for its signal, then takes more memory than it may have, and ends as what took it did, a moment later.
     uses: container
     with:
       image: busybox:1.36
-      command: [sh, -c, "trap 'exit 0' TERM; echo waiting; until [ -e /signal/eat ]; do sleep 0.2; done; echo eating; exec dd if=/dev/zero of=/dev/null bs=64M count=1"]
+      command: [sh, -c, "trap 'exit 0' TERM; echo waiting; until [ -e /signal/eat ]; do sleep 0.2; done; echo eating; dd if=/dev/zero of=/dev/null bs=64M count=1; ended=$?; sleep 1; exit $ended"]
       mounts: [{ from: "${environment.state}/hungry", to: /signal }]
     restart: { on: never }
 
