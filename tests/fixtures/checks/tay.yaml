@@ -6,10 +6,10 @@ settings:
 units:
   site-port: { uses: port }
   site:
-    doc: Answers 200 at /health while its folder has a file `healthy`, and 503 when not.
+    doc: Answers 200 at /health while its folder has a file `healthy`, and 503 when not, at the address its own check uses.
     uses: process
     with:
-      command: ["python3", "${environment.root}/services/serve.py", "${site-port.number}"]
+      command: ["python3", "${environment.root}/services/serve.py", "${site-port.number}", "${host.listen}"]
       workdir: "${environment.state}"
       prepare: [["${environment.root}/services/mark.sh", "${environment.state}/healthy"]]
     ready: { http: "${self.web.url}/health", within: 20s }

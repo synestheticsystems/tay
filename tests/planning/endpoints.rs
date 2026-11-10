@@ -1,7 +1,7 @@
 //! An address depends on who asks: the view of an endpoint follows where the
 //! unit that uses it runs, unless the reference asks for one.
 
-use crate::support::{given, plan, plan_json, unit, unit_names};
+use crate::support::{PLANNED_HOST_LISTEN, given, plan, plan_json, unit, unit_names};
 use serde_json::json;
 
 /// The words of a unit's readiness command, as resolved for that unit.
@@ -15,14 +15,15 @@ fn probe(plan: &serde_json::Value, name: &str) -> Vec<String> {
 }
 
 #[test]
-fn a_unit_on_the_host_sees_127_0_0_1_and_host_ports() {
+fn a_unit_on_the_host_sees_a_process_where_host_listen_names_and_a_container_at_its_host_port() {
     let plan = plan_json("endpoints", &[]);
     assert_eq!(
         probe(&plan, "host-user"),
         [
             "probe",
-            // A process's endpoint: 127.0.0.1 and its port.
-            "http://127.0.0.1:<port: host-port>/v1",
+            // A process's endpoint: the address `${host.listen}` names, and
+            // its port.
+            &format!("http://{PLANNED_HOST_LISTEN}:<port: host-port>/v1"),
             // A container's endpoint: 127.0.0.1 and the published host port.
             "127.0.0.1:<port: box-port>",
             // `@net` asks for the network's view whoever asks.
@@ -47,7 +48,7 @@ fn a_unit_in_a_container_sees_the_host_by_name_and_containers_by_unit_name() {
             // A container's endpoint: its unit's name and the port inside it.
             "http://in-box:8080",
             // `@host` asks for the host's view whoever asks.
-            "http://127.0.0.1:<port: host-port>/v1",
+            &format!("http://{PLANNED_HOST_LISTEN}:<port: host-port>/v1"),
             "http://in-box:8080/v2",
             "host.docker.internal",
         ]

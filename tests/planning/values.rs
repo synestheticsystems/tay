@@ -61,7 +61,7 @@ fn references_to_the_environment_and_the_host() {
     // None of these is known until the environment is first brought up.
     assert_eq!(text("id"), "<environment.id>");
     assert_eq!(text("network"), "<environment.network>");
-    assert_eq!(text("listen"), "<host.listen>");
+    assert_eq!(text("listen"), crate::support::PLANNED_HOST_LISTEN);
 }
 
 #[test]

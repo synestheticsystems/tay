@@ -21,7 +21,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use crate::definition::{Arg, Body, Mechanism, Stack, reference_errors};
 use crate::diagnostic::source::{Loc, SourceId, Sources};
 use crate::diagnostic::{Diagnostic, Diagnostics};
-use crate::module::{Runs, UnitKind};
+use crate::module::{HOST_LISTEN_BEFORE_START, Runs, UnitKind};
 use crate::syntax::expr::{Expr, ExprKind, Part, Piece, Reference, Target, View};
 use crate::syntax::names::NameAt;
 
@@ -144,9 +144,9 @@ pub struct Resolver<'s> {
     /// Every file and argument read, which a path beginning `./` is
     /// relative to the folder of.
     pub sources: &'s mut Sources,
-    /// Whether a value was `${host.listen}`, which is known only once the
-    /// environment is brought up.
-    pub host_listen: bool,
+    /// Whether a value was `${host.listen}` where it is known only once
+    /// the environment is brought up.
+    pub uses_host_listen: bool,
     /// The arguments of the action `tay run` runs, which fill its
     /// `${args.NAME}`; an action's argument is otherwise a placeholder.
     arguments: Option<Arguments>,
@@ -165,7 +165,7 @@ impl<'s> Resolver<'s> {
             layered,
             environment,
             sources,
-            host_listen: false,
+            uses_host_listen: false,
             arguments,
             d: Diagnostics::default(),
             units: stack
@@ -284,14 +284,24 @@ impl<'s> Resolver<'s> {
         Ok(text)
     }
 
+    /// `${host.listen}`: the address itself where the system makes it
+    /// known before anything starts, and otherwise its placeholder, which
+    /// the engine fills once it has learnt the address.
+    fn host_listen(&mut self) -> Resolved {
+        match HOST_LISTEN_BEFORE_START {
+            Some(address) => Resolved::text(address),
+            None => {
+                self.uses_host_listen = true;
+                Resolved::known(Value::Placeholder(Placeholder::HostListen))
+            }
+        }
+    }
+
     fn reference(&mut self, reference: &Reference, scope: Scope) -> Res {
         match &reference.target {
             Target::Setting(name) => self.setting(name, reference),
             Target::Environment(field) => self.environment_field(*field, reference),
-            Target::HostListen => {
-                self.host_listen = true;
-                Ok(Resolved::known(Value::Placeholder(Placeholder::HostListen)))
-            }
+            Target::HostListen => Ok(self.host_listen()),
             Target::Arg(name) => {
                 // An action's arguments were checked against its declaration
                 // while reading, in the unit the reference is written in.

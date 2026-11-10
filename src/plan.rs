@@ -214,12 +214,19 @@ mod tests {
             ),
             "{web}"
         );
-        // The API's address as the host, where `web` runs, sees it: its
-        // port is left out if it is filled with 80.
+        // The API's address as the host, where `web` runs, sees it: where
+        // `${host.listen}` names, known before start on a Mac and learnt as
+        // the environment comes up elsewhere; its port is left out if it is
+        // filled with 80.
+        let host = if cfg!(target_os = "macos") {
+            r#"Text("http://127.0.0.1")"#
+        } else {
+            r#"Text("http://"), Placeholder(HostListen)"#
+        };
         assert!(
-            web.contains(
-                r#"("API_URL", Text([Text("http://127.0.0.1"), UrlPort { scheme: Text([Text("http")]), port: Placeholder(Port { unit: "api-port", name: "number" }) }]))"#
-            ),
+            web.contains(&format!(
+                r#"("API_URL", Text([{host}, UrlPort {{ scheme: Text([Text("http")]), port: Placeholder(Port {{ unit: "api-port", name: "number" }}) }}]))"#
+            )),
             "{web}"
         );
         // A secret in `secret_env` names the secret that fills it.

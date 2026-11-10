@@ -4,7 +4,7 @@
 use std::fs;
 use std::path::Path;
 
-use crate::support::{fixture, plan};
+use crate::support::{PLANNED_HOST_LISTEN, fixture, plan};
 
 /// The output with the fixture's absolute path, which differs between
 /// machines, written as `<root>`.
@@ -15,13 +15,23 @@ fn printed(args: &[&str]) -> String {
     run.stdout.replace(root.to_str().unwrap(), "<root>")
 }
 
+/// The output expected, as this system prints it: the files are written
+/// as a Mac prints them, where a host process is at 127.0.0.1 from the
+/// host, and elsewhere it is where `${host.listen}` prints. The shop's host
+/// processes listen on these ports.
 fn expected(name: &str) -> String {
-    fs::read_to_string(
+    let written = fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/expected")
             .join(name),
     )
-    .unwrap()
+    .unwrap();
+    ["api-port", "web-port"].iter().fold(written, |text, port| {
+        text.replace(
+            &format!("127.0.0.1:<port: {port}>"),
+            &format!("{PLANNED_HOST_LISTEN}:<port: {port}>"),
+        )
+    })
 }
 
 #[test]

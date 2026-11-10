@@ -7,7 +7,6 @@
 //! tay says what it means, the host's address on the environment's network,
 //! which is where a host process listens.
 
-#[cfg(not(target_os = "macos"))]
 use super::docker::{Docker, DockerError};
 use crate::disk::Environment;
 use crate::module::operations::Failure;
@@ -25,22 +24,28 @@ pub enum Occasion {
 /// system: Docker Desktop gives it, and on Linux tay does.
 pub const HOST_IN_CONTAINERS: &str = "host.docker.internal";
 
-/// `${host.listen}`: the address a host process listens on so that this
-/// machine's containers can reach it and other machines cannot. Docker
-/// Desktop brings a container's connections to the host's name to the
-/// host's own loopback address.
-#[cfg(target_os = "macos")]
-pub async fn host_listen(_: &Environment, _: Occasion) -> Result<String, Failure> {
-    Ok("127.0.0.1".to_string())
-}
+/// `${host.listen}` where the system makes it known before anything starts,
+/// which the plan then gives as it is: Docker Desktop brings a container's
+/// connections to the host's name to the host's own loopback address.
+/// Where Docker runs on the host itself, it is the host's address on the
+/// environment's network, learnt only once that network is there.
+pub const HOST_LISTEN_BEFORE_START: Option<&str> = if cfg!(target_os = "macos") {
+    Some("127.0.0.1")
+} else {
+    None
+};
 
-/// `${host.listen}` elsewhere: the host's address on the environment's
-/// network, its gateway, which its containers reach the host by and which
-/// no other machine has a way to. The network is made now as the
-/// environment is brought up, and is only looked for when a daemon finds
-/// the environment again.
-#[cfg(not(target_os = "macos"))]
+/// `${host.listen}`: the address a host process listens on so that this
+/// machine's containers can reach it and other machines cannot. Where the
+/// system does not make it known before anything starts, it is the host's
+/// address on the environment's network, its gateway, which its
+/// containers reach the host by and which no other machine has a way to.
+/// The network is made now as the environment is brought up, and is only
+/// looked for when a daemon finds the environment again.
 pub async fn host_listen(environment: &Environment, occasion: Occasion) -> Result<String, Failure> {
+    if let Some(address) = HOST_LISTEN_BEFORE_START {
+        return Ok(address.to_string());
+    }
     let docker = Docker::connect()?;
     let (id, name) = (environment.id.as_str(), environment.network());
     let network = match occasion {

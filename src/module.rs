@@ -25,7 +25,7 @@ pub use operations::{
     Values,
 };
 pub use running::command_line::argv;
-pub use running::container::{HOST_IN_CONTAINERS, Occasion, host_listen};
+pub use running::container::{HOST_IN_CONTAINERS, HOST_LISTEN_BEFORE_START, Occasion, host_listen};
 pub use running::{
     anything_left, anything_left_of_environment, found_left, kept_by_environment,
     remove_kept_by_environment, remove_shared, stop,

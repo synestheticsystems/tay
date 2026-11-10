@@ -33,7 +33,7 @@ use crate::module::settings::{MapValues, Operate, each, each_named, maybe};
 use crate::module::{Cx, Module};
 use unit::ContainerUnit;
 
-pub use host::{HOST_IN_CONTAINERS, Occasion, host_listen};
+pub use host::{HOST_IN_CONTAINERS, HOST_LISTEN_BEFORE_START, Occasion, host_listen};
 pub use kept::{kept_by_environment, remove_kept_by_environment};
 pub use left::{anything_left, anything_left_of_environment, found_left, remove_shared, stop};
 pub use step::{

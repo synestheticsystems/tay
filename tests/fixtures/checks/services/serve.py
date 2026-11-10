@@ -1,5 +1,6 @@
 """Answers GET /health with 200 while the folder it runs in has a file
-`healthy`, and with 503 while it has not, on the port it is given."""
+`healthy`, and with 503 while it has not, on the port it is given, at the
+address it is given or else 127.0.0.1."""
 
 import http.server
 import os
@@ -20,5 +21,6 @@ class Health(http.server.BaseHTTPRequestHandler):
 port = sys.argv[1]
 if port.startswith("@"):
     port = open(port[1:]).read().strip()
+address = sys.argv[2] if len(sys.argv) > 2 else "127.0.0.1"
 print("serving", flush=True)
-http.server.HTTPServer(("127.0.0.1", int(port)), Health).serve_forever()
+http.server.HTTPServer((address, int(port)), Health).serve_forever()

@@ -8,6 +8,17 @@ use std::process::Command;
 
 use serde_json::Value;
 
+/// How `tay plan` prints `${host.listen}`. Where Docker runs in a virtual
+/// machine of its own, as on a Mac, the address is known before anything
+/// starts; where it runs on the host itself, as on Linux, it is the host's
+/// address on the environment's network, which is made only as the
+/// environment is brought up.
+pub const PLANNED_HOST_LISTEN: &str = if cfg!(target_os = "macos") {
+    "127.0.0.1"
+} else {
+    "<host.listen>"
+};
+
 pub struct Run {
     pub code: i32,
     pub stdout: String,

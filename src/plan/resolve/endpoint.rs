@@ -2,7 +2,7 @@
 //!
 //! |                     | it belongs to a unit on the host | it belongs to a unit in a container |
 //! |---------------------|----------------------------------|-------------------------------------|
-//! | asked from the host | `127.0.0.1` and its port         | `127.0.0.1` and the published port  |
+//! | asked from the host | the address `${host.listen}` names, and its port | `127.0.0.1` and the published port |
 //! | asked from a container | the host's name for containers, and its port | the unit's name and the port inside |
 //!
 //! An endpoint that writes its `host` has no views: everyone gets that host
@@ -17,8 +17,8 @@ use super::{Asker, Fail, Res, Resolver, Scope, ViewProblem};
 use crate::plan::resolve::resolved::{ReachedEntry, Resolved};
 use crate::value::{Bit, Exact, Value, usual_port};
 
-/// The host's own address, which a unit on the host reaches another at and
-/// a published port is opened on unless its entry names another.
+/// The host's own address, which a unit on the host reaches a container
+/// at, and a published port is opened on unless its entry names another.
 pub const LOOPBACK: &str = "127.0.0.1";
 
 impl<'s> Resolver<'s> {
@@ -158,7 +158,9 @@ impl<'s> Resolver<'s> {
                     endpoint: endpoint.loc,
                 }]));
             }
-            (Asker::Host, Runs::OnHost) => (LOOPBACK.to_string(), port),
+            // A host process listens where containers reach it, which the
+            // host reaches too.
+            (Asker::Host, Runs::OnHost) => (self.host_listen(), port),
             (Asker::Host, Runs::OneOffContainer) => return not_published(&port),
             (Asker::Host, Runs::OwnContainer | Runs::InsideUnit(_)) => {
                 let container = match runs {
@@ -185,15 +187,17 @@ impl<'s> Resolver<'s> {
                     port: number,
                     always: entry.always,
                 });
-                (LOOPBACK.to_string(), host_port)
+                (Resolved::text(LOOPBACK), host_port)
             }
-            (Asker::Container, Runs::OnHost) => (HOST_IN_CONTAINERS.to_string(), port),
+            (Asker::Container, Runs::OnHost) => (Resolved::text(HOST_IN_CONTAINERS), port),
             (Asker::Container, Runs::OwnContainer | Runs::OneOffContainer) => {
-                (owner_name.clone(), port)
+                (Resolved::text(owner_name.clone()), port)
             }
-            (Asker::Container, Runs::InsideUnit(inner)) => (inner.name.clone(), port),
+            (Asker::Container, Runs::InsideUnit(inner)) => {
+                (Resolved::text(inner.name.clone()), port)
+            }
         };
-        Ok((Resolved::text(host), port))
+        Ok((host, port))
     }
 
     /// The `publish` entry of the container `unit` for its port `port`, if any.

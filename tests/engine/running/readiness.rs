@@ -24,10 +24,13 @@ fn an_http_check_passes_on_a_2xx_answer_and_a_ready_unit_whose_check_stops_passi
         "{}",
         up.stdout
     );
+    // The check is made where the process listens, at the address
+    // `${host.listen}` names.
     let ready = up.last_change("site");
+    let port = crate::harness::kept_ports(&root)["site-port"].clone();
     assert!(
-        ready.starts_with("ready attempt 1, http http://127.0.0.1:")
-            && ready.ends_with("/health passes"),
+        ready.starts_with("ready attempt 1, http http://")
+            && ready.ends_with(&format!(":{port}/health passes")),
         "{ready}"
     );
     let healthy = root.join(".tay/state/healthy");
