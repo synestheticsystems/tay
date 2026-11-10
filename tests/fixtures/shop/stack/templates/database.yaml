@@ -7,4 +7,4 @@ unit:
   with:
     in: database
     env: { DB: "${params.name}" }
-    run: ["createdb", "-U", "postgres", "-O", "${params.owner}", "${params.name}"]
+    run: ["db", "create", "--owner", "${params.owner}", "${params.name}"]

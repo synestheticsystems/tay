@@ -13,7 +13,7 @@ units:
         PASSWORD: "${db-password.value}"
         LICENCE: "${settings.licence_key}"
     gives:
-      dsn: "postgres://app:${db-password.value}@database/app"
+      dsn: "db://app:${db-password.value}@database/app"
       licence: "${settings.licence_key}"
   credentials:
     uses: file

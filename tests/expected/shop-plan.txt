@@ -7,7 +7,7 @@ Plan for stack `shop`, profile `dev`, in <root>
    gives outputs.server = <output: build.server> (produced by running build)
 
 2. database: uses `container`, runs in its own container
-   ready: command check of pg_isready -U postgres, within 2m
+   ready: command check of db ready, within 2m
    restart: on failure, up to 5 attempts
    gives sql
      from the host: 127.0.0.1:<port: db-port>

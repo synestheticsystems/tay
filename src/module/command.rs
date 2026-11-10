@@ -170,7 +170,7 @@ mod tests {
         let runs = |with: &str| check("command", with).0.unwrap().runs;
         assert!(matches!(runs("run: [true]\n"), Runs::OnHost));
         assert!(
-            matches!(runs("run: [true]\nin: postgres\n"), Runs::InsideUnit(u) if u.name == "postgres")
+            matches!(runs("run: [true]\nin: database\n"), Runs::InsideUnit(u) if u.name == "database")
         );
         assert!(matches!(
             runs("run: [true]\nimage: alpine\n"),
@@ -204,7 +204,7 @@ mod tests {
     fn produced_values_and_outputs_are_given() {
         let (shape, errors) = check(
             "command",
-            "run: [cargo, build]\nproduces: [token]\noutputs: { server: target/debug/server }\n",
+            "run: [build]\nproduces: [token]\noutputs: { server: target/debug/server }\n",
         );
         assert!(errors.is_empty(), "{errors:?}");
         let shape = shape.unwrap();

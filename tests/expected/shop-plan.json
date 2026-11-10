@@ -77,16 +77,12 @@
           "check": "command",
           "target": [
             {
-              "text": "pg_isready",
-              "value": "pg_isready"
+              "text": "db",
+              "value": "db"
             },
             {
-              "text": "-U",
-              "value": "-U"
-            },
-            {
-              "text": "postgres",
-              "value": "postgres"
+              "text": "ready",
+              "value": "ready"
             }
           ],
           "within": {

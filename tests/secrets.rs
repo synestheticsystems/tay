@@ -13,10 +13,7 @@ fn a_secret_may_go_in_secret_env_a_file_and_a_value_given() {
     let database = unit(&plan, "database");
     let dsn = given(database, "dsn");
     assert_eq!(dsn["secret"], true);
-    assert_eq!(
-        dsn["from_host"]["text"],
-        "postgres://app:<secret>@database/app"
-    );
+    assert_eq!(dsn["from_host"]["text"], "db://app:<secret>@database/app");
     assert_eq!(dsn["from_host"]["value"], serde_json::Value::Null);
     assert_eq!(
         given(database, "licence")["from_containers"]["text"],

@@ -2,7 +2,7 @@ doc: The shop's site, served by its development server.
 needs: [web-port, api]
 uses: process
 with:
-  command: ["node", "server.js", "--port", "${web-port.number}"]
+  command: ["serve", "--port", "${web-port.number}"]
   env:
     API_URL: "${api.http.url}"
     LOG: "${settings.log.web}"
