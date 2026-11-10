@@ -104,7 +104,8 @@ It keeps two facts about intent on disk: whether the environment is meant to be 
     ports.json            the port numbers this environment keeps
     secrets/              one file per secret, readable by this account only
     files/<folder>/<name> what `file` units write
-    units/<unit>/         one folder per unit that runs: its lock, its record, the values it produced
+    units/<unit>/         one folder per unit that runs: its lock, its record, the values it produced,
+                          and a fingerprint of what it was started from
     attempts.json         what the daemon counts of each unit's attempts
   logs/
     <unit>/               that unit's log files
@@ -129,7 +130,7 @@ An environment leaves the machine's list when a check finds nothing of it left: 
 - Choosing goes through one lock and the machine's list, so two environments starting at once cannot get the same number.
 - If a kept port turns out to be taken, by something that is not this environment, when the stack comes up: a `fixed` port fails its unit and names the holder as well as tay can; any other port is chosen again, and `tay up` says so.
 
-**`secret`.** Generated once and kept in `state/secrets/`. Its value never appears in any output, in the stored plan, or in the argument list of anything tay starts.
+**`secret`.** Generated once and kept in `state/secrets/`. Its value never appears in any output, in the stored plan, or in the argument list of anything tay starts. Kept beats written, as for a port: if a secret's `length` or `encoding` is changed after it was generated, the stored value stays, because whatever already holds it (a database's own password, say) would not change with it, and `tay up` says that the two no longer match. `tay wipe` on the secret makes a new one. If its `kind` is changed, the stored value cannot give what the unit must give, so the unit fails and says to wipe it.
 
 **`file`.** Written whole and then moved into place, so no reader sees half a file. Written again only when its content would differ, and never when `overwrite` is `false` and it exists.
 
@@ -188,7 +189,7 @@ Docker is a container's parent: it keeps the exit code, says whether the contain
 
 **Bringing a container up.**
 
-1. The image is pulled if it is not here, or built if the unit has `build`. Either shows in the unit's detail while it runs, and neither holds up a unit that does not need this one.
+1. The image is pulled if it is not here, or built if the unit has `build`. Either shows in the unit's detail while it runs, and neither holds up a unit that does not need this one. An image tay builds carries the environment's label, like everything else tay creates, and `tay wipe --all` removes it.
 2. The unit's volumes are made if missing, and given to their `owner` when they are made.
 3. The container is created from the unit's settings and started. A published port is given to Docker only if the plan opens it.
 4. Readiness is checked: the image's own health check, or having started, when the unit writes no `ready`; a `command` check runs inside the container; `http` and `tcp` checks are made from the host through the opened port; a `log` check reads what the container wrote.
@@ -254,14 +255,15 @@ In order: every running unit that needs the unit or mounts one of its volumes, d
 
 **At `tay up` on an environment that is up,** each unit is compared with its fingerprint.
 
-- A unit whose settings, files or image differ from what it was started from is started again: a container is replaced, a process is restarted, a made unit is made again.
+- A unit whose settings, files or image differ from what it was started from is started again: a container is replaced, a process is restarted, a file is written again. A port keeps its number and a secret its value: kept beats written.
+- A unit that is running with no fingerprint kept, as one started by an older tay is, is started again, and `tay up` says that what it was started from is not known.
 - A unit that only receives a value from a unit that changed is started again if the value it receives changed, and left alone if it did not.
 - A command is checked again, as at every `tay up`.
 - Everything else is left running.
 
 `tay up` says of each unit it starts again what changed, by the setting's or the file's name, and never shows a secret.
 
-**Watching, in development.** A unit with `watch` is run again when a file under the paths it names changes: a command runs again, a process is restarted. Files that git ignores do not count. This is what rebuilds a service when its source is saved.
+**Watching, in development.** A unit with `watch` is run again when a file under the paths it names changes: a command runs again, a process is restarted. Files that git ignores do not count, and a folder that git ignores is not watched at all, so a large build folder costs nothing. This is what rebuilds a service when its source is saved.
 
 - Changes are gathered for a moment, so that saving several files runs the unit once.
 - A change that arrives while the unit is running does not stop it. The unit runs once more when it ends, however many changes arrived meanwhile.
