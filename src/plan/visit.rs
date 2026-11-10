@@ -196,10 +196,9 @@ impl Planner<'_> {
                 produced,
             )?)),
             None if on.text == "never" => None,
-            None => default
-                .attempts
-                .or(RestartDefault::ON_FAILURE.attempts)
-                .map(Shown::number),
+            None => Some(Shown::number(
+                default.attempts.unwrap_or(RestartDefault::ATTEMPTS),
+            )),
         };
         Some(RestartPolicy { on, attempts })
     }

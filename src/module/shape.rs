@@ -108,12 +108,17 @@ pub struct RestartDefault {
 }
 
 impl RestartDefault {
+    /// The attempts a unit that restarts gets when its policy does not say.
+    /// The format gives 5 for the units that restart by default, and says
+    /// nothing for a unit whose `restart` asks for it; the same 5 is used.
+    pub const ATTEMPTS: i64 = 5;
+
     pub const NEVER: RestartDefault = RestartDefault {
         on: "never",
         attempts: None,
     };
     pub const ON_FAILURE: RestartDefault = RestartDefault {
         on: "failure",
-        attempts: Some(5),
+        attempts: Some(RestartDefault::ATTEMPTS),
     };
 }
