@@ -58,7 +58,7 @@ impl Change {
     pub fn describe(&self) -> String {
         match &self.kind {
             Kind::Up(request) => std::iter::once("tay up")
-                .chain(request.units.iter().map(String::as_str))
+                .chain(request.asked.units.iter().map(String::as_str))
                 .collect::<Vec<_>>()
                 .join(" "),
             Kind::Down => "tay down".to_string(),

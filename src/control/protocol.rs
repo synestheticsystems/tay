@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::disk;
+use crate::disk::{self, Asked};
 use crate::engine::{Decision, Left, State};
 use crate::plan::Options;
 
@@ -37,36 +37,25 @@ pub struct About {
     pub started: u64,
 }
 
-/// What `tay up` asks for: what it plans with, exactly as `tay plan` would.
-/// It has no `Debug`, since a `--set` may give a secret setting its value.
+/// What `tay up` asks for: what it plans with, exactly as `tay plan` would,
+/// which the environment remembers. It has no `Debug`, since a `--set` may
+/// give a secret setting its value.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UpRequest {
-    /// The units named; none brings up what the choices list under `up`.
-    pub units: Vec<String>,
-    pub profile: Option<String>,
-    pub sets: Vec<String>,
+    /// The profile, the `--set`s and the units, what the environment
+    /// remembered with what this `tay up` adds.
+    #[serde(flatten)]
+    pub asked: Asked,
     /// The home folder of whoever asks, where their own choices are.
     pub home: Option<PathBuf>,
 }
 
 impl UpRequest {
-    /// What `tay up` asks for when it plans with `options`.
-    pub fn of(options: Options) -> UpRequest {
-        UpRequest {
-            units: options.units,
-            profile: options.profile,
-            sets: options.sets,
-            home: options.home,
-        }
-    }
-
-    /// What the daemon plans with: what `tay up` planned with, and this
-    /// machine's folder of shared folders.
+    /// What the daemon plans with: what was asked, and this machine's
+    /// folder of shared folders.
     pub fn options(&self) -> Options {
         Options {
-            profile: self.profile.clone(),
-            sets: self.sets.clone(),
-            units: self.units.clone(),
+            asked: self.asked.clone(),
             home: self.home.clone(),
             shared_folders: disk::shared_folders(),
         }

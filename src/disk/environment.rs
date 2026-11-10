@@ -1,6 +1,7 @@
 //! An environment of a stack on this machine: its folder, laid out under
 //! `.tay/`, what identifies it, and whether it is meant to be up.
 
+mod asked;
 mod identity;
 mod intent;
 mod layout;
@@ -9,6 +10,7 @@ use std::path::PathBuf;
 
 use super::Machine;
 
+pub use asked::Asked;
 pub use identity::{Id, Identity};
 pub use intent::Intent;
 pub use layout::Layout;

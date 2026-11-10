@@ -14,7 +14,7 @@ use std::path::Path;
 use crate::definition::{Places, Profile, Stack, Unit};
 use crate::diagnostic::source::{Loc, Sources};
 use crate::diagnostic::{Diagnostic, Diagnostics, quoted_list};
-use crate::disk::Layout;
+use crate::disk::{Asked, Layout};
 use crate::syntax::fields::{self, Fields};
 use crate::syntax::names::{self, NameAt, RESERVED_UNIT_NAMES};
 
@@ -108,8 +108,9 @@ pub fn read(root: &Path, sources: &mut Sources, d: &mut Diagnostics) -> Outcome 
 
 /// Reads every place choices are written for the stack under `profile`, in
 /// the order they are layered: this person's own file in `home`, unless the
-/// profile is a production one, the environment's file, each `--set`, and
-/// the units `tay up` names. Gives whether every file in them parsed.
+/// profile is a production one, the environment's file, each `--set` that
+/// is asked, what the environment remembers first, and the units named.
+/// Gives whether every file in them parsed.
 pub fn places<'s>(
     stack: &'s Stack,
     profile: Option<&'s Profile>,
@@ -135,7 +136,7 @@ pub fn places<'s>(
         .iter()
         .filter_map(|set| assignment(set, sources, d))
         .collect();
-    let named = named_units(asked.units, sources, d);
+    let named = named_units(&asked.units, sources, d);
     let places = Places {
         defaults: &stack.defaults,
         profile,
@@ -145,13 +146,6 @@ pub fn places<'s>(
         named,
     };
     (places, every_file_parsed)
-}
-
-/// The choices a command makes: each `--set`, in the order written, and the
-/// units `tay up` names.
-pub struct Asked<'a> {
-    pub sets: &'a [String],
-    pub units: &'a [String],
 }
 
 /// Unit names are unique across the stack, and none is a name references use.

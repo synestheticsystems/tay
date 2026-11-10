@@ -10,10 +10,11 @@ use crate::cli::Exit;
 use crate::cli::args::{Args, Takes, UnitsNamed};
 use crate::cli::stack;
 use crate::control::client::Client;
-use crate::definition::read::THIS_TAY;
-use crate::disk::{Environment, Identity, Intent, Layout};
+use crate::definition::read::{self, THIS_TAY};
+use crate::diagnostic::Diagnostics;
+use crate::diagnostic::source::Sources;
+use crate::disk::{Asked, Environment, Identity, Intent, Layout};
 use crate::engine::State;
-use crate::plan::Options;
 use crate::print::out;
 
 use super::plan::{no_stack, options, planned, print_json};
@@ -38,6 +39,9 @@ struct Report {
     id: Option<String>,
     /// `up`, `down`, or `never brought up`.
     standing: &'static str,
+    /// What the environment remembers being asked for, with the value of
+    /// every secret setting a `--set` gives hidden.
+    asked: Asked,
     units: Vec<Line>,
 }
 
@@ -76,6 +80,10 @@ pub fn run(args: Args) -> Exit {
         Ok(report) => report,
         Err(exit) => return exit,
     };
+    report.asked = match Asked::read(&Layout::of(&root)) {
+        Ok(asked) => shown(asked, &root),
+        Err(error) => return disk_problem(COMMAND, &error),
+    };
     if let [unit] = args.units.as_slice() {
         report.units.retain(|line| line.unit == *unit);
         if report.units.is_empty() {
@@ -113,6 +121,7 @@ fn from_daemon(environment: &Environment, args: &Args) -> Result<Report, Exit> {
             root: root.display().to_string(),
             id,
             standing: intent.word(),
+            asked: Asked::default(),
             units: status
                 .units
                 .into_iter()
@@ -139,10 +148,7 @@ fn stopped(
     args: &Args,
 ) -> Result<Report, Exit> {
     // The unit `tay status` names is the one it reports, not one to plan.
-    let options = Options {
-        units: Vec::new(),
-        ..options(args)
-    };
+    let options = options(root, None, &[], &[]).map_err(|error| disk_problem(COMMAND, &error))?;
     let plan = planned(COMMAND, root, &options, args.json, "there is no plan")?;
     let units = plan
         .units
@@ -158,8 +164,47 @@ fn stopped(
         root: root.display().to_string(),
         id,
         standing,
+        asked: Asked::default(),
         units,
     })
+}
+
+/// What was asked as `tay status` shows it: a `--set` of a setting the stack
+/// does not declare plain has its value hidden, since it may be a secret.
+fn shown(mut asked: Asked, root: &Path) -> Asked {
+    let mut sources = Sources::default();
+    let mut d = Diagnostics::default();
+    let stack = match read::read(root, &mut sources, &mut d) {
+        read::Outcome::Read { stack, .. } => Some(stack),
+        read::Outcome::TooOld(_) | read::Outcome::Unreadable => None,
+    };
+    for set in &mut asked.sets {
+        let Some((place, _)) = set.split_once('=') else {
+            continue;
+        };
+        let Some(setting) = place.strip_prefix("settings.") else {
+            continue;
+        };
+        let plain = stack
+            .as_ref()
+            .and_then(|stack| stack.setting(setting))
+            .is_some_and(|declared| !declared.secret);
+        if !plain {
+            *set = format!("{place}=<secret>");
+        }
+    }
+    asked
+}
+
+/// What was asked, as the plain `tay up` it now stands for.
+fn remembered(asked: &Asked) -> String {
+    let mut words = vec!["tay up".to_string()];
+    words.extend(asked.units.iter().cloned());
+    if let Some(profile) = &asked.profile {
+        words.push(format!("--profile {profile}"));
+    }
+    words.extend(asked.sets.iter().map(|set| format!("--set {set}")));
+    words.join(" ")
 }
 
 fn print(report: &Report, json: bool) {
@@ -171,6 +216,11 @@ fn print(report: &Report, json: bool) {
                 "root": report.root,
                 "id": report.id,
                 "standing": report.standing,
+                "asked": {
+                    "profile": report.asked.profile,
+                    "sets": report.asked.sets,
+                    "units": report.asked.units,
+                },
             },
             "units": report.units.iter().map(|line| json!({
                 "unit": line.unit,
@@ -188,6 +238,9 @@ fn print(report: &Report, json: bool) {
         .max()
         .unwrap_or(0);
     let mut text = format!("{}: {}\n", report.root, report.standing);
+    if !report.asked.is_empty() {
+        text.push_str(&format!("  remembered: {}\n", remembered(&report.asked)));
+    }
     for line in &report.units {
         text.push_str(&format!(
             "  {:<width$}  {:<8}  {}\n",

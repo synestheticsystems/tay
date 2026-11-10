@@ -13,7 +13,7 @@ mod whole;
 use std::io;
 use std::path::PathBuf;
 
-pub use environment::{Environment, Id, Identity, Intent, Layout};
+pub use environment::{Asked, Environment, Id, Identity, Intent, Layout};
 pub use lock::Lock;
 pub use machine::{List, Listed, Machine, shared_folder, shared_folders, socket_fits};
 pub use whole::write_whole;

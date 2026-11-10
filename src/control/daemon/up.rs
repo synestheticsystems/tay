@@ -10,18 +10,23 @@ use crate::engine::{self, Decision, Progress};
 use crate::plan::PlannedUnit;
 
 impl Daemon {
-    /// Brings up what `asked` asks for, telling `change`'s followers each
+    /// Brings up what `request` asks for, telling `change`'s followers each
     /// change of state and, once it is decided, the decision.
-    pub async fn bring_up(self: Arc<Self>, change: Arc<Change>, asked: UpRequest) {
+    pub async fn bring_up(self: Arc<Self>, change: Arc<Change>, request: UpRequest) {
         log(&format!("change: {}", change.describe()));
-        // The environment is meant to be up from now, so that a daemon
-        // started after this one dies finds its units again.
-        if let Err(error) = Intent::Up.write(&self.environment.layout) {
+        // The environment is meant to be up from now, and with what was
+        // asked, so that a daemon started after this one dies finds its
+        // units again, and every later command sees the same stack.
+        let layout = &self.environment.layout;
+        if let Err(error) = Intent::Up
+            .write(layout)
+            .and_then(|()| request.asked.write(layout))
+        {
             self.fail(&change, &error.to_string());
             return;
         }
         let root = self.environment.layout.root().to_path_buf();
-        let plan = match tokio::task::spawn_blocking(move || planned(&root, &asked)).await {
+        let plan = match tokio::task::spawn_blocking(move || planned(&root, &request)).await {
             Ok(Ok(plan)) => plan,
             Ok(Err(unplanned)) => {
                 change.say(Event::Errors {

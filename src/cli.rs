@@ -61,23 +61,27 @@ nearest folder above it, applies the choices, and prints each unit that would
 come up, in an order it could start in: the module it uses and where it runs,
 what it needs and why, how it is known to be ready, the host ports it opens
 and what opens each, and the values it gives. Of the environment's .tay/
-folder it reads choices.yaml and nothing else, and it writes nothing.
+folder it reads choices.yaml and what the environment remembers being asked
+for, and it writes nothing.
 
 tay up plans exactly as tay plan does, starts the environment's daemon if none
 runs, and has it bring up what the choices list under `up`, or the units named
 and what they need. It prints each change of state as it happens, and returns
 when everything asked for is ready or one of it can no longer become ready.
---profile and --set apply to that tay up only, for now: a daemon started
-afresh plans with the stack's own choices.
+The environment remembers the profile, each --set and the units named, so a
+later plain tay up, tay status, tay plan and a daemon started afresh all see
+the same stack: --profile replaces the remembered profile, a --set replaces a
+remembered one for the same place, and units named replace those remembered.
 
 tay down stops everything the environment runs and says so; its daemon exits.
-tay status prints each unit's state, from a check made now. tay ls prints the
+tay status prints each unit's state, from a check made now, and what the
+environment remembers being asked for. tay ls prints the
 environments tay knows on this machine, and marks with * the one it is run in.
 
 Options:
   --root FOLDER       look for tay.yaml from FOLDER instead of the current one
-  --profile NAME      of plan and up: use this profile instead of the stack's
-                      default one
+  --profile NAME      of plan and up: use this profile instead of the one
+                      remembered or the stack's default one
   --set PLACE=VALUE   of plan and up: make one choice, after every other
                       place. PLACE is up, up_add, up_remove, run.default,
                       run.units.UNIT, settings.NAME or label; a list is

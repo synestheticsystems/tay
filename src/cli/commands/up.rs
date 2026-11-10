@@ -28,7 +28,10 @@ pub fn run(args: Args) -> Exit {
         Ok(root) => root,
         Err(message) => return no_stack(COMMAND, &message, args.json),
     };
-    let options = options(&args);
+    let options = match options(&root, args.profile.clone(), &args.sets, &args.units) {
+        Ok(options) => options,
+        Err(error) => return disk_problem(COMMAND, &error),
+    };
     // Errors in the definitions stop it here, with nothing started.
     if let Err(exit) = planned(COMMAND, &root, &options, args.json, "nothing was started") {
         return exit;
@@ -41,7 +44,10 @@ pub fn run(args: Args) -> Exit {
         Ok(environment) => environment,
         Err(error) => return disk_problem(COMMAND, &error),
     };
-    let request = UpRequest::of(options);
+    let request = UpRequest {
+        asked: options.asked,
+        home: options.home,
+    };
     let ended = block_on(COMMAND, async {
         let client = match Client::ensure(&environment).await {
             Ok(client) => client,

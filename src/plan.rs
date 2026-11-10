@@ -18,6 +18,7 @@ use crate::definition::read;
 use crate::definition::{Profile, Stack};
 use crate::diagnostic::source::{Loc, Sources};
 use crate::diagnostic::{Diagnostic, Diagnostics};
+use crate::disk::Asked;
 use crate::syntax::expr::Expr;
 
 pub use model::{
@@ -29,11 +30,10 @@ use resolve::{EnvironmentFacts, Resolver};
 
 /// What `tay plan` is asked for, or `tay up`, which plans as it does.
 pub struct Options {
-    pub profile: Option<String>,
-    /// Each `--set KEY=VALUE`, in the order given.
-    pub sets: Vec<String>,
-    /// The units `tay up` names, in place of `up`.
-    pub units: Vec<String>,
+    /// The profile, each `--set` in the order it applies, and the units
+    /// named in place of `up`: what the environment remembers being asked
+    /// for, with what this command adds.
+    pub asked: Asked,
     /// The home folder, where this person's own file of choices is.
     pub home: Option<PathBuf>,
     /// The folder that holds each stack's shared folder, when it is known.
@@ -68,14 +68,10 @@ pub fn plan(root: &Path, options: &Options, sources: &mut Sources, d: &mut Diagn
         read::Outcome::TooOld(reasons) => return Outcome::TooOld(reasons),
         read::Outcome::Unreadable => return Outcome::Errors,
     };
-    let profile = choose_profile(&stack, options.profile.as_deref(), sources, d);
+    let profile = choose_profile(&stack, options.asked.profile.as_deref(), sources, d);
     let production = profile.and_then(|profile| profile.production);
     let home = options.home.as_deref();
-    let asked = read::Asked {
-        sets: &options.sets,
-        units: &options.units,
-    };
-    let (places, places_parsed) = read::places(&stack, profile, home, &asked, sources, d);
+    let (places, places_parsed) = read::places(&stack, profile, home, &options.asked, sources, d);
     let every_file_parsed = every_file_parsed && places_parsed;
     let layered = choices::layer(places.in_order());
     // With a file that did not parse, the set of units is not known, and
@@ -84,7 +80,7 @@ pub fn plan(root: &Path, options: &Options, sources: &mut Sources, d: &mut Diagn
     // A profile that is named and missing, or that must be named and is
     // not, has been reported, and what it would have said is not known.
     let profile_missing = profile.is_none()
-        && (options.profile.is_some()
+        && (options.asked.profile.is_some()
             || stack.default_profile.is_some()
             || stack.profiles.len() > 1);
     if every_file_parsed {
@@ -174,9 +170,10 @@ mod tests {
         let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
         let root = fixtures.join(name).canonicalize().unwrap();
         let options = Options {
-            profile: None,
-            sets: sets.iter().map(|set| set.to_string()).collect(),
-            units: Vec::new(),
+            asked: Asked {
+                sets: sets.iter().map(|set| set.to_string()).collect(),
+                ..Asked::default()
+            },
             home: Some(fixtures.join("homes/none")),
             shared_folders: Some(fixtures.join("homes/none/.local/share/tay")),
         };

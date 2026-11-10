@@ -57,6 +57,11 @@ impl Layout {
         self.state().join("intent")
     }
 
+    /// `state/asked`: what the environment was last asked for.
+    pub fn asked(&self) -> PathBuf {
+        self.state().join("asked")
+    }
+
     /// `logs/`: a folder for each unit's log files, and `tay/`, the
     /// daemon's own.
     pub fn logs(&self) -> PathBuf {

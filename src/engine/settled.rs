@@ -139,9 +139,7 @@ mod tests {
             format!("format: 1\nstack: settling\nup: [web, notice, search]\nunits:\n{units}");
         std::fs::write(root.path().join("tay.yaml"), stack).unwrap();
         let options = Options {
-            profile: None,
-            sets: Vec::new(),
-            units: Vec::new(),
+            asked: crate::disk::Asked::default(),
             home: None,
             shared_folders: None,
         };

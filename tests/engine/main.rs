@@ -6,6 +6,7 @@
 #[path = "../support/mod.rs"]
 mod support;
 
+mod asked;
 mod commands;
 mod daemon;
 mod daemon_versions;

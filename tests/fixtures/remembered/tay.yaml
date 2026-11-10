@@ -1,0 +1,15 @@
+format: 1
+stack: remembered
+default_profile: quiet
+settings:
+  greeting: { default: hello }
+  name: { default: world }
+  token: { secret: true, default: not-a-real-token }
+up: [greeting]
+units:
+  greeting:
+    uses: file
+    with: { content: "${settings.greeting}, ${settings.name}\n" }
+  token-file:
+    uses: file
+    with: { content: "${settings.token}\n" }

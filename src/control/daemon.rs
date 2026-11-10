@@ -29,7 +29,7 @@ use crate::control::protocol::{self, Event, UpRequest};
 use crate::definition::read::THIS_TAY;
 use crate::diagnostic::Diagnostics;
 use crate::diagnostic::source::Sources;
-use crate::disk::{DiskError, Environment, Identity, Intent, Layout, Lock, Machine};
+use crate::disk::{Asked, DiskError, Environment, Identity, Intent, Layout, Lock, Machine};
 use crate::engine::{self, UnitState, Units};
 use crate::module::Values;
 use crate::plan::{self, Plan, PlannedUnit};
@@ -167,15 +167,20 @@ async fn start(layout: Layout) -> Result<(Arc<Daemon>, UnixListener, Socket), Ca
 }
 
 /// What the daemon knows of the units when it starts: those `tay plan`
-/// would list, each found as it is when the environment is meant to be up,
-/// and stopped when it is not. Choices `tay up` was given are not kept, so
-/// they are not what this plan is made with.
+/// would list, with what the environment remembers being asked for, each
+/// found as it is when the environment is meant to be up, and stopped when
+/// it is not.
 fn found_again(environment: &Environment) -> Units {
     let mut units = Units::default();
+    let asked = match Asked::read(&environment.layout) {
+        Ok(asked) => asked,
+        Err(error) => {
+            log(&format!("{error}, so no unit is known yet"));
+            return units;
+        }
+    };
     let request = UpRequest {
-        units: Vec::new(),
-        profile: None,
-        sets: Vec::new(),
+        asked,
         home: std::env::var_os("HOME").map(PathBuf::from),
     };
     let planned = match planned(environment.layout.root(), &request) {

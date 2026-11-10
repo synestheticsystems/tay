@@ -8,9 +8,11 @@ use crate::cli::output::{json, text};
 use crate::cli::stack;
 use crate::diagnostic::Diagnostics;
 use crate::diagnostic::source::Sources;
-use crate::disk;
+use crate::disk::{self, Asked, DiskError, Layout};
 use crate::plan::{self, Options, Outcome, Plan};
 use crate::print::{err, out};
+
+use super::disk_problem;
 
 pub const TAKES: Takes = Takes {
     command: "tay plan",
@@ -24,13 +26,11 @@ pub fn run(args: Args) -> Exit {
         Ok(root) => root,
         Err(message) => return no_stack("tay plan", &message, args.json),
     };
-    match planned(
-        "tay plan",
-        &root,
-        &options(&args),
-        args.json,
-        "there is no plan",
-    ) {
+    let options = match options(&root, args.profile.clone(), &args.sets, &[]) {
+        Ok(options) => options,
+        Err(error) => return disk_problem("tay plan", &error),
+    };
+    match planned("tay plan", &root, &options, args.json, "there is no plan") {
         Ok(plan) => {
             if args.json {
                 print_json(&json::plan(&plan));
@@ -43,15 +43,21 @@ pub fn run(args: Args) -> Exit {
     }
 }
 
-/// What a command that plans as `tay plan` does plans with.
-pub fn options(args: &Args) -> Options {
-    Options {
-        profile: args.profile.clone(),
-        sets: args.sets.clone(),
-        units: args.units.clone(),
+/// What a command that plans as `tay plan` does plans with: what the
+/// environment at `root` remembers being asked for, with the profile, the
+/// `--set`s and the units the command adds.
+pub fn options(
+    root: &Path,
+    profile: Option<String>,
+    sets: &[String],
+    units: &[String],
+) -> Result<Options, DiskError> {
+    let remembered = Asked::read(&Layout::of(root))?;
+    Ok(Options {
+        asked: remembered.with(profile, sets, units),
         home: std::env::var_os("HOME").map(PathBuf::from),
         shared_folders: disk::shared_folders(),
-    }
+    })
 }
 
 /// Plans the stack at `root` as `tay plan` does. When the definitions have

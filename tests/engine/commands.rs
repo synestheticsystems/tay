@@ -62,12 +62,12 @@ fn down_with_json_prints_its_events_in_schema_1() {
 }
 
 #[test]
-fn the_help_says_choices_given_to_up_apply_to_that_up_only() {
+fn the_help_says_the_environment_remembers_what_up_was_asked() {
     let machine = Machine::new();
     let help = machine.tay(&machine.path("home"), &["--help"]);
     assert!(
         help.stdout
-            .contains("--profile and --set apply to that tay up only, for now")
+            .contains("The environment remembers the profile, each --set and the units named")
     );
     for usage in [
         "tay up [UNIT...] [--root FOLDER] [--profile NAME] [--set PLACE=VALUE]... [--json]",

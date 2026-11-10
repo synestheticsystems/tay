@@ -172,6 +172,18 @@ impl Machine {
             .map(|daemon| daemon["pid"].as_i64().unwrap() as i32)
     }
 
+    /// Kills the daemon of the environment at `root` with `SIGKILL`, and
+    /// waits until it is gone.
+    pub fn kill_daemon(&self, root: &Path) {
+        let pid = self.daemon_pid(root).expect("a daemon answers");
+        let process = rustix::process::Pid::from_raw(pid).unwrap();
+        rustix::process::kill_process(process, rustix::process::Signal::KILL).unwrap();
+        assert!(
+            eventually(Duration::from_secs(5), || !alive(pid)),
+            "the daemon {pid} is gone"
+        );
+    }
+
     /// The environment's id.
     pub fn id(&self, root: &Path) -> String {
         fs::read_to_string(root.join(".tay/id"))
