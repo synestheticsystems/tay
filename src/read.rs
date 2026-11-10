@@ -91,10 +91,7 @@ pub fn read(root: &Path, sources: &mut Sources, d: &mut Diagnostics) -> Outcome 
     let environment_choices = reader.environment_choices();
     let stack = Stack {
         root: root.to_path_buf(),
-        name: stack_name.unwrap_or(NameAt {
-            name: String::new(),
-            loc: node.loc,
-        }),
+        name: stack_name,
         loc: node.loc,
         default_profile,
         settings,

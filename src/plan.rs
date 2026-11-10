@@ -65,11 +65,9 @@ pub fn plan(root: &Path, options: &Options, sources: &mut Sources, d: &mut Diagn
     let profile = choose_profile(&stack, options.profile.as_deref(), sources, d);
     let production = profile.and_then(|profile| profile.production);
     // A production stack must not change with whoever runs the command.
-    let personal = match (&options.home, production) {
-        (Some(home), None) if !stack.name.name.is_empty() => {
-            let path = home
-                .join(".config/tay")
-                .join(format!("{}.yaml", stack.name.name));
+    let personal = match (&options.home, &stack.name, production) {
+        (Some(home), Some(name), None) => {
+            let path = home.join(".config/tay").join(format!("{}.yaml", name.name));
             read::optional_choices(&path, root, sources, d)
         }
         _ => None,
@@ -94,6 +92,10 @@ pub fn plan(root: &Path, options: &Options, sources: &mut Sources, d: &mut Diagn
     if !d.is_empty() {
         return Outcome::Errors;
     }
+    // A stack with no name has reported an error, so it does not get here.
+    let Some(stack_name) = &stack.name else {
+        return Outcome::Errors;
+    };
     let layered = choices::layer(places);
     let Some(environment) = Environment::of(&stack, profile, d) else {
         return Outcome::Errors;
@@ -109,7 +111,7 @@ pub fn plan(root: &Path, options: &Options, sources: &mut Sources, d: &mut Diagn
         planner.refuse_for_production(&profile.name, marked_at, &reached.chosen);
     }
     planner.resolver.report_unset_settings();
-    let plan = planner.finish(reached, &stack, profile);
+    let plan = planner.finish(reached, &stack, &stack_name.name, profile);
     d.extend(planner.resolver.d);
     match plan {
         Some(plan) if d.is_empty() => Outcome::Plan(plan),

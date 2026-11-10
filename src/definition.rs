@@ -10,7 +10,8 @@ use crate::source::Loc;
 #[derive(Debug)]
 pub struct Stack {
     pub root: PathBuf,
-    pub name: NameAt,
+    /// `None` when `stack` is missing or not a name, which is reported.
+    pub name: Option<NameAt>,
     /// Where `tay.yaml` is, for errors about the stack as a whole.
     pub loc: Loc,
     pub default_profile: Option<NameAt>,

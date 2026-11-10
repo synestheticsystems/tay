@@ -57,25 +57,32 @@ impl<'a> Reader<'a> {
         }
     }
 
-    pub fn folder(&mut self, file: &Fields<'_>, key: &str, default: &str) -> Folder {
-        match file.get(key) {
-            Some(node) => Folder {
-                path: self
-                    .root
-                    .join(fields::text(node, &format!("`{key}`"), self.d).unwrap_or(default)),
-                named_at: Some(node.loc),
-            },
-            None => Folder {
+    /// The folder `key` names, or `default`. `None` when `key` is not text:
+    /// that folder is then not read, and the set of units is not known.
+    pub fn folder(&mut self, file: &Fields<'_>, key: &str, default: &str) -> Option<Folder> {
+        let Some(node) = file.get(key) else {
+            return Some(Folder {
                 path: self.root.join(default),
                 named_at: None,
-            },
-        }
+            });
+        };
+        let Some(path) = fields::text(node, &format!("`{key}`"), self.d) else {
+            self.every_file_parsed = false;
+            return None;
+        };
+        Some(Folder {
+            path: self.root.join(path),
+            named_at: Some(node.loc),
+        })
     }
 
     /// The entries of a definitions folder. A folder `tay.yaml` names must
     /// exist; one it leaves at the default may be absent, as in a small stack
     /// that keeps everything in `tay.yaml`.
-    fn entries(&mut self, folder: &Folder) -> Vec<discover::Entry> {
+    fn entries(&mut self, folder: Option<Folder>) -> Vec<discover::Entry> {
+        let Some(folder) = folder else {
+            return Vec::new();
+        };
         match discover::entries(&folder.path) {
             Ok(Some(entries)) => entries,
             Ok(None) => {
@@ -130,9 +137,9 @@ impl<'a> Reader<'a> {
         }
     }
 
-    pub fn templates(&mut self, folder: Folder) -> Vec<template::Template> {
+    pub fn templates(&mut self, folder: Option<Folder>) -> Vec<template::Template> {
         let mut templates = Vec::new();
-        for entry in self.entries(&folder) {
+        for entry in self.entries(folder) {
             match entry {
                 discover::Entry::File(path) => {
                     let Some(node) = self.parse(&path) else {
@@ -151,9 +158,13 @@ impl<'a> Reader<'a> {
         templates
     }
 
-    pub fn unit_files(&mut self, folder: Folder, templates: &[template::Template]) -> Vec<Unit> {
+    pub fn unit_files(
+        &mut self,
+        folder: Option<Folder>,
+        templates: &[template::Template],
+    ) -> Vec<Unit> {
         let mut units = Vec::new();
-        for entry in self.entries(&folder) {
+        for entry in self.entries(folder) {
             match entry {
                 discover::Entry::Folder(path) => {
                     let file = path.join("unit.yaml");
@@ -187,9 +198,9 @@ impl<'a> Reader<'a> {
         units
     }
 
-    pub fn profiles(&mut self, folder: Folder) -> Vec<Profile> {
+    pub fn profiles(&mut self, folder: Option<Folder>) -> Vec<Profile> {
         let mut profiles = Vec::new();
-        for entry in self.entries(&folder) {
+        for entry in self.entries(folder) {
             match entry {
                 discover::Entry::File(path) => {
                     let Some(node) = self.parse(&path) else {

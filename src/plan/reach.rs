@@ -70,6 +70,7 @@ impl Planner<'_> {
         &mut self,
         reached: Reached,
         stack: &Stack,
+        stack_name: &str,
         profile: Option<&Profile>,
     ) -> Option<Plan> {
         let name = |unit: usize| stack.units[unit].name.name.clone();
@@ -122,7 +123,7 @@ impl Planner<'_> {
             planned.push(unit_plan);
         }
         Some(Plan {
-            stack: stack.name.name.clone(),
+            stack: stack_name.to_string(),
             root: self.resolver.environment.root.clone(),
             profile: profile.map(|profile| profile.name.name.clone()),
             production: self.production,
