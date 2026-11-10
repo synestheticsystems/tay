@@ -13,9 +13,10 @@ pub enum Source {
         path: PathBuf,
         shown: String,
     },
-    /// A `--set` argument, kept by its key only: its value may be a secret.
+    /// A command-line argument, kept as it is shown in errors: a `--set` is
+    /// shown by its key only, since its value may be a secret.
     Argument {
-        key: String,
+        shown: String,
     },
 }
 
@@ -39,9 +40,9 @@ impl Sources {
         })
     }
 
-    pub fn add_argument(&mut self, key: &str) -> SourceId {
+    pub fn add_argument(&mut self, shown: &str) -> SourceId {
         self.push(Source::Argument {
-            key: key.to_string(),
+            shown: shown.to_string(),
         })
     }
 
@@ -55,11 +56,10 @@ impl Sources {
         &self.list[id.0 as usize]
     }
 
-    /// The name a person sees for a source: a path, or `--set KEY`.
-    pub fn shown(&self, id: SourceId) -> String {
+    /// The name a person sees for a source: a path, or an argument.
+    pub fn shown(&self, id: SourceId) -> &str {
         match self.get(id) {
-            Source::File { shown, .. } => shown.clone(),
-            Source::Argument { key } => format!("--set {key}"),
+            Source::File { shown, .. } | Source::Argument { shown } => shown,
         }
     }
 }
@@ -90,11 +90,11 @@ impl Loc {
         }
     }
 
-    /// Writes `file:line:column`, or `--set KEY` for an argument.
+    /// Writes `file:line:column`, or the argument as it is shown.
     pub fn render(&self, sources: &Sources) -> String {
         match sources.get(self.source) {
             Source::File { shown, .. } => format!("{shown}:{}:{}", self.line, self.column),
-            Source::Argument { key } => format!("--set {key}"),
+            Source::Argument { shown } => shown.clone(),
         }
     }
 }
