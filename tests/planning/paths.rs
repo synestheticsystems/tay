@@ -59,14 +59,14 @@ fn a_mount_source_must_exist_unless_in_the_state_log_or_shared_folder_or_produce
     assert_eq!(
         run.errors(),
         [format!(
-            "tay.yaml:26:24: the mount's source `{}/missing` does not exist; outside the state, log and shared folders it must exist when tay plans",
+            "tay.yaml:25:24: the mount's source `{}/missing` does not exist; outside the state, log and shared folders it must exist when tay plans",
             root()
         )]
     );
 }
 
 #[test]
-fn a_file_name_and_template_path_built_from_values_known_before_start_are_checked_once_resolved() {
+fn a_template_path_built_from_values_known_before_start_is_resolved_before_it_is_read() {
     let plan = plan_json("paths", &[]);
     assert_eq!(
         given(unit(&plan, "named-conf"), "path")["from_host"]["value"],
@@ -80,7 +80,7 @@ fn a_watched_path_must_exist() {
     assert_eq!(
         run.errors(),
         [format!(
-            "tay.yaml:35:13: `{}/nothing-here`, which this unit watches, does not exist",
+            "tay.yaml:34:13: `{}/nothing-here`, which this unit watches, does not exist",
             root()
         )]
     );

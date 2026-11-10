@@ -1,5 +1,6 @@
 //! `file`: a file tay writes from values, in the environment's state folder.
 
+use crate::diagnostic::Diagnostics;
 use crate::diagnostic::source::Loc;
 use crate::syntax::expr::{EnvField, Expr, ExprKind, Piece, Reference, Target};
 use crate::syntax::fields::{self, Fields};
@@ -28,8 +29,9 @@ struct FileSettings<V> {
     /// The text written: `content`, or the file `template` names, whose
     /// text is read before start and is the value once resolved.
     content: V,
-    /// `None`: the unit's name.
-    name: Option<V>,
+    /// The file's name, which is the unit's unless `name` gives another,
+    /// and where it is written: at `uses` when it is the unit's.
+    name: NameAt,
     /// The folder under `files` in the state folder that it is written in.
     folder: String,
     /// `None`: `"0644"`, or `"0600"` when the content holds a secret.
@@ -46,12 +48,11 @@ impl MapSlots for FileSettings<Slot> {
         f: &mut dyn FnMut(&'a Slot) -> Option<W>,
     ) -> Option<FileSettings<W>> {
         let content = f(&self.content);
-        let name = maybe(&self.name, f);
         let mode = maybe(&self.mode, f);
         let overwrite = maybe(&self.overwrite, f);
         Some(FileSettings {
             content: content?,
-            name: name?,
+            name: self.name.clone(),
             folder: self.folder.clone(),
             mode: mode?,
             overwrite: overwrite?,
@@ -68,37 +69,19 @@ impl Module for File {
 
     fn read(&self, with: Option<&Node>, cx: &mut Cx<'_>) -> Option<Description> {
         let settings = read(with, cx)?;
-        let name_pieces = match &settings.name {
-            Some(slot) => match &slot.expr.kind {
-                ExprKind::Text(pieces) => pieces.clone(),
-                ExprKind::Ref(reference) => vec![Piece::Ref(reference.clone())],
-                ExprKind::Number(n) => vec![Piece::Lit(n.to_string())],
-                ExprKind::Bool(b) => vec![Piece::Lit(b.to_string())],
-            },
-            None => vec![Piece::Lit(cx.unit.to_string())],
-        };
-        // Files in one folder are compared by their names as written.
-        let written_name: String = name_pieces
-            .iter()
-            .map(|piece| match piece {
-                Piece::Lit(text) => text.clone(),
-                Piece::Ref(reference) => reference.written(),
-            })
-            .collect();
         let claim = Claim {
             what: format!(
-                "the file `{FILES}/{}/{written_name}` in the state folder",
-                settings.folder
+                "the file `{FILES}/{}/{}` in the state folder",
+                settings.folder, settings.name.name
             ),
-            loc: settings.name.as_ref().map_or(cx.uses, |slot| slot.expr.loc),
+            loc: settings.name.loc,
         };
         let dir = vec![
             state_folder(cx.uses),
             Piece::Lit(format!("/{FILES}/{}", settings.folder)),
         ];
         let mut path = dir.clone();
-        path.push(Piece::Lit("/".to_string()));
-        path.extend(name_pieces);
+        path.push(Piece::Lit(format!("/{}", settings.name.name)));
         let given = |name: &str, pieces: Vec<Piece>| ModuleGive {
             name: NameAt {
                 name: name.to_string(),
@@ -176,14 +159,13 @@ fn read(with: Option<&Node>, cx: &mut Cx<'_>) -> Option<FileSettings<Slot>> {
             d,
         )
     });
-    let name = settings.get("name").and_then(|node| {
-        Slot::read(
-            node,
-            Want::FileName,
-            Destination::Readable("a file name"),
-            d,
-        )
-    });
+    let name = match settings.get("name") {
+        Some(node) => file_name(node, d),
+        None => Some(NameAt {
+            name: cx.unit.to_string(),
+            loc: cx.uses,
+        }),
+    };
     let folder = match settings.get("folder") {
         Some(node) => fields::name(node, "`folder`", d).map(|folder| folder.name),
         None => Some(cx.unit.to_string()),
@@ -193,10 +175,36 @@ fn read(with: Option<&Node>, cx: &mut Cx<'_>) -> Option<FileSettings<Slot>> {
     }
     Some(FileSettings {
         content: content?,
-        name,
+        name: name?,
         folder: folder?,
         mode,
         overwrite,
+    })
+}
+
+/// `name`: a file's name, with no folder in it. As every name, it is
+/// written out, so that two units that would write one file are found
+/// before anything is written.
+fn file_name(node: &Node, d: &mut Diagnostics) -> Option<NameAt> {
+    let expr = Want::Text.read(node, d)?;
+    let Some(name) = expr.literal_text() else {
+        let written = node.as_str().map_or("", |text| text.text.as_str());
+        d.error(
+            node.loc,
+            format!("`name`: `{written}` holds a reference, and a name must be written out"),
+        );
+        return None;
+    };
+    if name.is_empty() || name.contains('/') || name == "." || name == ".." {
+        d.error(
+            node.loc,
+            format!("this must be a file name with no folder in it; this is `{name}`"),
+        );
+        return None;
+    }
+    Some(NameAt {
+        name,
+        loc: node.loc,
     })
 }
 
@@ -246,6 +254,27 @@ mod tests {
     }
 
     #[test]
+    fn a_name_or_folder_with_a_reference_in_it_is_an_error() {
+        let (_, errors) = check("file", "content: x\nname: \"${settings.name}.conf\"\n");
+        assert_eq!(
+            errors,
+            [
+                "2:7: `name`: `${settings.name}.conf` holds a reference, and a name must be written out"
+            ]
+        );
+        let (_, errors) = check("file", "content: x\nfolder: \"${settings.folder}\"\n");
+        assert_eq!(
+            errors,
+            ["2:9: `folder`: `${settings.folder}` is a reference, and a name must be written out"]
+        );
+        // `$${` writes a literal `${`, which a file's name may hold.
+        assert_eq!(
+            settings("content: x\nname: \"a$${b}\"\n").name.name,
+            "a${b}"
+        );
+    }
+
+    #[test]
     fn a_secret_may_go_in_the_content_whatever_mode_is_written() {
         for with in ["content: x\n", "content: x\nmode: \"0644\"\n"] {
             assert_eq!(
@@ -263,8 +292,11 @@ mod tests {
             read.content.want,
             Want::Path(PathUse::Read(Destination::FileContent))
         );
-        assert!(read.mode.is_some() && read.overwrite.is_some() && read.name.is_none());
-        assert_eq!(read.folder, "the-unit");
+        assert!(read.mode.is_some() && read.overwrite.is_some());
+        assert_eq!(
+            (read.name.name.as_str(), read.folder.as_str()),
+            ("the-unit", "the-unit")
+        );
     }
 
     #[test]

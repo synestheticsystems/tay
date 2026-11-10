@@ -74,3 +74,17 @@ fn an_address_a_template_file_cannot_have_is_reported_at_its_reference_in_the_fi
         ]
     );
 }
+
+#[test]
+fn a_files_name_and_folder_are_written_out_so_two_units_cannot_name_one_file_through_a_setting() {
+    let run = plan("file-names", &[]);
+    assert_eq!(run.code, 2);
+    assert_eq!(
+        run.errors(),
+        [
+            "tay.yaml:9:46: `name`: `${settings.routes}` holds a reference, and a name must be written out",
+            "tay.yaml:12:46: `name`: `${settings.routes}` holds a reference, and a name must be written out",
+            "tay.yaml:15:33: `folder`: `${settings.routes}` is a reference, and a name must be written out",
+        ]
+    );
+}

@@ -26,8 +26,6 @@ pub enum Want {
     Duration,
     /// Permissions written as octal text, such as `"0600"`.
     FileMode,
-    /// A file's name, with no folder in it.
-    FileName,
     /// A path on the host. One that begins `./` is relative to the folder of
     /// the file it is written in, any other relative one to the stack's
     /// root, and the value used is the whole path.
@@ -176,7 +174,7 @@ impl Want {
     fn checks_exact_form(&self) -> bool {
         matches!(
             self,
-            Want::Count | Want::OneOf(_) | Want::Duration | Want::FileMode | Want::FileName
+            Want::Count | Want::OneOf(_) | Want::Duration | Want::FileMode
         )
     }
 
@@ -187,9 +185,6 @@ impl Want {
             Want::FileMode => {
                 (3..=4).contains(&text.len()) && text.chars().all(|c| ('0'..='7').contains(&c))
             }
-            Want::FileName => {
-                !text.is_empty() && !text.contains('/') && text != "." && text != ".."
-            }
             _ => true,
         }
     }
@@ -199,7 +194,6 @@ impl Want {
             Want::OneOf(choices) => format!("one of {}", quoted_list(*choices)),
             Want::Duration => "a whole number followed by s, m or h, such as `2m`".to_string(),
             Want::FileMode => "permissions in octal, such as `\"0600\"`".to_string(),
-            Want::FileName => "a file name with no folder in it".to_string(),
             Want::Path(_) => "the path of a file".to_string(),
             Want::Count => "a whole number above 0".to_string(),
             _ => "text".to_string(),
@@ -295,7 +289,6 @@ mod tests {
         assert!(Want::Duration.problem(&Form::Text(None)).is_some());
         assert!(Want::FileMode.problem(&text("0600")).is_none());
         assert!(Want::FileMode.problem(&text("rw")).is_some());
-        assert!(Want::FileName.problem(&text("a/b")).is_some());
     }
 
     #[test]
@@ -312,7 +305,6 @@ mod tests {
             Want::Duration,
             Want::OneOf(&["a"]),
             Want::FileMode,
-            Want::FileName,
         ] {
             assert_eq!(
                 want.problem(&Form::Unknown),

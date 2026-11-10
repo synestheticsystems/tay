@@ -1,0 +1,15 @@
+format: 1
+stack: file-names
+up: [first-routes, second-routes]
+settings:
+  routes: { default: routes.yaml }
+units:
+  first-routes:
+    uses: file
+    with: { content: a, folder: proxy, name: "${settings.routes}" }
+  second-routes:
+    uses: file
+    with: { content: b, folder: proxy, name: "${settings.routes}" }
+  by-folder:
+    uses: file
+    with: { content: c, folder: "${settings.routes}" }

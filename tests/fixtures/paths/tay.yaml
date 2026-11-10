@@ -3,7 +3,6 @@ stack: paths
 up: [web, box, conf, named-conf]
 settings:
   port: { default: 8080 }
-  conf_name: { default: site }
   config_folder: { default: ./config }
 units:
   build:
@@ -28,7 +27,7 @@ units:
     uses: file
     with:
       template: "${environment.root}/stack/units/conf/site.conf.tmpl"
-      name: "${settings.conf_name}.conf"
+      name: site.conf
   forgetful:
     uses: process
     with: { command: [work] }
