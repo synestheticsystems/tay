@@ -210,7 +210,7 @@ A mount's `from` under `.tay/` (the state and log folders) or in the shared fold
 | `run` | Required. A list (program and arguments), or `{ shell: "..." }` when a shell is wanted |
 | `check` | Same form. Exit 0: already done, do not run. Exit 1: not done, run. Any other exit: cannot tell, and the unit fails. With no `check`, the command runs every time the environment is brought up |
 | `undo` | Same form. What wiping this unit runs |
-| `when_removed` | `keep` (the default) or `undo`. With `undo`, tay runs `undo` when the unit leaves the plan of an environment that had run it, with what the unit last ran with and while the units it needed are still up. Requires `undo` |
+| `when_removed` | `keep` (the default) or `undo`. With `undo`, tay runs `undo` when the unit leaves the plan of an environment that had run it, with what the unit last ran with and while the units it needed are still up. Requires `undo`, and is not allowed on an action |
 | `in` | Run inside this container unit's container. At most one of `in` and `image`. It is a need for that unit, and writing the unit in `needs` as well is an error |
 | `image` | Run as a one-off container from this image, on the environment's network. `run` is then the whole command, in place of the image's entrypoint. With it: `mounts` as for `container` |
 | `user` | With `in` or `image`: the user to run as |

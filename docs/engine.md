@@ -102,10 +102,10 @@ It keeps two facts about intent on disk: whether the environment is meant to be 
     intent                up or down
     asked                 the profile, the `--set`s and the units last asked for
     ports.json            the port numbers this environment keeps
-    secrets/              one file per secret, readable by this account only
+    secrets/              one file per secret, and the secrets of each kept undo; readable by this account only
     files/<folder>/<name> what `file` units write
     units/<unit>/         one folder per unit that runs: its lock, its record, the values it produced,
-                          and a fingerprint of what it was started from
+                          a fingerprint of what it was started from, and the undo it keeps
     attempts.json         what the daemon counts of each unit's attempts
   logs/
     <unit>/               that unit's log files
@@ -271,7 +271,9 @@ In order: every running unit that needs the unit or mounts one of its volumes, d
 
 Production profiles refuse a unit with `watch`, so none of this happens on a server.
 
-**A command with `when_removed: undo`** keeps, once it has run, what its `undo` needs: the command, where it runs, and its environment, the secrets with the secrets. At a `tay up` whose plan no longer has the unit, tay runs that `undo` before it stops anything else the plan no longer has, and then forgets it. If the `undo` fails, `tay up` says so, keeps it, and tries again at the next `tay up`. `tay wipe --all` runs none of them.
+**A command with `when_removed: undo`** keeps, once it has run, what its `undo` needs: the command, where it runs, its environment, the secrets with the secrets, and the names of the units it needed. At a `tay up` whose plan no longer has the unit, tay runs that `undo` once the units it needed that are still in the plan are ready, and before it stops anything else the plan no longer has; then it forgets the unit. If the `undo` fails, or a unit it needed is neither up nor in the plan any more, `tay up` says so, exits with code 1, keeps the `undo` and tries again at the next `tay up`; `tay status` lists every unit whose `undo` is still waiting. `tay wipe --all` runs none of them. An action cannot have `when_removed: undo`: it is never part of what `tay up` brings up, so it never leaves.
+
+*Not built yet: waiting for the units an `undo` needed; exit code 1 and the line in `tay status` for an `undo` that failed; refusing the setting on an action.*
 
 ## Not in this document yet
 
