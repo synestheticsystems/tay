@@ -66,20 +66,39 @@ pub enum EnvField {
     Name,
     Id,
     Label,
+    LabelSuffix,
+    LabelPrefix,
     Root,
     State,
+    Logs,
+    Shared,
+    Network,
     Profile,
 }
 
 impl EnvField {
-    const ALL: [(&'static str, EnvField); 6] = [
+    const ALL: [(&'static str, EnvField); 11] = [
         ("name", EnvField::Name),
         ("id", EnvField::Id),
         ("label", EnvField::Label),
+        ("label_suffix", EnvField::LabelSuffix),
+        ("label_prefix", EnvField::LabelPrefix),
         ("root", EnvField::Root),
         ("state", EnvField::State),
+        ("logs", EnvField::Logs),
+        ("shared", EnvField::Shared),
+        ("network", EnvField::Network),
         ("profile", EnvField::Profile),
     ];
+
+    /// The fields, as a message lists them.
+    fn listed() -> String {
+        let names: Vec<String> = EnvField::ALL
+            .iter()
+            .map(|(name, _)| format!("`{name}`"))
+            .collect();
+        names.join(", ")
+    }
 }
 
 /// Reads the text between `${` and `}`. The error says what is wrong with it.
@@ -121,11 +140,13 @@ pub fn parse_target(inner: &str) -> Result<Target, String> {
         ["environment", field] => match EnvField::ALL.iter().find(|(n, _)| n == field) {
             Some((_, field)) => no_view(Target::Environment(*field)),
             None => Err(format!(
-                "`{written}`: the environment has `name`, `id`, `label`, `root`, `state` and `profile`"
+                "`{written}`: the environment has {}",
+                EnvField::listed()
             )),
         },
         ["environment", ..] => Err(format!(
-            "`{written}`: the environment has `name`, `id`, `label`, `root`, `state` and `profile`"
+            "`{written}`: the environment has {}",
+            EnvField::listed()
         )),
         ["host", "listen"] => no_view(Target::HostListen),
         ["host", ..] => Err(format!("`{written}`: the host has only `listen`")),

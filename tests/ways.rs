@@ -34,7 +34,7 @@ fn a_unit_that_no_choice_names_a_way_for_is_an_error_listing_them() {
     assert_eq!(
         run.errors(),
         [
-            "tay.yaml:6:3: unit `server` has the ways `source`, `image`, and no choice names one: `run.units` does not name it, and `run.default` is `published`, which it does not have",
+            "tay.yaml:6:3: unit `server` has the ways `source`, `image`, and no choice names one: `run.units` does not name it, and `run.default` (`published`) names none of them",
             "  stack/profiles/neither.yaml:2:17: `run.default` is chosen here",
         ]
     );

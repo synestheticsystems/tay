@@ -20,6 +20,9 @@ pub struct Stack {
     pub settings: Vec<SettingDecl>,
     pub units: Vec<Unit>,
     pub profiles: Vec<Profile>,
+    /// `up` and `run` as `tay.yaml` writes them: the first place choices
+    /// are layered from.
+    pub defaults: Choices,
     /// `.tay/choices.yaml`, when the environment has one.
     pub environment_choices: Option<Choices>,
 }
@@ -191,20 +194,26 @@ pub struct Profile {
     pub name: NameAt,
     /// Where `production: true` is written, if it is.
     pub production: Option<Loc>,
+    /// Settings a choice must give a value that is not empty.
+    pub require: Vec<NameAt>,
     pub choices: Choices,
 }
 
-/// Choices as one place writes them: a profile, the personal file, the
-/// environment's file, or one `--set`.
+/// Choices as one place writes them: `tay.yaml`, a profile, the personal
+/// file, the environment's file, or one `--set`.
 #[derive(Clone, Debug, Default)]
 pub struct Choices {
     pub up: Option<Vec<NameAt>>,
     pub up_add: Vec<NameAt>,
     pub up_remove: Vec<NameAt>,
-    pub run_default: Option<NameAt>,
+    /// Way names in the order they are tried.
+    pub run_default: Option<Vec<NameAt>>,
     /// A unit, and the way chosen for it.
     pub run_units: Vec<(NameAt, NameAt)>,
     pub settings: Vec<(NameAt, SettingValue)>,
+    /// The environment's label, in place of the one worked out from the
+    /// folder's name.
+    pub label: Option<String>,
 }
 
 /// A setting's value as one place gives it.
@@ -221,6 +230,14 @@ impl SettingValue {
         match self {
             SettingValue::Written(written) => written.loc,
             SettingValue::Argument { loc, .. } => *loc,
+        }
+    }
+
+    /// Whether the value is empty text.
+    pub fn is_empty(&self) -> bool {
+        match self {
+            SettingValue::Written(written) => written.value == Literal::Text(String::new()),
+            SettingValue::Argument { text, .. } => text.is_empty(),
         }
     }
 

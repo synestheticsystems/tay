@@ -6,3 +6,4 @@ units:
     with:
       command: [app]
       secret_env: { TOKEN: hunter2-literal }
+up: []

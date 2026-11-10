@@ -96,6 +96,24 @@ pub fn setting_name_problem(name: &str) -> Option<String> {
     None
 }
 
+/// The rule for an environment's label, which goes into hostnames: empty,
+/// or lower-case letters, digits and hyphens, neither starting nor ending
+/// with a hyphen, at most 63 characters.
+pub fn label_problem(label: &str) -> Option<String> {
+    let fits = label.is_empty()
+        || (label.len() <= 63
+            && !label.starts_with('-')
+            && !label.ends_with('-')
+            && label
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'));
+    (!fits).then(|| {
+        format!(
+            "`{label}` is not a label: lower-case letters, digits and hyphens, neither starting nor ending with a hyphen, at most 63 characters"
+        )
+    })
+}
+
 /// Environment variable names, as a shell can use them.
 pub fn variable_name_problem(name: &str) -> Option<String> {
     let mut chars = name.chars();

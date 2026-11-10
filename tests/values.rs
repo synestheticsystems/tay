@@ -47,12 +47,20 @@ fn references_to_the_environment_and_the_host() {
     let port = unit(&plan, "fixed-port");
     let text = |name: &str| given(port, name)["from_host"]["text"].clone();
     assert_eq!(text("name"), "value-types");
-    assert_eq!(text("label"), "value-types");
+    // The folder is named after the stack, so the label is empty.
+    assert_eq!(text("label"), "");
     assert_eq!(text("profile"), "dev");
     let root = support::fixture("value-types").canonicalize().unwrap();
     assert_eq!(text("state"), format!("{}/.tay/state", root.display()));
-    // Neither is known until the environment is first brought up.
+    assert_eq!(text("logs"), format!("{}/.tay/logs", root.display()));
+    let home = support::fixture("homes/none");
+    assert_eq!(
+        text("shared"),
+        format!("{}/.local/share/tay/value-types", home.display())
+    );
+    // None of these is known until the environment is first brought up.
     assert_eq!(text("id"), "<environment.id>");
+    assert_eq!(text("network"), "<environment.network>");
     assert_eq!(text("listen"), "<host.listen>");
 }
 

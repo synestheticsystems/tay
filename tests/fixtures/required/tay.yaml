@@ -1,0 +1,8 @@
+format: 1
+stack: required
+settings:
+  base_domain: { default: example.test }
+  licence_key: { secret: true }
+  region: {}
+units:
+  app: { uses: port }

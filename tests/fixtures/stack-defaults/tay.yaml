@@ -1,0 +1,12 @@
+format: 1
+stack: stack-defaults
+up: [web, api]
+run: { default: [image, source] }
+units:
+  web:
+    run:
+      source: { uses: process, with: { command: [serve] } }
+      image: { uses: container, with: { image: example/web } }
+  api:
+    run:
+      source: { uses: process, with: { command: [api] } }

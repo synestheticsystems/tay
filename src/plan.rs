@@ -74,17 +74,35 @@ pub fn plan(root: &Path, options: &Options, sources: &mut Sources, d: &mut Diagn
         .iter()
         .filter_map(|set| read::assignment(set, sources, d))
         .collect();
-    let places: Vec<&Choices> = profile
-        .map(|profile| &profile.choices)
+    let profile_choices = profile.map(|profile| &profile.choices);
+    let places: Vec<&Choices> = [&stack.defaults]
         .into_iter()
+        .chain(profile_choices)
         .chain(personal.as_ref())
         .chain(stack.environment_choices.as_ref())
         .chain(&sets)
         .collect();
+    let layered = choices::layer(places.iter().copied());
     // With a file that did not parse, the set of units is not known, and
-    // every reference to a unit in it would be reported as missing.
+    // every reference to a unit in it would be reported as missing; nor is
+    // it known whether a place gives `up` or a required setting.
+    // A profile that is named and missing has been reported, and what it
+    // would have said is not known.
+    let profile_missing =
+        profile.is_none() && (options.profile.is_some() || stack.default_profile.is_some());
     if every_file_parsed {
         read::references::check(&stack, &places, d);
+        if !profile_missing {
+            choices::check_up_given(&stack, &layered, d);
+        }
+        if let Some(profile) = profile {
+            let counting: Vec<&Choices> = profile_choices
+                .into_iter()
+                .chain(stack.environment_choices.as_ref())
+                .chain(&sets)
+                .collect();
+            choices::check_required(&stack, profile, &counting, d);
+        }
     }
     if !d.is_empty() {
         return Outcome::Errors;
@@ -93,8 +111,9 @@ pub fn plan(root: &Path, options: &Options, sources: &mut Sources, d: &mut Diagn
     let Some(stack_name) = &stack.name else {
         return Outcome::Errors;
     };
-    let layered = choices::layer(places);
-    let Some(environment) = Environment::of(&stack, profile, d) else {
+    let home = options.home.as_deref();
+    let Some(environment) = Environment::of(&stack, &stack_name.name, profile, &layered, home, d)
+    else {
         return Outcome::Errors;
     };
     let mut planner = Planner {

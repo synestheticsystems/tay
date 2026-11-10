@@ -24,6 +24,7 @@ pub enum Hole {
     },
     HostListen,
     EnvironmentId,
+    EnvironmentNetwork,
 }
 
 impl Hole {
@@ -35,6 +36,7 @@ impl Hole {
             Hole::Output { unit, name } => format!("<output: {unit}.{name}>"),
             Hole::HostListen => "<host.listen>".to_string(),
             Hole::EnvironmentId => "<environment.id>".to_string(),
+            Hole::EnvironmentNetwork => "<environment.network>".to_string(),
         }
     }
 }

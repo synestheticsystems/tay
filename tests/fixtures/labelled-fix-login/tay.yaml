@@ -1,0 +1,11 @@
+format: 1
+stack: labelled
+up: [site]
+units:
+  site:
+    uses: port
+    gives:
+      label: "${environment.label}"
+      suffix: "${environment.label_suffix}"
+      prefix: "${environment.label_prefix}"
+      host: "portal${environment.label_suffix}.example.test"

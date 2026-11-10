@@ -1,9 +1,10 @@
 //! Choices layered across the stack, the profile, the personal file, the
-//! environment's file and `--set`, later ones winning.
+//! environment's file and `--set`, later ones winning; and what a choice
+//! must give.
 
 mod support;
 
-use support::{fixture, given, plan_with_home, unit, unit_names};
+use support::{fixture, given, plan_json, plan_with_home, unit, unit_names};
 
 fn plan(args: &[&str]) -> serde_json::Value {
     let mut all = args.to_vec();
@@ -52,4 +53,90 @@ fn a_production_profile_does_not_read_the_personal_file() {
     assert_eq!(setting_from(&plan, "personal"), "profile");
     assert_eq!(setting_from(&plan, "environment"), "environment");
     assert_eq!(unit_names(&plan), ["one"]);
+}
+
+#[test]
+fn tay_yaml_gives_up_and_run_when_no_later_place_does() {
+    let plan = plan_json("stack-defaults", &[]);
+    assert_eq!(unit_names(&plan), ["api", "web"]);
+    // `run.default` is a list: each unit takes the first of its own ways in it.
+    assert_eq!(unit(&plan, "web")["way"], "image");
+    assert_eq!(unit(&plan, "api")["way"], "source");
+    let plan = plan_json("stack-defaults", &["--set", "run.default=source,image"]);
+    assert_eq!(unit(&plan, "web")["way"], "source");
+}
+
+#[test]
+fn no_place_giving_up_is_an_error() {
+    let run = support::plan("no-up", &[]);
+    assert_eq!(run.code, 2);
+    assert_eq!(
+        run.errors(),
+        [
+            "tay.yaml:1:1: nothing says what comes up: none of tay.yaml, the profile, the personal file, the environment's file and `--set` gives `up`"
+        ]
+    );
+    assert_eq!(
+        unit_names(&plan_json("no-up", &["--set", "up=web"])),
+        ["web"]
+    );
+}
+
+#[test]
+fn the_label_is_the_folder_name_after_the_stack_name_unless_a_choice_sets_it() {
+    let plan = plan_json("labelled-fix-login", &[]);
+    let site = unit(&plan, "site");
+    let value = |name: &str| given(site, name)["from_host"]["value"].clone();
+    assert_eq!(value("label"), "fix-login");
+    assert_eq!(value("suffix"), "-fix-login");
+    assert_eq!(value("prefix"), "fix-login-");
+    assert_eq!(value("host"), "portal-fix-login.example.test");
+    let plan = plan_json("labelled-fix-login", &["--set", "label="]);
+    let site = unit(&plan, "site");
+    assert_eq!(given(site, "suffix")["from_host"]["value"], "");
+    assert_eq!(
+        given(site, "host")["from_host"]["value"],
+        "portal.example.test"
+    );
+}
+
+#[test]
+fn a_required_setting_must_be_given_a_value_that_is_not_empty_by_a_choice() {
+    // `base_domain` has only its default, which does not count, and the
+    // personal file's value does not count either; the environment's file
+    // gives `region` an empty value.
+    let run = plan_with_home("required", &fixture("homes/required"), &[]);
+    assert_eq!(run.code, 2);
+    assert_eq!(
+        run.errors(),
+        [
+            "stack/profiles/deploy.yaml:2:11: the profile `deploy` requires setting `base_domain`, and no choice gives it a value: the profile, the environment's file or a `--set` must (its default does not count)",
+            ".tay/choices.yaml:2:11: the profile `deploy` requires setting `region`, and the value given here is empty",
+            "  stack/profiles/deploy.yaml:2:37: it is required here",
+        ]
+    );
+    let run = plan_with_home(
+        "required",
+        &fixture("homes/required"),
+        &[
+            "--set",
+            "settings.base_domain=example.org",
+            "--set",
+            "settings.region=eu",
+        ],
+    );
+    assert_eq!(run.code, 0, "{}", run.stderr);
+}
+
+#[test]
+fn production_and_require_may_be_written_only_in_a_profile() {
+    let run = plan_with_home("required", &fixture("homes/profile-only"), &[]);
+    assert_eq!(run.code, 2);
+    let errors = run.errors();
+    for field in ["production", "require"] {
+        let line = errors
+            .iter()
+            .find(|line| line.contains(&format!("`{field}` may be written only in a profile")));
+        assert!(line.is_some(), "{errors:?}");
+    }
 }

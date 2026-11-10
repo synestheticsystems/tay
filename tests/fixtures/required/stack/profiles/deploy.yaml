@@ -1,0 +1,4 @@
+up: [app]
+require: [base_domain, licence_key, region]
+settings:
+  licence_key: LICENCE-VALUE-0451

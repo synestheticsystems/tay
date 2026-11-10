@@ -48,6 +48,8 @@ const STACK_FIELDS: &[&str] = &[
     "templates_dir",
     "profiles_dir",
     "settings",
+    "up",
+    "run",
     "units",
 ];
 
@@ -75,6 +77,7 @@ pub fn read(root: &Path, sources: &mut Sources, d: &mut Diagnostics) -> Outcome 
         .get("settings")
         .map(|node| settings::declarations(node, reader.d))
         .unwrap_or_default();
+    let defaults = choices::stack_defaults(&file, reader.d);
     let templates = reader.templates(templates_dir);
     let mut units = Vec::new();
     if let Some(inline) = file.get("units") {
@@ -95,6 +98,7 @@ pub fn read(root: &Path, sources: &mut Sources, d: &mut Diagnostics) -> Outcome 
         settings,
         units,
         profiles,
+        defaults,
         environment_choices,
     };
     Outcome::Read {
