@@ -88,7 +88,8 @@ impl Layout {
     }
 
     /// `state/units/<unit>/`: what tay keeps of `unit`, a unit that runs:
-    /// its lock, its record, the values it produced.
+    /// its lock, its record, the values it produced, what it was started
+    /// from, and what its `undo` needs.
     pub fn unit_state(&self, unit: &str) -> PathBuf {
         self.units_state().join(unit)
     }

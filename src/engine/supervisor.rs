@@ -158,6 +158,17 @@ impl Supervisor {
         }
     }
 
+    /// Says that `unit` took `state`, whether or not the table has it, as
+    /// a unit the plan no longer has does while its `undo` runs: it is
+    /// recorded if the table has it, and the daemon is told.
+    pub fn say(&self, unit: &str, state: UnitState) {
+        if self.units().state(unit).is_some() {
+            self.record(unit, state, None);
+        } else {
+            (self.told)(unit, &state);
+        }
+    }
+
     /// Records how the attempt of `unit` that came out last ended, before
     /// the state it takes is recorded, so that whoever waits on that state
     /// finds it.

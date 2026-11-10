@@ -3,6 +3,7 @@
 //! its steps.
 
 mod attempt;
+pub mod kept_undo;
 mod produced;
 mod step;
 mod wipe;
@@ -66,10 +67,11 @@ struct CommandSettings<V> {
     stdin: Option<V>,
     /// The values the command writes out, each with whether it is secret.
     produces: Vec<(NameAt, bool)>,
-    /// Whether the values it writes out are kept, so that a daemon started
-    /// afresh gives them too: they are, unless it is an action, whose
-    /// values go to whoever runs it.
-    keeps_values: bool,
+    /// Whether what it does is kept, so that a daemon started afresh has
+    /// it too: the values it writes out, and what its `undo` needs. It is,
+    /// unless it is an action, whose values go to whoever runs it and
+    /// which leaves no work behind for a plan to undo.
+    keeps: bool,
     /// The files the command builds, by name.
     outputs: Vec<(NameAt, V)>,
 }
@@ -103,7 +105,7 @@ impl<V> MapValues for CommandSettings<V> {
             steps: steps?,
             stdin: stdin?,
             produces: self.produces.clone(),
-            keeps_values: self.keeps_values,
+            keeps: self.keeps,
             outputs: outputs?,
         })
     }
@@ -286,7 +288,7 @@ fn read(
         },
         stdin,
         produces,
-        keeps_values: !cx.is_action,
+        keeps: !cx.is_action,
         outputs,
     };
     Some((settings, runs, volume_mounts))

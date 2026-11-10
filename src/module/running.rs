@@ -112,6 +112,19 @@ pub async fn remove_kept_by_environment(environment: &Environment) -> Result<Vec
     container::remove_kept_by_environment(environment).await
 }
 
+/// The units of `environment` that keep an `undo` to run, as a command
+/// done with `when_removed: undo` does, whatever the plan holds now: the
+/// last kept first.
+pub fn units_keeping_an_undo(environment: &Environment) -> Result<Vec<String>, Failure> {
+    command::kept_undo::units(environment)
+}
+
+/// Runs the `undo` the unit at `place` keeps, where it ran and with what it
+/// last ran with; once it has run, the unit is forgotten.
+pub async fn run_kept_undo(place: &UnitPlace) -> Result<(), Failure> {
+    command::kept_undo::run(place).await
+}
+
 /// Whether anything of the environment `listed` is left where its units
 /// run that its folder cannot tell: a container, a volume or a network of
 /// it.

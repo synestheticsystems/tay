@@ -25,6 +25,7 @@ mod run;
 mod running;
 mod secrets;
 mod status;
+mod undoing;
 mod up;
 mod watching;
 mod wipe;

@@ -1,6 +1,7 @@
 //! Mounts: a host file or folder, or another unit's volume, made visible in
 //! a container. Where a mount is written is told to the planner as it is
-//! read; the settings hold only what is mounted.
+//! read; the settings hold only what is mounted, so that a mount can be
+//! kept and had again as it was filled.
 
 use serde::{Deserialize, Serialize};
 
@@ -10,9 +11,10 @@ use crate::syntax::names::{self, NameAt};
 use crate::syntax::yaml::Node;
 
 use crate::module::description::{Concern, VolumeMount};
+use crate::module::operations::{self, WrongType};
 use crate::module::settings::{Destination, Slot, maybe};
 use crate::module::want::{PathUse, Want};
-use crate::value::Filled;
+use crate::value::{Exact, Filled};
 
 const MOUNT: Destination = Destination::Readable("a mount");
 
@@ -72,6 +74,57 @@ impl Mount<Filled> {
             "to": self.to.reveal(),
             "readonly": self.readonly.as_ref().map(Filled::reveal),
         })
+    }
+}
+
+/// A mount as it was filled, kept so that it is had again as it was.
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KeptMount {
+    #[serde(flatten)]
+    source: KeptSource,
+    to: String,
+    /// `None`: read-only, the default.
+    readonly: Option<bool>,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum KeptSource {
+    From(String),
+    Volume(UnitVolume),
+}
+
+impl Mount<Filled> {
+    /// The mount as it is kept.
+    pub fn kept(&self) -> Result<KeptMount, WrongType> {
+        let source = match &self.source {
+            Source::Host(from) => KeptSource::From(operations::text(from, "mounts")?.to_string()),
+            Source::Volume(volume) => KeptSource::Volume(volume.clone()),
+        };
+        let readonly = (self.readonly.as_ref())
+            .map(|readonly| operations::boolean(readonly, "mounts"))
+            .transpose()?;
+        Ok(KeptMount {
+            source,
+            to: operations::text(&self.to, "mounts")?.to_string(),
+            readonly,
+        })
+    }
+}
+
+impl KeptMount {
+    /// The mount as it was filled.
+    pub fn filled(&self) -> Mount<Filled> {
+        Mount {
+            source: match &self.source {
+                KeptSource::From(from) => Source::Host(Filled::text(from)),
+                KeptSource::Volume(volume) => Source::Volume(volume.clone()),
+            },
+            to: Filled::text(&self.to),
+            readonly: self
+                .readonly
+                .map(|readonly| Filled::of(Exact::Bool(readonly), false)),
+        }
     }
 }
 

@@ -1,13 +1,14 @@
 //! What a command keeps: what its `undo` undoes, the values it produced,
 //! and its record. Wiping it runs its `undo` where its steps run, which
-//! needs what it needs to be up, and then forgets the rest.
+//! needs what it needs to be up, and then forgets the rest, what was kept
+//! for an `undo` to run once it leaves the plan among it.
 
 use crate::module::operations::{Keeping, PartlyRemoved, Removing, UnitPlace};
 use crate::module::running::{RECORD, remove_record};
 use crate::module::settings::{Keeps, filled};
 use crate::value::{Filled, Placeholder, Unfilled, Value};
 
-use super::{CommandSettings, produced};
+use super::{CommandSettings, kept_undo, produced};
 
 impl Keeps for CommandSettings<Value> {
     fn kept(&self, _: &UnitPlace) -> Keeping {
@@ -15,7 +16,7 @@ impl Keeps for CommandSettings<Value> {
         if self.undo.is_some() {
             what.push("what its `undo` undoes".to_string());
         }
-        if self.keeps_values && !self.produces.is_empty() {
+        if self.keeps && !self.produces.is_empty() {
             what.push("the values it produced".to_string());
         }
         what.push(RECORD.to_string());
@@ -35,7 +36,7 @@ impl Keeps for CommandSettings<Value> {
             Some(_) => Some(filled(self, fill)?),
             None => None,
         };
-        let values_kept = self.keeps_values && !self.produces.is_empty();
+        let values_kept = self.keeps && !self.produces.is_empty();
         Ok(Box::pin(async move {
             let mut removed = 0;
             if let Some(undoing) = undoing
@@ -46,6 +47,7 @@ impl Keeps for CommandSettings<Value> {
                     .undo(&place, undo)
                     .await
                     .map_err(PartlyRemoved::after(removed))?;
+                kept_undo::forget(&place).map_err(PartlyRemoved::after(removed))?;
                 removed += 1;
             }
             produced::forget(&place).map_err(PartlyRemoved::after(removed))?;

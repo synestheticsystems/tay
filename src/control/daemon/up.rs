@@ -39,8 +39,9 @@ impl Daemon {
         }
     }
 
-    /// Brings `plan` up as `tay up` does: what runs and the plan no longer
-    /// has is stopped first, and then every unit of the plan is brought
+    /// Brings `plan` up as `tay up` does: what a unit the plan no longer
+    /// has keeps to undo is undone first, then what runs and the plan no
+    /// longer has is stopped, and then every unit of the plan is brought
     /// up, telling `change`'s followers each change of state and the
     /// decision; then the change is over.
     pub(super) async fn bring_up_plan(&self, change: &Arc<Change>, plan: Plan) {
@@ -56,21 +57,30 @@ impl Daemon {
             );
             return;
         }
-        let unplanned: Vec<String> = self
-            .supervisor
-            .snapshot()
-            .each_unplanned()
-            .map(|unplanned| unplanned.name.clone())
-            .collect();
-        change.say(Event::Units {
-            units: units
-                .iter()
-                .map(|unit| unit.name.clone())
-                .chain(unplanned)
-                .collect(),
-        });
-        // What runs and the plan no longer has is stopped first, so that
-        // nothing it holds is in the way of what the plan brings up.
+        let owed = match engine::undos_owed(&self.supervisor, &units) {
+            Ok(owed) => owed,
+            Err(why) => {
+                let reason = format!(
+                    "what the units the plan does not have keep to undo cannot be told: {why}"
+                );
+                self.fail(change, &reason);
+                return;
+            }
+        };
+        let mut said: Vec<String> = units.iter().map(|unit| unit.name.clone()).collect();
+        let snapshot = self.supervisor.snapshot();
+        let unplanned = snapshot.each_unplanned().map(|unplanned| &unplanned.name);
+        for unit in unplanned.chain(&owed) {
+            if !said.contains(unit) {
+                said.push(unit.clone());
+            }
+        }
+        change.say(Event::Units { units: said });
+        // What a unit the plan no longer has undoes is undone while what it
+        // needs is still up; then what runs and the plan no longer has is
+        // stopped, so that nothing it holds is in the way of what the plan
+        // brings up.
+        engine::undo_unplanned(&self.supervisor, &owed).await;
         engine::stop_unplanned(&self.supervisor).await;
         // A production profile refuses a unit with `watch`, and nothing on
         // a server is watched in any case.

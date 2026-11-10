@@ -3,8 +3,9 @@
 //! unit's running container, or in a container of its own. A check that
 //! exits 0 finds the command done and nothing more runs; 1 finds it not
 //! done; anything else cannot tell, and the command fails without running.
-//! Once done, every file under `outputs` must exist, and the values it wrote
-//! are kept and given.
+//! Once done, every file under `outputs` must exist, the values it wrote
+//! are kept and given, and what its `undo` needs is kept when it is to run
+//! once the unit leaves the plan.
 //!
 //! A command killed part-way, or whose daemon was killed during it, is
 //! simply not done: the next `tay up` checks again and runs it again. One on
@@ -27,7 +28,7 @@ use crate::module::running::host;
 use crate::value::Filled;
 
 use super::step::{CHECK, RUN, StepOutcome, Where};
-use super::{CommandSettings, produced};
+use super::{CommandSettings, WhenRemoved, kept_undo, produced};
 
 #[derive(Debug, thiserror::Error)]
 enum CommandError {
@@ -329,9 +330,11 @@ impl CommandSettings<Filled> {
         })
     }
 
-    /// The command is done: every file under `outputs` must exist, and the
+    /// The command is done: every file under `outputs` must exist, the
     /// values it gives are what it wrote, or else, when `kept` says so and
-    /// it keeps its values, what was kept when it was done before.
+    /// it keeps its values, what was kept when it was done before, and what
+    /// its `undo` needs is kept when it is to run once the unit leaves the
+    /// plan.
     fn done(&self, place: &UnitPlace, detail: &str, kept: Kept) -> Result<Outcome, Failure> {
         for (name, path) in &self.outputs {
             let path = operations::text(path, "outputs")?;
@@ -343,17 +346,35 @@ impl CommandSettings<Filled> {
             }
         }
         let values = match (produced::written(place), kept) {
-            (false, Kept::Given) if self.keeps_values && !self.produces.is_empty() => {
+            (false, Kept::Given) if self.keeps && !self.produces.is_empty() => {
                 produced::kept(place, &self.produces)
             }
-            _ => produced::take(place, &self.produces, self.keeps_values),
+            _ => produced::take(place, &self.produces, self.keeps),
         };
-        Ok(match values {
-            Ok(values) => Outcome::Done {
+        let values = match values {
+            Ok(values) => values,
+            Err(why) => return Ok(Outcome::Failed(format!("{detail}, but {why}"))),
+        };
+        Ok(match self.keep_undo(place) {
+            Ok(()) => Outcome::Done {
                 values,
                 detail: detail.to_string(),
             },
-            Err(why) => Outcome::Failed(format!("{detail}, but {why}")),
+            Err(why) => Outcome::Failed(format!(
+                "{detail}, but what its `undo` needs could not be kept: {why}"
+            )),
         })
+    }
+
+    /// Keeps what its `undo` needs, as it ran now, when the `undo` is to
+    /// run once the unit leaves the plan; forgets what was kept for an
+    /// earlier one otherwise, as when `when_removed` was changed to `keep`.
+    fn keep_undo(&self, place: &UnitPlace) -> Result<(), Failure> {
+        match (&self.undo, self.when_removed) {
+            (Some(undo), WhenRemoved::Undo) if self.keeps => {
+                kept_undo::keep(place, undo, &self.steps)
+            }
+            _ => kept_undo::forget(place),
+        }
     }
 }
