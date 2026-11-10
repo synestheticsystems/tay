@@ -61,7 +61,10 @@ fn references_to_the_environment_and_the_host() {
     // None of these is known until the environment is first brought up.
     assert_eq!(text("id"), "<environment.id>");
     assert_eq!(text("network"), "<environment.network>");
-    assert_eq!(text("listen"), crate::support::PLANNED_HOST_LISTEN);
+    // Nothing in this plan runs in a container, so there is none for a
+    // host process to be reached by, and the address is the loopback
+    // address on every system.
+    assert_eq!(text("listen"), "127.0.0.1");
 }
 
 #[test]

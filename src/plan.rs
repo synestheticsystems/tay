@@ -20,7 +20,9 @@ use crate::definition::{Profile, Stack};
 use crate::diagnostic::source::{Loc, Sources};
 use crate::diagnostic::{Diagnostic, Diagnostics};
 use crate::disk::Asked;
+use crate::module::HOST_LISTEN_BEFORE_START;
 use crate::syntax::expr::Expr;
+use crate::syntax::names::NameAt;
 
 pub use action::ActionRun;
 pub use model::{
@@ -28,6 +30,9 @@ pub use model::{
     Unreachable,
 };
 
+use action::Arguments;
+use choices::Layered;
+use resolve::endpoint::LOOPBACK;
 use resolve::{EnvironmentFacts, Resolver};
 
 /// What `tay plan` is asked for, or `tay up`, which plans as it does.
@@ -120,23 +125,88 @@ pub fn plan(root: &Path, options: &Options, sources: &mut Sources, d: &mut Diagn
         return Outcome::Errors;
     };
     let (action, arguments) = action.unzip();
-    let mut planner = Planner {
-        resolver: Resolver::new(&stack, &layered, environment, arguments, sources),
-        root: root.to_path_buf(),
-        production: production.is_some(),
-        template_files: HashMap::new(),
+    let planning = Planning {
+        stack: &stack,
+        stack_name: &stack_name.name,
+        layered: &layered,
+        profile,
+        production,
+        root,
+        environment,
+        sought: [layered.up.as_slice(), action.as_slice()].concat(),
+        arguments,
     };
-    let reached = planner.reach(&[layered.up.as_slice(), action.as_slice()].concat());
-    if let (Some(profile), Some(marked_at)) = (profile, production) {
-        planner.refuse_for_production(&profile.name, marked_at, &reached);
-    }
-    let up: Vec<String> = layered.up.iter().map(|name| name.name.clone()).collect();
-    let plan = planner.finish(reached, &stack, &stack_name.name, profile, up);
-    planner.resolver.report_unset_settings();
-    d.extend(planner.resolver.d);
+    let Some(plan) = planning.plan(HOST_LISTEN_BEFORE_START, sources, d) else {
+        return Outcome::Errors;
+    };
+    // `${host.listen}` is learnt from the environment's network so that
+    // containers reach a host process. When nothing in the plan runs in a
+    // container there is none to reach it, and it is the loopback address,
+    // which needs no network. Where each unit runs is known only once the
+    // plan is made, so a plan that would learn it is made again with it.
+    let plan = match plan.uses_host_listen && !plan.runs_in_a_container() {
+        true => planning.plan(Some(LOOPBACK), sources, d),
+        false => Some(plan),
+    };
     match plan {
-        Some(plan) if d.is_empty() => Outcome::Plan(plan),
-        _ => Outcome::Errors,
+        Some(plan) => Outcome::Plan(plan),
+        None => Outcome::Errors,
+    }
+}
+
+/// What the units that come up are planned from, once the definitions are
+/// read and the choices applied.
+struct Planning<'s> {
+    stack: &'s Stack,
+    stack_name: &'s str,
+    layered: &'s Layered,
+    profile: Option<&'s Profile>,
+    /// Where the profile says it is a production one, when it does.
+    production: Option<Loc>,
+    root: &'s Path,
+    environment: EnvironmentFacts,
+    /// What `up` brings, and the action `tay run` runs.
+    sought: Vec<NameAt>,
+    arguments: Option<Arguments>,
+}
+
+impl Planning<'_> {
+    /// The plan, with `${host.listen}` as `host_listen` when that is known
+    /// before anything starts; `None` when it has errors, which go to `d`.
+    fn plan(
+        &self,
+        host_listen: Option<&'static str>,
+        sources: &mut Sources,
+        d: &mut Diagnostics,
+    ) -> Option<Plan> {
+        let resolver = Resolver::new(
+            self.stack,
+            self.layered,
+            self.environment.clone(),
+            self.arguments.clone(),
+            host_listen,
+            sources,
+        );
+        let mut planner = Planner {
+            resolver,
+            root: self.root.to_path_buf(),
+            production: self.production.is_some(),
+            template_files: HashMap::new(),
+        };
+        let reached = planner.reach(&self.sought);
+        if let (Some(profile), Some(marked_at)) = (self.profile, self.production) {
+            planner.refuse_for_production(&profile.name, marked_at, &reached);
+        }
+        let up: Vec<String> = self
+            .layered
+            .up
+            .iter()
+            .map(|name| name.name.clone())
+            .collect();
+        let plan = planner.finish(reached, self.stack, self.stack_name, self.profile, up);
+        planner.resolver.report_unset_settings();
+        d.extend(planner.resolver.d);
+        plan.filter(|_| d.is_empty())
     }
 }
 

@@ -227,3 +227,31 @@ fn an_environment_that_never_ran_a_container_never_asks_docker() {
     let list = machine.list();
     assert_eq!(list["environments"][0]["made_outside"], false, "{list}");
 }
+
+#[test]
+fn a_host_process_listens_on_the_loopback_address_and_needs_no_docker_when_no_container_runs() {
+    let machine = Machine::new();
+    let root = machine.stack("checks");
+    // Docker's configuration names a socket that does not exist.
+    let socket = format!("unix://{}", machine.path("no-docker.sock").display());
+    let tay = |command: &str, args: &[&str]| {
+        let mut all = vec![command, "--root", root.to_str().unwrap()];
+        all.extend(args);
+        let mut run = machine.command(&root, &all);
+        run.env("DOCKER_HOST", &socket);
+        machine.run(run)
+    };
+    // `site` listens on `${host.listen}`, and its own check reaches it
+    // there from the host.
+    let up = tay("up", &["site"]);
+    assert_eq!(up.code, 0, "{}{}", up.stdout, up.stderr);
+    let port = crate::harness::kept_ports(&root)["site-port"].clone();
+    assert_eq!(
+        up.last_change("site"),
+        format!("ready attempt 1, http http://127.0.0.1:{port}/health passes")
+    );
+    let down = tay("down", &[]);
+    assert_eq!(down.code, 0, "{}{}", down.stdout, down.stderr);
+    let list = machine.list();
+    assert_eq!(list["environments"][0]["made_outside"], false, "{list}");
+}

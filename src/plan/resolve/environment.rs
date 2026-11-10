@@ -12,7 +12,7 @@ use crate::value::{Placeholder, Value};
 
 use super::{Res, Resolver};
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct EnvironmentFacts {
     /// The name of the folder the stack's root is: in development the
     /// folder is the environment.

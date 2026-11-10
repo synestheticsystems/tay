@@ -24,6 +24,7 @@ pub struct ActionRun {
 
 /// The arguments of the action that is run, each as it was given or as its
 /// default is.
+#[derive(Clone)]
 pub struct Arguments {
     /// The action, by its index among the stack's units.
     pub unit: usize,

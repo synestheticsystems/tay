@@ -105,6 +105,16 @@ pub enum Runs {
     OneOffContainer,
 }
 
+impl Runs {
+    /// Whether it runs in a container: one of its own, or another unit's.
+    pub fn in_a_container(&self) -> bool {
+        match self {
+            Runs::OnHost => false,
+            Runs::OwnContainer | Runs::InsideUnit(_) | Runs::OneOffContainer => true,
+        }
+    }
+}
+
 /// One entry of a container's `publish`: a container port that may be made
 /// reachable from the host. It is opened only when something in the plan
 /// uses it from the host, or when `always` says so; until then nothing uses

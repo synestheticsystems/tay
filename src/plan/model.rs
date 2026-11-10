@@ -27,11 +27,23 @@ pub struct Plan {
     pub up: Vec<String>,
     /// Every unit that comes up, in an order it could start in.
     pub units: Vec<PlannedUnit>,
-    /// Whether a value in the plan is `${host.listen}`.
+    /// Whether a value in the plan is `${host.listen}` where it is learnt
+    /// as the environment is brought up.
     pub uses_host_listen: bool,
 }
 
 impl Plan {
+    /// Whether a unit of the plan runs in a container, as its module says.
+    pub fn runs_in_a_container(&self) -> bool {
+        self.units
+            .iter()
+            .filter_map(|unit| unit.mechanism.as_ref())
+            .any(|mechanism| match &mechanism.kind {
+                UnitKind::Runs(runs) => runs.in_a_container(),
+                UnitKind::Made => false,
+            })
+    }
+
     /// Each unit of this plan, with a published port of it, that this plan
     /// opens and `other` does not: what runs of the unit as `other` gives
     /// it would have to be replaced to run as this plan does.

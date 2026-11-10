@@ -21,7 +21,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use crate::definition::{Arg, Body, Mechanism, Stack, reference_errors};
 use crate::diagnostic::source::{Loc, SourceId, Sources};
 use crate::diagnostic::{Diagnostic, Diagnostics};
-use crate::module::{HOST_LISTEN_BEFORE_START, Runs, UnitKind};
+use crate::module::{Runs, UnitKind};
 use crate::syntax::expr::{Expr, ExprKind, Part, Piece, Reference, Target, View};
 use crate::syntax::names::NameAt;
 
@@ -144,6 +144,9 @@ pub struct Resolver<'s> {
     /// Every file and argument read, which a path beginning `./` is
     /// relative to the folder of.
     pub sources: &'s mut Sources,
+    /// `${host.listen}` when it is known before anything starts; `None`
+    /// when it is learnt as the environment is brought up.
+    host_listen: Option<&'static str>,
     /// Whether a value was `${host.listen}` where it is known only once
     /// the environment is brought up.
     pub uses_host_listen: bool,
@@ -158,6 +161,7 @@ impl<'s> Resolver<'s> {
         layered: &'s Layered,
         environment: EnvironmentFacts,
         arguments: Option<Arguments>,
+        host_listen: Option<&'static str>,
         sources: &'s mut Sources,
     ) -> Resolver<'s> {
         Resolver {
@@ -165,6 +169,7 @@ impl<'s> Resolver<'s> {
             layered,
             environment,
             sources,
+            host_listen,
             uses_host_listen: false,
             arguments,
             d: Diagnostics::default(),
@@ -284,11 +289,11 @@ impl<'s> Resolver<'s> {
         Ok(text)
     }
 
-    /// `${host.listen}`: the address itself where the system makes it
-    /// known before anything starts, and otherwise its placeholder, which
-    /// the engine fills once it has learnt the address.
+    /// `${host.listen}`: the address itself where it is known before
+    /// anything starts, and otherwise its placeholder, which the engine
+    /// fills once it has learnt the address.
     fn host_listen(&mut self) -> Resolved {
-        match HOST_LISTEN_BEFORE_START {
+        match self.host_listen {
             Some(address) => Resolved::text(address),
             None => {
                 self.uses_host_listen = true;
