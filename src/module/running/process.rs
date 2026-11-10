@@ -5,7 +5,7 @@ use crate::syntax::names;
 use crate::syntax::yaml::Node;
 
 use super::common::{argv, argv_list, environment};
-use crate::module::shape::{Concern, Place, RestartDefault, Runs, Slot, UnitShape};
+use crate::module::shape::{Concern, Place, RestartDefault, Runs, Slot, UnitKind, UnitShape};
 use crate::module::want::Want;
 use crate::module::{Cx, Module};
 
@@ -71,13 +71,13 @@ impl Module for Process {
             }
         }
         (cx.d.len() == errors_before).then_some(UnitShape {
-            runs: Runs::OnHost,
+            kind: UnitKind::Runs(Runs::OnHost),
             slots,
             gives: Vec::new(),
             outputs: Vec::new(),
             production,
             ready_without_check: "when it has started",
-            restart_by_default: RestartDefault::ON_FAILURE,
+            restart_by_default: RestartDefault::OnFailure,
         })
     }
 }
@@ -122,7 +122,10 @@ mod tests {
         let (shape, errors) = check("process", "command: [a]\nprepare: [[bun, install]]\n");
         assert!(errors.is_empty(), "{errors:?}");
         let shape = shape.unwrap();
-        assert!(matches!(shape.runs, crate::module::Runs::OnHost));
+        assert!(matches!(
+            shape.kind,
+            crate::module::UnitKind::Runs(crate::module::Runs::OnHost)
+        ));
         assert_eq!(shape.production.len(), 1);
         assert_eq!(shape.slots.len(), 3);
     }

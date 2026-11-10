@@ -6,7 +6,7 @@
 //! | asked from a container | the host's name for containers, and its port | the unit's name and the port inside |
 
 use crate::definition::Endpoint;
-use crate::module::{Form, Runs};
+use crate::module::{Form, Runs, UnitKind};
 use crate::syntax::expr::{Part, Reference};
 
 use super::{Asker, Fail, Res, Resolver, Scope, ViewProblem};
@@ -28,11 +28,11 @@ impl Resolver<'_> {
     ) -> Res {
         let stack = self.stack;
         let owner_name = &stack.units[owner].name.name;
-        let runs = self.runs(owner).ok_or(Fail::Reported)?;
+        let kind = self.kind(owner).ok_or(Fail::Reported)?;
         // The endpoint's own fields are in its unit's terms: the port it listens on.
         let own = Scope {
             unit: Some(owner),
-            asker: Asker::of(runs),
+            asker: Asker::of(kind),
         };
         let port = self.resolve(&endpoint.port, own)?;
         if !matches!(port.form(), Form::Number(_) | Form::Unknown) {
@@ -56,20 +56,20 @@ impl Resolver<'_> {
                 endpoint: endpoint.loc,
             }))
         };
+        let UnitKind::Runs(runs) = kind else {
+            return self.fail(
+                endpoint.loc,
+                format!(
+                    "unit `{owner_name}` is made and runs nothing that listens, so an endpoint it gives has no address"
+                ),
+            );
+        };
         let (host, seen_port) = match (asker, runs) {
-            (Asker::Unplaced, _) => {
+            (Asker::Nowhere, _) => {
                 return Err(Fail::View(ViewProblem::NeedsView {
                     reference: reference.written(),
                     endpoint: endpoint.loc,
                 }));
-            }
-            (_, Runs::ByTay) => {
-                return self.fail(
-                    endpoint.loc,
-                    format!(
-                        "unit `{owner_name}` runs nothing that listens, so an endpoint it gives has no address"
-                    ),
-                );
             }
             (Asker::Host, Runs::OnHost) => (LOOPBACK.to_string(), port.clone()),
             (Asker::Host, Runs::OneOffContainer) => return not_published(&port),
@@ -138,7 +138,7 @@ impl Resolver<'_> {
 
     /// The host port published for `port` of the container `unit` runs in, if any.
     fn published(&mut self, unit: usize, port: &Resolved) -> Result<Option<Resolved>, Fail> {
-        let Some(Runs::OwnContainer { published }) = self.runs(unit) else {
+        let Some(UnitKind::Runs(Runs::OwnContainer { published })) = self.kind(unit) else {
             return Ok(None);
         };
         let Form::Number(Some(port)) = port.form() else {

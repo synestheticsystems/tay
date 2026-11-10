@@ -8,7 +8,9 @@ use crate::diagnostic::source::Loc;
 use crate::module::{Place, Want};
 use crate::syntax::expr::{self, Expr};
 
+use super::visit::NeedEdge;
 use crate::plan::Planner;
+use crate::plan::model::Because;
 use crate::plan::resolve::value::Resolved;
 use crate::plan::resolve::{Asker, Fail, Scope, ViewProblem};
 
@@ -31,30 +33,22 @@ impl User<'_> {
             }
             (_, Asker::Host) => format!("unit `{name}` runs on the host"),
             (_, Asker::Container) => format!("unit `{name}` runs in a container"),
-            (_, Asker::Unplaced) => {
-                format!("unit `{name}` runs neither on the host nor in a container")
-            }
+            (_, Asker::Nowhere) => format!("unit `{name}` is made, and runs nowhere"),
         }
     }
 }
 
-/// A value produced by running that a unit uses, which makes it a need.
-pub struct ProducedUse {
-    pub producer: String,
-    pub value: String,
-    pub loc: Loc,
-}
-
 impl Planner<'_> {
-    /// Resolves `expr` for `user` and checks it at its place. `None` when it
-    /// cannot be used; the reason is reported.
+    /// Resolves `expr` for `user` and checks it at its place. Each unit that
+    /// makes or produces a value it is built from is a need, added to
+    /// `needs`. `None` when it cannot be used; the reason is reported.
     pub fn use_value(
         &mut self,
         user: User<'_>,
         expr: &Expr,
         want: Want,
         place: Place,
-        produced: &mut Vec<ProducedUse>,
+        needs: &mut Vec<NeedEdge>,
     ) -> Option<Resolved> {
         let scope = Scope {
             unit: Some(user.unit),
@@ -68,12 +62,24 @@ impl Planner<'_> {
                 return None;
             }
         };
-        for (producer, value_name) in &value.producers {
-            produced.push(ProducedUse {
-                producer: producer.clone(),
-                value: value_name.clone(),
-                loc: expr.loc,
-            });
+        let built_from = value
+            .producers
+            .iter()
+            .map(|(unit, used)| (unit, Because::UsesProduced(used.clone())))
+            .chain(
+                value
+                    .made
+                    .iter()
+                    .map(|(unit, used)| (unit, Because::UsesMade(used.clone()))),
+            );
+        for (unit, because) in built_from {
+            if let Some(unit) = self.resolver.unit_index(unit) {
+                needs.push(NeedEdge {
+                    unit,
+                    loc: expr.loc,
+                    because,
+                });
+            }
         }
         if let Some(problem) = want.problem(&value.form()) {
             let what = match &expr.kind {
@@ -86,7 +92,7 @@ impl Planner<'_> {
         self.check_place(&value, place, expr.loc);
         if let Want::TemplateFile(content) = want {
             let path = value.exact_text()?;
-            self.use_template_file(user, &path, expr.loc, content, produced)?;
+            self.use_template_file(user, &path, expr.loc, content, needs)?;
         }
         Some(value)
     }
@@ -124,7 +130,7 @@ impl Planner<'_> {
         path: &str,
         at: Loc,
         content: Place,
-        produced: &mut Vec<ProducedUse>,
+        needs: &mut Vec<NeedEdge>,
     ) -> Option<()> {
         let file = self.root.join(path);
         let text = match fs::read_to_string(&file) {
@@ -149,7 +155,7 @@ impl Planner<'_> {
             loc: Loc::new(source, 1, 1),
             kind: expr::ExprKind::Text(pieces),
         };
-        self.use_value(user, &content_expr, Want::Scalar, content, produced)
+        self.use_value(user, &content_expr, Want::Scalar, content, needs)
             .map(|_| ())
     }
 }

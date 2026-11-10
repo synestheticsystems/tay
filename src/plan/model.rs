@@ -32,7 +32,9 @@ pub enum Mechanism {
     Module {
         module: &'static str,
         way: Option<String>,
-        runs: Running,
+        /// Where the unit runs; `None` for a unit that is made, which runs
+        /// nowhere.
+        runs: Option<Running>,
     },
 }
 
@@ -42,7 +44,6 @@ pub enum Running {
     OwnContainer,
     InsideUnit(String),
     OneOffContainer,
-    ByTay,
 }
 
 #[derive(Debug)]
@@ -51,12 +52,17 @@ pub struct Need {
     pub because: Because,
 }
 
-#[derive(Debug)]
+/// Why a unit needs another.
+#[derive(Clone, Debug)]
 pub enum Because {
     /// Written in `needs`.
     Written,
-    /// The unit uses this value, which the needed unit produces by running.
-    Uses(String),
+    /// The unit is a command run inside the other's container (`in`).
+    In,
+    /// The unit uses this value, which the other produces by running.
+    UsesProduced(String),
+    /// The unit uses this value of the other, which is made.
+    UsesMade(String),
 }
 
 #[derive(Debug)]

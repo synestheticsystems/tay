@@ -7,7 +7,9 @@ use crate::syntax::names::{self, NameAt};
 use crate::syntax::yaml::Node;
 
 use super::common::{self, environment, run_form};
-use crate::module::shape::{Given, GivenValue, Place, RestartDefault, Runs, Slot, UnitShape};
+use crate::module::shape::{
+    Given, GivenValue, Place, RestartDefault, Runs, Slot, UnitKind, UnitShape,
+};
 use crate::module::want::Want;
 use crate::module::{Cx, Module};
 
@@ -139,13 +141,13 @@ impl Module for Command {
             }
         }
         (cx.d.len() == errors_before).then_some(UnitShape {
-            runs,
+            kind: UnitKind::Runs(runs),
             slots,
             gives,
             outputs,
             production,
             ready_without_check: "when it exits with 0",
-            restart_by_default: RestartDefault::NEVER,
+            restart_by_default: RestartDefault::Never,
         })
     }
 }
@@ -167,11 +169,14 @@ fn unique(names: Vec<NameAt>, d: &mut crate::diagnostic::Diagnostics) -> Vec<Nam
 #[cfg(test)]
 mod tests {
     use crate::module::testing::check;
-    use crate::module::{GivenValue, Runs};
+    use crate::module::{GivenValue, Runs, UnitKind};
 
     #[test]
     fn where_a_command_runs() {
-        let runs = |with: &str| check("command", with).0.unwrap().runs;
+        let runs = |with: &str| match check("command", with).0.unwrap().kind {
+            UnitKind::Runs(runs) => runs,
+            UnitKind::Made => panic!("a command runs"),
+        };
         assert!(matches!(runs("run: [true]\n"), Runs::OnHost));
         assert!(
             matches!(runs("run: [true]\nin: database\n"), Runs::InsideUnit(u) if u.name == "database")

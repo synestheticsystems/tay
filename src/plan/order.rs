@@ -5,6 +5,8 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use crate::diagnostic::source::Loc;
 use crate::diagnostic::{Diagnostic, Diagnostics};
 
+use super::model::Because;
+
 /// `from` starts only after `to`.
 pub struct Edge {
     pub from: usize,
@@ -14,18 +16,20 @@ pub struct Edge {
 }
 
 pub enum EdgeKind {
-    Needs,
-    /// `from` uses this value, which `to` produces by running.
-    Uses(String),
+    Need(Because),
     After,
 }
 
 /// The units in an order they could start in: each after everything it
-/// needs or waits for, ties broken by name so every run gives the same order.
-/// Every circle is reported, whole, when there is none.
+/// needs or waits for. Of the units that could come next, one that is made
+/// comes first, so that a unit made only from values known before start is
+/// made before anything starts; other ties are broken by name, so every run
+/// gives the same order. Every circle is reported, whole, when there is no
+/// order.
 pub fn order(
     units: &[usize],
     name: &dyn Fn(usize) -> String,
+    made: &dyn Fn(usize) -> bool,
     edges: &[Edge],
     d: &mut Diagnostics,
 ) -> Option<Vec<usize>> {
@@ -40,14 +44,14 @@ pub fn order(
             .get_mut(&edge.from)
             .expect("edges are between units in the plan") += 1;
     }
-    let mut ready: BTreeSet<(String, usize)> = waiting
+    let key = |unit: usize| (!made(unit), name(unit), unit);
+    let mut ready: BTreeSet<(bool, String, usize)> = waiting
         .iter()
         .filter(|(_, count)| **count == 0)
-        .map(|(unit, _)| (name(*unit), *unit))
+        .map(|(unit, _)| key(*unit))
         .collect();
     let mut ordered = Vec::new();
-    while let Some(first) = ready.pop_first() {
-        let unit = first.1;
+    while let Some((_, _, unit)) = ready.pop_first() {
         ordered.push(unit);
         for edge in edges.iter().filter(|e| e.to == unit) {
             let count = waiting
@@ -55,7 +59,7 @@ pub fn order(
                 .expect("edges are between units in the plan");
             *count -= 1;
             if *count == 0 {
-                ready.insert((name(edge.from), edge.from));
+                ready.insert(key(edge.from));
             }
         }
     }
@@ -90,9 +94,15 @@ fn report_circles(edges: &[&Edge], name: &dyn Fn(usize) -> String, d: &mut Diagn
             .map(|edge| {
                 let (from, to) = (name(edge.from), name(edge.to));
                 match &edge.kind {
-                    EdgeKind::Needs => format!("`{from}` needs `{to}`"),
-                    EdgeKind::Uses(value) => {
+                    EdgeKind::Need(Because::Written) => format!("`{from}` needs `{to}`"),
+                    EdgeKind::Need(Because::In) => {
+                        format!("`{from}` runs inside the container of `{to}`")
+                    }
+                    EdgeKind::Need(Because::UsesProduced(value)) => {
                         format!("`{from}` uses `{value}`, which `{to}` produces by running")
+                    }
+                    EdgeKind::Need(Because::UsesMade(value)) => {
+                        format!("`{from}` uses `{value}`, which `{to}` makes")
                     }
                     EdgeKind::After => format!("`{from}` waits for `{to}` (`after`)"),
                 }
@@ -151,7 +161,7 @@ mod tests {
             .map(|(line, (from, to))| Edge {
                 from: *from,
                 to: *to,
-                kind: EdgeKind::Needs,
+                kind: EdgeKind::Need(Because::Written),
                 loc: Loc::new(source, line as u32 + 1, 1),
             })
             .collect()
@@ -161,16 +171,30 @@ mod tests {
         ["a", "b", "c", "d"][unit].to_string()
     }
 
+    fn runs(_: usize) -> bool {
+        false
+    }
+
     #[test]
     fn each_unit_comes_after_what_it_needs_and_ties_go_by_name() {
         let mut d = Diagnostics::default();
         let order = order(
             &[0, 1, 2, 3],
             &name,
+            &runs,
             &edges(&[(0, 2), (1, 2), (2, 3)]),
             &mut d,
         );
         assert_eq!(order, Some(vec![3, 2, 0, 1]));
+    }
+
+    #[test]
+    fn a_unit_that_is_made_comes_before_one_that_runs_when_either_could_come_next() {
+        let mut d = Diagnostics::default();
+        // `c` and `d` are made; `c` needs `a`, which runs.
+        let made = |unit: usize| unit >= 2;
+        let order = order(&[0, 1, 2, 3], &name, &made, &edges(&[(2, 0)]), &mut d);
+        assert_eq!(order, Some(vec![3, 0, 2, 1]));
     }
 
     #[test]
@@ -179,6 +203,7 @@ mod tests {
         let order = order(
             &[0, 1, 2, 3],
             &name,
+            &runs,
             &edges(&[(0, 1), (1, 2), (2, 0), (3, 0)]),
             &mut d,
         );
@@ -195,7 +220,7 @@ mod tests {
     #[test]
     fn a_unit_that_needs_itself_is_a_circle() {
         let mut d = Diagnostics::default();
-        assert_eq!(order(&[0], &name, &edges(&[(0, 0)]), &mut d), None);
+        assert_eq!(order(&[0], &name, &runs, &edges(&[(0, 0)]), &mut d), None);
         assert_eq!(
             d.into_sorted()[0].message,
             "a circle among units: `a` needs `a`"

@@ -3,7 +3,6 @@ params:
   owner: { default: app }
 unit:
   uses: command
-  needs: [database]
   with:
     in: database
     env: { DB: "${params.name}" }

@@ -5,7 +5,7 @@ use std::path::{Component, Path, PathBuf};
 
 use crate::diagnostic::Diagnostic;
 use crate::diagnostic::source::Loc;
-use crate::module::{Concern, Runs};
+use crate::module::{Concern, Runs, UnitKind};
 use crate::syntax::expr::{Expr, ExprKind, Piece, Target};
 use crate::syntax::names::NameAt;
 
@@ -29,7 +29,7 @@ impl Planner<'_> {
                 continue;
             };
             let mut refusals: Vec<(Loc, String)> = Vec::new();
-            if matches!(module.shape.runs, Runs::OnHost) {
+            if matches!(module.shape.kind, UnitKind::Runs(Runs::OnHost)) {
                 refusals.push((module.uses, "it runs on the host".to_string()));
             }
             for concern in &module.shape.production {
@@ -41,7 +41,7 @@ impl Planner<'_> {
                         refusals.push((*loc, "it runs preparation commands".to_string()));
                     }
                     Concern::MountsHostPath(from) => {
-                        let asker = Asker::of(&module.shape.runs);
+                        let asker = Asker::of(&module.shape.kind);
                         if let Some(why) = self.mount_outside(chosen.unit, from, asker) {
                             refusals.push((from.loc, why));
                         }

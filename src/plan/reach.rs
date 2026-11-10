@@ -13,9 +13,10 @@ use crate::diagnostic::Diagnostic;
 use crate::syntax::names::NameAt;
 
 use super::Planner;
-use super::model::{After, Because, Need, Plan};
+use super::model::{After, Need, Plan};
 use super::order::{self, Edge, EdgeKind};
 use super::production::Chosen;
+use crate::module::UnitKind;
 use visit::Visit;
 
 pub struct Reached {
@@ -85,10 +86,7 @@ impl Planner<'_> {
                 edges.push(Edge {
                     from: *unit,
                     to: need.unit,
-                    kind: match &need.because {
-                        Because::Written => EdgeKind::Needs,
-                        Because::Uses(value) => EdgeKind::Uses(value.clone()),
-                    },
+                    kind: EdgeKind::Need(need.because.clone()),
                     loc: need.loc,
                 });
             }
@@ -102,7 +100,19 @@ impl Planner<'_> {
             }
         }
         let units: Vec<usize> = reached.plans.iter().map(|(unit, _)| *unit).collect();
-        let order = order::order(&units, &name, &edges, &mut self.resolver.d)?;
+        let made: HashSet<usize> = reached
+            .chosen
+            .iter()
+            .filter(|chosen| {
+                stack.units[chosen.unit].ways[chosen.way]
+                    .module
+                    .as_ref()
+                    .is_some_and(|module| matches!(module.shape.kind, UnitKind::Made))
+            })
+            .map(|chosen| chosen.unit)
+            .collect();
+        let is_made = |unit: usize| made.contains(&unit);
+        let order = order::order(&units, &name, &is_made, &edges, &mut self.resolver.d)?;
         let mut plans: HashMap<usize, Visit> = reached.plans.into_iter().collect();
         let mut planned = Vec::new();
         for unit in order {

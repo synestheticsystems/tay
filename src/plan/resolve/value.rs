@@ -69,6 +69,9 @@ pub struct Resolved {
     /// The units whose running produces part of it, each with the value it
     /// produces. Empty when the value is known before start.
     pub producers: BTreeMap<String, String>,
+    /// The units that are made whose values it is built from, each with the
+    /// value used.
+    pub made: BTreeMap<String, String>,
 }
 
 /// A value exactly, when all of it is known before start and none of it is secret.
@@ -85,6 +88,7 @@ impl Resolved {
             shape,
             secrets: BTreeSet::new(),
             producers: BTreeMap::new(),
+            made: BTreeMap::new(),
         }
     }
 
@@ -96,11 +100,17 @@ impl Resolved {
         !self.secrets.is_empty()
     }
 
-    /// Takes in what `other` is built from: its secrets and its producers.
+    /// Takes in what `other` is built from: its secrets, its producers and
+    /// the units that are made it uses.
     pub fn absorb(&mut self, other: &Resolved) {
         self.secrets.extend(other.secrets.iter().cloned());
         for (unit, value) in &other.producers {
             self.producers
+                .entry(unit.clone())
+                .or_insert_with(|| value.clone());
+        }
+        for (unit, value) in &other.made {
+            self.made
                 .entry(unit.clone())
                 .or_insert_with(|| value.clone());
         }

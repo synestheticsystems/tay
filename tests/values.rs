@@ -88,6 +88,7 @@ fn using_an_address_orders_nothing_so_two_units_can_use_each_others_and_plan() {
         json!([
             { "unit": "portal-port", "because": "written" },
             { "unit": "login", "because": "written" },
+            { "unit": "login-port", "because": "uses_made_value", "value": "login-port.number" },
         ])
     );
 }
@@ -99,6 +100,7 @@ fn a_value_produced_by_running_adds_a_need_and_the_plan_says_why() {
         unit(&planned, "login")["needs"],
         json!([
             { "unit": "login-port", "because": "written" },
+            { "unit": "portal-port", "because": "uses_made_value", "value": "portal-port.number" },
             { "unit": "issuer", "because": "uses_produced_value", "value": "issuer.token" },
         ])
     );

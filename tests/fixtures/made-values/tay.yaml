@@ -1,0 +1,31 @@
+format: 1
+stack: made-values
+up: [web, a-worker]
+units:
+  web-port: { uses: port }
+  api-port: { uses: port }
+  unused-port: { uses: port }
+  api:
+    uses: process
+    with: { command: [api] }
+    gives:
+      http: { port: "${api-port.number}", scheme: http }
+  zz-config:
+    uses: file
+    with: { content: "port = ${web-port.number}" }
+  issuer:
+    uses: command
+    with: { run: [issue], produces: [token] }
+  token-file:
+    uses: file
+    with: { content: "${issuer.token}" }
+  a-worker:
+    uses: process
+    with: { command: [work] }
+  web:
+    uses: process
+    with:
+      command: [serve, --port, "${web-port.number}", --api, "${api.http.url}"]
+      env:
+        CONFIG: "${zz-config.path}"
+        TOKEN_FILE: "${token-file.path}"

@@ -80,7 +80,7 @@ fn an_unpublished_container_port_used_from_the_host_is_an_error_naming_both_unit
             "tay.yaml:18:43: unit `box-user` runs in a container, and uses here an address of unit `hidden` as the host sees it, but `hidden` publishes no host port for its port 5432",
             "  tay.yaml:8:11: the endpoint of `hidden` is defined here",
             // A file is read by whoever reads it, so it must say which view.
-            "tay.yaml:21:22: unit `config` runs neither on the host nor in a container, so `${hidden.db}` must say which view of the address it wants: add `@host` or `@net`",
+            "tay.yaml:21:22: unit `config` is made, and runs nowhere, so `${hidden.db}` must say which view of the address it wants: add `@host` or `@net`",
             "  tay.yaml:8:11: the endpoint is defined here",
         ]
     );

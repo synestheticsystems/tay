@@ -1,49 +1,68 @@
 Plan for stack `shop`, profile `dev`, in <root>
-7 units come up, in an order they could start in.
+10 units come up, in an order they could start in.
 
-1. build: uses `command`, runs on the host
+1. api-port: uses `port`, is made
+   ready: when it is held
+   restart: never
+   gives number = <port: api-port>
+
+2. db-password: uses `secret`, is made
+   ready: when it has been generated
+   restart: never
+   gives value = <secret> (secret)
+
+3. db-port: uses `port`, is made
+   ready: when it is held
+   restart: never
+   gives number = <port: db-port>
+
+4. web-port: uses `port`, is made
+   ready: when it is held
+   restart: never
+   gives number = <port: web-port>
+
+5. build: uses `command`, runs on the host
    ready: when it exits with 0
    restart: never
    gives outputs.server = <output: build.server> (produced by running build)
 
-2. database: uses `container`, runs in its own container
+6. database: uses `container`, runs in its own container
+   needs db-password, because it uses db-password.value
+   needs db-port, because it uses db-port.number
    ready: command check of db ready, within 2m
    restart: on failure, up to 5 attempts
    gives sql
      from the host: 127.0.0.1:<port: db-port>
      from a container: database:5432
 
-3. api: uses `process` (way `source`), runs on the host
+7. api: uses `process` (way `source`), runs on the host
    The shop's API.
    needs database
    needs build, because it uses build.outputs.server, which build produces by running
+   needs db-port, because it uses db-port.number
    ready: when it has started
    restart: on failure, up to 5 attempts
    gives http
      from the host: http://127.0.0.1:<port: api-port>
      from a container: http://host.docker.internal:<port: api-port>
 
-4. app-db: uses `command`, runs inside the container of `database`
-   needs database
+8. app-db: uses `command`, runs inside the container of `database`
+   needs database, because it runs inside its container
    ready: when it exits with 0
    restart: never
 
-5. web-port: uses `port`, tay does it itself
-   ready: when it is held
-   restart: never
-   gives number = <port: web-port>
-
-6. web: uses `process`, runs on the host
+9. web: uses `process`, runs on the host
    The shop's site, served by its development server.
    needs web-port
    needs api
+   needs api-port, because it uses api-port.number
    ready: http check of http://127.0.0.1:<port: web-port>/, within 2m
    restart: on failure, up to 5 attempts
    gives site
      from the host: http://127.0.0.1:<port: web-port>
      from a container: http://host.docker.internal:<port: web-port>
 
-7. core: a group
+10. core: a group
    Everything the shop needs to serve a page.
    needs web
    needs app-db

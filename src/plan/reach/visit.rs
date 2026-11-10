@@ -3,9 +3,9 @@
 
 use crate::definition::{Check, Way};
 use crate::diagnostic::source::Loc;
-use crate::module::{Place, RestartDefault, Runs, Want};
+use crate::module::{Place, RestartDefault, Runs, UnitKind, Want};
 
-use super::usage::{ProducedUse, User};
+use super::usage::User;
 use crate::plan::Planner;
 use crate::plan::model::{
     Because, Mechanism, PlannedUnit, Readiness, RestartPolicy, Running, Shown,
@@ -16,8 +16,14 @@ use crate::plan::resolve::value::Resolved;
 const READINESS: Place = Place::Readable("a readiness check");
 const WATCHED: Place = Place::Readable("a watched folder");
 
-/// A unit `needs` another: as written, or because it uses a value the other
-/// produces by running.
+/// What `restart.on` may be.
+const RESTART_ON: &[&str] = &["failure", "always", "never"];
+
+/// The attempts a unit that restarts gets when its `restart` does not say.
+const RESTART_ATTEMPTS: i64 = 5;
+
+/// A unit needs another: as written, because it runs inside the other's
+/// container, or because it uses a value the other makes or produces.
 pub struct NeedEdge {
     pub unit: usize,
     pub loc: Loc,
@@ -37,7 +43,8 @@ impl Planner<'_> {
         let stack = self.resolver.stack;
         let definition = &stack.units[unit];
         let way = &definition.ways[way];
-        let mut produced = Vec::new();
+        // The needs that using values makes, in the order they are found.
+        let mut uses = Vec::new();
         let (mechanism, ready, restart, watch, gives) = match &way.module {
             None => (
                 Mechanism::Group,
@@ -47,32 +54,30 @@ impl Planner<'_> {
                 Vec::new(),
             ),
             Some(module) => {
-                let runs = &module.shape.runs;
+                let kind = &module.shape.kind;
                 let user = User {
                     unit,
                     name: &definition.name.name,
-                    asker: Asker::of(runs),
+                    asker: Asker::of(kind),
                     readiness: false,
                 };
                 for slot in &module.shape.slots {
-                    self.use_value(user, &slot.expr, slot.want, slot.place, &mut produced);
+                    self.use_value(user, &slot.expr, slot.want, slot.place, &mut uses);
                 }
-                let running = self.running(runs);
-                let ready =
-                    self.readiness(user, way, module.shape.ready_without_check, &mut produced);
-                let restart =
-                    self.restart(user, way, module.shape.restart_by_default, &mut produced);
-                let watch = self.watch(user, way, &mut produced);
+                let runs = self.running(kind);
+                let ready = self.readiness(user, way, module.shape.ready_without_check, &mut uses);
+                let restart = self.restart(user, way, module.shape.restart_by_default, &mut uses);
+                let watch = self.watch(user, way, &mut uses);
                 let gives = self.gives(unit, way);
                 let mechanism = Mechanism::Module {
                     module: module.module.name(),
                     way: way.name.as_ref().map(|name| name.name.clone()),
-                    runs: running,
+                    runs,
                 };
                 (mechanism, ready, restart.map(Some), watch, gives)
             }
         };
-        let needs = self.needs(way, produced);
+        let needs = self.needs(unit, way, uses);
         let after = way
             .after
             .iter()
@@ -98,15 +103,23 @@ impl Planner<'_> {
         }
     }
 
-    fn running(&mut self, runs: &Runs) -> Running {
-        match runs {
+    /// Where the unit runs, as the plan says it; `None` for a unit that is
+    /// made. A unit run inside another's container needs that container to
+    /// be one of its own.
+    fn running(&mut self, kind: &UnitKind) -> Option<Running> {
+        let UnitKind::Runs(runs) = kind else {
+            return None;
+        };
+        Some(match runs {
             Runs::OnHost => Running::OnHost,
             Runs::OwnContainer { .. } => Running::OwnContainer,
             Runs::OneOffContainer => Running::OneOffContainer,
-            Runs::ByTay => Running::ByTay,
             Runs::InsideUnit(inner) => {
                 if let Some(index) = self.resolver.unit_index(&inner.name)
-                    && !matches!(self.resolver.runs(index), Some(Runs::OwnContainer { .. }))
+                    && !matches!(
+                        self.resolver.kind(index),
+                        Some(UnitKind::Runs(Runs::OwnContainer { .. }))
+                    )
                 {
                     self.resolver.d.error(
                         inner.loc,
@@ -118,7 +131,7 @@ impl Planner<'_> {
                 }
                 Running::InsideUnit(inner.name.clone())
             }
-        }
+        })
     }
 
     fn readiness(
@@ -126,7 +139,7 @@ impl Planner<'_> {
         user: User<'_>,
         way: &Way,
         without_check: &'static str,
-        produced: &mut Vec<ProducedUse>,
+        uses: &mut Vec<NeedEdge>,
     ) -> Option<Readiness> {
         let Some(ready) = &way.ready else {
             return Some(Readiness::Default(without_check));
@@ -140,25 +153,25 @@ impl Planner<'_> {
         let (check, target): (&'static str, Vec<Option<Resolved>>) = match &ready.check {
             Check::Http(url) => (
                 "http",
-                vec![self.use_value(from_host, url, Want::Text, READINESS, produced)],
+                vec![self.use_value(from_host, url, Want::Text, READINESS, uses)],
             ),
             Check::Tcp(address) => (
                 "tcp",
-                vec![self.use_value(from_host, address, Want::Text, READINESS, produced)],
+                vec![self.use_value(from_host, address, Want::Text, READINESS, uses)],
             ),
             Check::Log(line) => (
                 "log",
-                vec![self.use_value(user, line, Want::Text, READINESS, produced)],
+                vec![self.use_value(user, line, Want::Text, READINESS, uses)],
             ),
             Check::Command(command) => (
                 "command",
                 command
                     .iter()
-                    .map(|word| self.use_value(user, word, Want::Scalar, READINESS, produced))
+                    .map(|word| self.use_value(user, word, Want::Scalar, READINESS, uses))
                     .collect(),
             ),
         };
-        let within = self.use_value(user, &ready.within, Want::Duration, READINESS, produced);
+        let within = self.use_value(user, &ready.within, Want::Duration, READINESS, uses);
         let target: Option<Vec<Resolved>> = target.into_iter().collect();
         Some(Readiness::Check {
             check,
@@ -172,14 +185,14 @@ impl Planner<'_> {
         user: User<'_>,
         way: &Way,
         default: RestartDefault,
-        produced: &mut Vec<ProducedUse>,
+        uses: &mut Vec<NeedEdge>,
     ) -> Option<RestartPolicy> {
         const RESTART: Place = Place::Readable("a restart policy");
         let written = way.restart.as_ref();
-        let mut on = Shown::word(default.on);
+        let mut on = Shown::word(default.word());
         if let Some(expr) = written.and_then(|r| r.on.as_ref()) {
-            let want = Want::OneOf(&["failure", "always", "never"]);
-            on = Shown::of(&self.use_value(user, expr, want, RESTART, produced)?);
+            let want = Want::OneOf(RESTART_ON);
+            on = Shown::of(&self.use_value(user, expr, want, RESTART, uses)?);
         }
         let attempts = match written.and_then(|r| r.attempts.as_ref()) {
             Some(expr) => Some(Shown::of(&self.use_value(
@@ -187,26 +200,19 @@ impl Planner<'_> {
                 expr,
                 Want::Number,
                 RESTART,
-                produced,
+                uses,
             )?)),
-            None if on.text == "never" => None,
-            None => Some(Shown::number(
-                default.attempts.unwrap_or(RestartDefault::ATTEMPTS),
-            )),
+            None if on.text == RestartDefault::Never.word() => None,
+            None => Some(Shown::number(RESTART_ATTEMPTS)),
         };
         Some(RestartPolicy { on, attempts })
     }
 
-    fn watch(
-        &mut self,
-        user: User<'_>,
-        way: &Way,
-        produced: &mut Vec<ProducedUse>,
-    ) -> Vec<Option<Shown>> {
+    fn watch(&mut self, user: User<'_>, way: &Way, uses: &mut Vec<NeedEdge>) -> Vec<Option<Shown>> {
         way.watch
             .iter()
             .map(|folder| {
-                let value = self.use_value(user, folder, Want::Text, WATCHED, produced)?;
+                let value = self.use_value(user, folder, Want::Text, WATCHED, uses)?;
                 // A production profile refuses any watch, so where it points does not matter there.
                 if !self.production
                     && let Some(path) = value.exact_text()
@@ -223,8 +229,10 @@ impl Planner<'_> {
             .collect()
     }
 
-    /// The needs as written, then each unit whose produced value is used.
-    fn needs(&mut self, way: &Way, produced: Vec<ProducedUse>) -> Vec<NeedEdge> {
+    /// The needs as written, then the container a command runs inside, then
+    /// each unit whose value is used, each unit once. Using a value of its
+    /// own is no need for a unit that is made.
+    fn needs(&mut self, unit: usize, way: &Way, uses: Vec<NeedEdge>) -> Vec<NeedEdge> {
         let mut needs: Vec<NeedEdge> = way
             .needs
             .iter()
@@ -236,18 +244,22 @@ impl Planner<'_> {
                 })
             })
             .collect();
-        for used in produced {
-            let Some(unit) = self.resolver.unit_index(&used.producer) else {
-                continue;
-            };
-            if needs.iter().any(|need| need.unit == unit) {
+        if let Some(module) = &way.module
+            && let UnitKind::Runs(Runs::InsideUnit(inner)) = &module.shape.kind
+            && let Some(container) = self.resolver.unit_index(&inner.name)
+        {
+            needs.push(NeedEdge {
+                unit: container,
+                loc: inner.loc,
+                because: Because::In,
+            });
+        }
+        for used in uses {
+            let own_made = used.unit == unit && matches!(used.because, Because::UsesMade(_));
+            if own_made || needs.iter().any(|need| need.unit == used.unit) {
                 continue;
             }
-            needs.push(NeedEdge {
-                unit,
-                loc: used.loc,
-                because: Because::Uses(used.value),
-            });
+            needs.push(used);
         }
         needs
     }

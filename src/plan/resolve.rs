@@ -20,7 +20,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use crate::definition::Stack;
 use crate::diagnostic::source::Loc;
 use crate::diagnostic::{Diagnostic, Diagnostics};
-use crate::module::Runs;
+use crate::module::{Runs, UnitKind};
 use crate::syntax::expr::{Expr, ExprKind, Part, Piece, Reference, Target, Type, View};
 
 use super::choices::{self, Layered};
@@ -31,19 +31,19 @@ use value::{Bit, Hole, Resolved, Shape};
 pub enum Asker {
     Host,
     Container,
-    /// A unit tay handles itself (a port, a file): it runs nowhere, so an
-    /// address used there must say which view it wants.
-    Unplaced,
+    /// A unit that is made: it runs nowhere, so an address used there must
+    /// say which view it wants.
+    Nowhere,
 }
 
 impl Asker {
-    pub fn of(runs: &Runs) -> Asker {
-        match runs {
-            Runs::OnHost => Asker::Host,
-            Runs::OwnContainer { .. } | Runs::InsideUnit(_) | Runs::OneOffContainer => {
-                Asker::Container
-            }
-            Runs::ByTay => Asker::Unplaced,
+    pub fn of(kind: &UnitKind) -> Asker {
+        match kind {
+            UnitKind::Runs(Runs::OnHost) => Asker::Host,
+            UnitKind::Runs(
+                Runs::OwnContainer { .. } | Runs::InsideUnit(_) | Runs::OneOffContainer,
+            ) => Asker::Container,
+            UnitKind::Made => Asker::Nowhere,
         }
     }
 }
@@ -147,14 +147,15 @@ impl<'s> Resolver<'s> {
         chosen
     }
 
-    /// Where `unit` runs under its chosen way; `None` for a group.
-    pub fn runs(&mut self, unit: usize) -> Option<&'s Runs> {
+    /// Whether `unit` runs, and where, under its chosen way; `None` for a
+    /// group.
+    pub fn kind(&mut self, unit: usize) -> Option<&'s UnitKind> {
         let stack = self.stack;
         let (way, _) = self.way(unit)?;
         stack.units[unit].ways[way]
             .module
             .as_ref()
-            .map(|module| &module.shape.runs)
+            .map(|module| &module.shape.kind)
     }
 
     pub fn resolve(&mut self, expr: &Expr, scope: Scope) -> Res {

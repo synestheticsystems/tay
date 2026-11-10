@@ -8,7 +8,170 @@
     "units": [
       {
         "after": [],
-        "way": null,
+        "doc": null,
+        "gives": [
+          {
+            "endpoint": false,
+            "from_containers": {
+              "text": "<port: api-port>",
+              "value": null
+            },
+            "from_host": {
+              "text": "<port: api-port>",
+              "value": null
+            },
+            "known_before_start": true,
+            "name": "number",
+            "produced_by": [],
+            "secret": false
+          }
+        ],
+        "group": false,
+        "made": true,
+        "module": "port",
+        "name": "api-port",
+        "needs": [],
+        "ready": {
+          "check": null,
+          "without_check": "when it is held"
+        },
+        "restart": {
+          "attempts": null,
+          "on": {
+            "text": "never",
+            "value": "never"
+          }
+        },
+        "runs": null,
+        "runs_inside": null,
+        "watch": [],
+        "way": null
+      },
+      {
+        "after": [],
+        "doc": null,
+        "gives": [
+          {
+            "endpoint": false,
+            "from_containers": {
+              "text": "<secret>",
+              "value": null
+            },
+            "from_host": {
+              "text": "<secret>",
+              "value": null
+            },
+            "known_before_start": true,
+            "name": "value",
+            "produced_by": [],
+            "secret": true
+          }
+        ],
+        "group": false,
+        "made": true,
+        "module": "secret",
+        "name": "db-password",
+        "needs": [],
+        "ready": {
+          "check": null,
+          "without_check": "when it has been generated"
+        },
+        "restart": {
+          "attempts": null,
+          "on": {
+            "text": "never",
+            "value": "never"
+          }
+        },
+        "runs": null,
+        "runs_inside": null,
+        "watch": [],
+        "way": null
+      },
+      {
+        "after": [],
+        "doc": null,
+        "gives": [
+          {
+            "endpoint": false,
+            "from_containers": {
+              "text": "<port: db-port>",
+              "value": null
+            },
+            "from_host": {
+              "text": "<port: db-port>",
+              "value": null
+            },
+            "known_before_start": true,
+            "name": "number",
+            "produced_by": [],
+            "secret": false
+          }
+        ],
+        "group": false,
+        "made": true,
+        "module": "port",
+        "name": "db-port",
+        "needs": [],
+        "ready": {
+          "check": null,
+          "without_check": "when it is held"
+        },
+        "restart": {
+          "attempts": null,
+          "on": {
+            "text": "never",
+            "value": "never"
+          }
+        },
+        "runs": null,
+        "runs_inside": null,
+        "watch": [],
+        "way": null
+      },
+      {
+        "after": [],
+        "doc": null,
+        "gives": [
+          {
+            "endpoint": false,
+            "from_containers": {
+              "text": "<port: web-port>",
+              "value": null
+            },
+            "from_host": {
+              "text": "<port: web-port>",
+              "value": null
+            },
+            "known_before_start": true,
+            "name": "number",
+            "produced_by": [],
+            "secret": false
+          }
+        ],
+        "group": false,
+        "made": true,
+        "module": "port",
+        "name": "web-port",
+        "needs": [],
+        "ready": {
+          "check": null,
+          "without_check": "when it is held"
+        },
+        "restart": {
+          "attempts": null,
+          "on": {
+            "text": "never",
+            "value": "never"
+          }
+        },
+        "runs": null,
+        "runs_inside": null,
+        "watch": [],
+        "way": null
+      },
+      {
+        "after": [],
         "doc": null,
         "gives": [
           {
@@ -30,6 +193,7 @@
           }
         ],
         "group": false,
+        "made": false,
         "module": "command",
         "name": "build",
         "needs": [],
@@ -46,11 +210,11 @@
         },
         "runs": "host",
         "runs_inside": null,
-        "watch": []
+        "watch": [],
+        "way": null
       },
       {
         "after": [],
-        "way": null,
         "doc": null,
         "gives": [
           {
@@ -70,9 +234,21 @@
           }
         ],
         "group": false,
+        "made": false,
         "module": "container",
         "name": "database",
-        "needs": [],
+        "needs": [
+          {
+            "because": "uses_made_value",
+            "unit": "db-password",
+            "value": "db-password.value"
+          },
+          {
+            "because": "uses_made_value",
+            "unit": "db-port",
+            "value": "db-port.number"
+          }
+        ],
         "ready": {
           "check": "command",
           "target": [
@@ -102,11 +278,11 @@
         },
         "runs": "own_container",
         "runs_inside": null,
-        "watch": []
+        "watch": [],
+        "way": null
       },
       {
         "after": [],
-        "way": "source",
         "doc": "The shop's API.",
         "gives": [
           {
@@ -126,6 +302,7 @@
           }
         ],
         "group": false,
+        "made": false,
         "module": "process",
         "name": "api",
         "needs": [
@@ -137,6 +314,11 @@
             "because": "uses_produced_value",
             "unit": "build",
             "value": "build.outputs.server"
+          },
+          {
+            "because": "uses_made_value",
+            "unit": "db-port",
+            "value": "db-port.number"
           }
         ],
         "ready": {
@@ -155,19 +337,20 @@
         },
         "runs": "host",
         "runs_inside": null,
-        "watch": []
+        "watch": [],
+        "way": "source"
       },
       {
         "after": [],
-        "way": null,
         "doc": null,
         "gives": [],
         "group": false,
+        "made": false,
         "module": "command",
         "name": "app-db",
         "needs": [
           {
-            "because": "written",
+            "because": "in",
             "unit": "database"
           }
         ],
@@ -184,51 +367,11 @@
         },
         "runs": "inside_unit",
         "runs_inside": "database",
-        "watch": []
+        "watch": [],
+        "way": null
       },
       {
         "after": [],
-        "way": null,
-        "doc": null,
-        "gives": [
-          {
-            "endpoint": false,
-            "from_containers": {
-              "text": "<port: web-port>",
-              "value": null
-            },
-            "from_host": {
-              "text": "<port: web-port>",
-              "value": null
-            },
-            "known_before_start": true,
-            "name": "number",
-            "produced_by": [],
-            "secret": false
-          }
-        ],
-        "group": false,
-        "module": "port",
-        "name": "web-port",
-        "needs": [],
-        "ready": {
-          "check": null,
-          "without_check": "when it is held"
-        },
-        "restart": {
-          "attempts": null,
-          "on": {
-            "text": "never",
-            "value": "never"
-          }
-        },
-        "runs": "tay",
-        "runs_inside": null,
-        "watch": []
-      },
-      {
-        "after": [],
-        "way": null,
         "doc": "The shop's site, served by its development server.",
         "gives": [
           {
@@ -248,6 +391,7 @@
           }
         ],
         "group": false,
+        "made": false,
         "module": "process",
         "name": "web",
         "needs": [
@@ -258,6 +402,11 @@
           {
             "because": "written",
             "unit": "api"
+          },
+          {
+            "because": "uses_made_value",
+            "unit": "api-port",
+            "value": "api-port.number"
           }
         ],
         "ready": {
@@ -285,14 +434,15 @@
         },
         "runs": "host",
         "runs_inside": null,
-        "watch": []
+        "watch": [],
+        "way": null
       },
       {
         "after": [],
-        "way": null,
         "doc": "Everything the shop needs to serve a page.",
         "gives": [],
         "group": true,
+        "made": false,
         "module": null,
         "name": "core",
         "needs": [
@@ -309,7 +459,8 @@
         "restart": null,
         "runs": null,
         "runs_inside": null,
-        "watch": []
+        "watch": [],
+        "way": null
       }
     ]
   },

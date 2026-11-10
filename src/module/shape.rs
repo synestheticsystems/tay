@@ -14,7 +14,7 @@ use super::want::{Form, Want};
 /// works from this alone.
 #[derive(Clone, Debug)]
 pub struct UnitShape {
-    pub runs: Runs,
+    pub kind: UnitKind,
     /// Every value the unit's settings use, with what each must be and where
     /// it goes.
     pub slots: Vec<Slot>,
@@ -23,15 +23,29 @@ pub struct UnitShape {
     /// The files the unit builds, used as `${unit.outputs.name}`.
     pub outputs: Vec<Given>,
     /// What in these settings a production profile refuses, beyond running on
-    /// the host, which the planner sees in `runs`.
+    /// the host, which the planner sees in `kind`.
     pub production: Vec<Concern>,
     /// How the unit is known to be ready when it has no `ready` check.
     pub ready_without_check: &'static str,
     pub restart_by_default: RestartDefault,
 }
 
-/// Where a unit runs. It decides which view of an address the unit's own
-/// settings receive, and how others reach an address the unit gives.
+/// The module's answers to the two questions the planner asks of every
+/// unit: is it something that runs or something that is made, and where
+/// does it run.
+#[derive(Clone, Debug)]
+pub enum UnitKind {
+    /// It runs, where `Runs` says. Using an address it gives orders nothing.
+    Runs(Runs),
+    /// It is made and then simply exists: a port held, a file written, a
+    /// secret generated. It runs nowhere, and using any of its values is a
+    /// need for it.
+    Made,
+}
+
+/// Where a unit that runs runs. It decides which view of an address the
+/// unit's own settings receive, and how others reach an address the unit
+/// gives.
 #[derive(Clone, Debug)]
 pub enum Runs {
     OnHost,
@@ -44,8 +58,6 @@ pub enum Runs {
     InsideUnit(NameAt),
     /// In a container made for one run, on the environment's network.
     OneOffContainer,
-    /// Nowhere: tay does the work itself (holds a port, writes a file).
-    ByTay,
 }
 
 /// A container port made reachable from the host.
@@ -118,24 +130,20 @@ pub enum Concern {
     MountsHostPath(Expr),
 }
 
+/// What a unit restarts on when its `restart` does not say: failure for a
+/// unit that keeps running, never for one that runs once or is made.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct RestartDefault {
-    pub on: &'static str,
-    pub attempts: Option<i64>,
+pub enum RestartDefault {
+    OnFailure,
+    Never,
 }
 
 impl RestartDefault {
-    /// The attempts a unit that restarts gets when its policy does not say.
-    /// The format gives 5 for the units that restart by default, and says
-    /// nothing for a unit whose `restart` asks for it; the same 5 is used.
-    pub const ATTEMPTS: i64 = 5;
-
-    pub const NEVER: RestartDefault = RestartDefault {
-        on: "never",
-        attempts: None,
-    };
-    pub const ON_FAILURE: RestartDefault = RestartDefault {
-        on: "failure",
-        attempts: Some(RestartDefault::ATTEMPTS),
-    };
+    /// The word `restart.on` would be written with.
+    pub fn word(self) -> &'static str {
+        match self {
+            RestartDefault::OnFailure => "failure",
+            RestartDefault::Never => "never",
+        }
+    }
 }

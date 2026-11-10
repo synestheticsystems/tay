@@ -4,7 +4,7 @@
 
 use crate::definition::{Check, Choices, GiveValue, SettingValue, Stack, Unit, Way};
 use crate::diagnostic::{Diagnostic, Diagnostics};
-use crate::module::{GivenValue, Runs};
+use crate::module::{GivenValue, Runs, UnitKind};
 use crate::syntax::expr::{Expr, Reference, Target, UnitRef};
 use crate::syntax::names::NameAt;
 
@@ -15,9 +15,21 @@ pub fn check(stack: &Stack, places: &[&Choices], d: &mut Diagnostics) {
                 unit_named(stack, name, d);
             }
             if let Some(module) = &way.module
-                && let Runs::InsideUnit(inner) = &module.shape.runs
+                && let UnitKind::Runs(Runs::InsideUnit(inner)) = &module.shape.kind
             {
                 unit_named(stack, inner, d);
+                if let Some(written) = way.needs.iter().find(|need| need.name == inner.name) {
+                    d.push(
+                        Diagnostic::new(
+                            written.loc,
+                            format!(
+                                "`{}` is a need already, through `in`; it is not written again in `needs`",
+                                inner.name
+                            ),
+                        )
+                        .with(inner.loc, "`in` names it here"),
+                    );
+                }
             }
             for expr in exprs(way) {
                 references(stack, expr, Some(unit), d);

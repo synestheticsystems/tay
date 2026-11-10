@@ -6,7 +6,9 @@ use crate::syntax::names;
 use crate::syntax::yaml::{Kind, Node, Scalar};
 
 use super::common::{self, argv, environment};
-use crate::module::shape::{Concern, Place, Published, RestartDefault, Runs, Slot, UnitShape};
+use crate::module::shape::{
+    Concern, Place, Published, RestartDefault, Runs, Slot, UnitKind, UnitShape,
+};
 use crate::module::want::Want;
 use crate::module::{Cx, Module};
 
@@ -128,13 +130,13 @@ impl Module for Container {
             }
         }
         (cx.d.len() == errors_before).then_some(UnitShape {
-            runs: Runs::OwnContainer { published },
+            kind: UnitKind::Runs(Runs::OwnContainer { published }),
             slots,
             gives: Vec::new(),
             outputs: Vec::new(),
             production,
             ready_without_check: "when its image's own health check passes, or when it has started if the image has none",
-            restart_by_default: RestartDefault::ON_FAILURE,
+            restart_by_default: RestartDefault::OnFailure,
         })
     }
 }
@@ -252,8 +254,8 @@ fn label_key_problem(key: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use crate::module::Runs;
     use crate::module::testing::check;
+    use crate::module::{Runs, UnitKind};
 
     #[test]
     fn exactly_one_of_image_and_build() {
@@ -276,7 +278,7 @@ mod tests {
             "image: db\npublish:\n  5432: \"${db-port.number}\"\n  8080: { port: 18080, address: 0.0.0.0 }\n",
         );
         assert!(errors.is_empty(), "{errors:?}");
-        let Runs::OwnContainer { published } = shape.unwrap().runs else {
+        let UnitKind::Runs(Runs::OwnContainer { published }) = shape.unwrap().kind else {
             panic!("a container runs in its own container");
         };
         assert_eq!(

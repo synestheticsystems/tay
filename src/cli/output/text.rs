@@ -33,7 +33,11 @@ fn unit_lines(lines: &mut Vec<String>, number: usize, unit: &PlannedUnit) {
                 .as_ref()
                 .map(|way| format!(" (way `{way}`)"))
                 .unwrap_or_default();
-            format!("uses `{module}`{way}, {}", running(runs))
+            let runs = match runs {
+                Some(runs) => running(runs),
+                None => "is made".to_string(),
+            };
+            format!("uses `{module}`{way}, {runs}")
         }
     };
     lines.push(format!("{number}. {}: {mechanism}", unit.name));
@@ -41,12 +45,14 @@ fn unit_lines(lines: &mut Vec<String>, number: usize, unit: &PlannedUnit) {
         lines.push(format!("   {doc}"));
     }
     for need in &unit.needs {
+        let unit = &need.unit;
         lines.push(match &need.because {
-            Because::Written => format!("   needs {}", need.unit),
-            Because::Uses(value) => format!(
-                "   needs {}, because it uses {value}, which {} produces by running",
-                need.unit, need.unit
+            Because::Written => format!("   needs {unit}"),
+            Because::In => format!("   needs {unit}, because it runs inside its container"),
+            Because::UsesProduced(value) => format!(
+                "   needs {unit}, because it uses {value}, which {unit} produces by running"
             ),
+            Because::UsesMade(value) => format!("   needs {unit}, because it uses {value}"),
         });
     }
     for after in &unit.after {
@@ -98,7 +104,6 @@ fn running(runs: &Running) -> String {
         Running::OwnContainer => "runs in its own container".to_string(),
         Running::InsideUnit(unit) => format!("runs inside the container of `{unit}`"),
         Running::OneOffContainer => "runs in a container made for the run".to_string(),
-        Running::ByTay => "tay does it itself".to_string(),
     }
 }
 

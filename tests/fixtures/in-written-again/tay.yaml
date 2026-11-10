@@ -1,0 +1,6 @@
+format: 1
+stack: in-written-again
+up: [again]
+units:
+  db: { uses: container, with: { image: example/db } }
+  again: { uses: command, needs: [db], with: { in: db, run: [again] } }

@@ -4,7 +4,7 @@ use crate::syntax::fields::{self, Fields};
 use crate::syntax::names::NameAt;
 use crate::syntax::yaml::Node;
 
-use crate::module::shape::{Given, GivenValue, Place, RestartDefault, Runs, Slot, UnitShape};
+use crate::module::shape::{Given, GivenValue, Place, RestartDefault, Slot, UnitKind, UnitShape};
 use crate::module::want::Want;
 use crate::module::{Cx, Module};
 
@@ -71,7 +71,7 @@ impl Module for Secret {
             (None, false) => {}
         }
         (cx.d.len() == errors_before).then(|| UnitShape {
-            runs: Runs::ByTay,
+            kind: UnitKind::Made,
             slots,
             gives: gives
                 .iter()
@@ -86,7 +86,7 @@ impl Module for Secret {
             outputs: Vec::new(),
             production: Vec::new(),
             ready_without_check: "when it has been generated",
-            restart_by_default: RestartDefault::NEVER,
+            restart_by_default: RestartDefault::Never,
         })
     }
 }

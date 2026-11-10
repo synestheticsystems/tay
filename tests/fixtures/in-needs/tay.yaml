@@ -1,0 +1,6 @@
+format: 1
+stack: in-needs
+up: [setup]
+units:
+  db: { uses: container, with: { image: example/db } }
+  setup: { uses: command, with: { in: db, run: [setup] } }

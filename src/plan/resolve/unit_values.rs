@@ -1,7 +1,7 @@
 //! The values units give, and the files they build.
 
 use crate::definition::GiveValue;
-use crate::module::GivenValue;
+use crate::module::{GivenValue, UnitKind};
 use crate::plan::resolve::value::{Hole, Resolved, Shape};
 use crate::syntax::expr::{Part, Reference, Type, UnitRef};
 
@@ -73,7 +73,7 @@ impl Resolver<'_> {
             unit: Some(owner),
             asker,
         };
-        match &give.value {
+        let mut value = match &give.value {
             GiveValue::Value(expr) => self.keyed(key, None, reference.loc, asker, |this| {
                 this.resolve(expr, scope)
             }),
@@ -113,7 +113,14 @@ impl Resolver<'_> {
             GiveValue::Module(GivenValue::Output) => {
                 unreachable!("outputs are not among the values a unit gives")
             }
+        }?;
+        if let Some(UnitKind::Made) = self.kind(owner) {
+            value
+                .made
+                .entry(unit.name.name.clone())
+                .or_insert_with(|| format!("{}.{name}", unit.name.name));
         }
+        Ok(value)
     }
 
     /// `${unit.outputs.name}`: a file the unit builds when it runs.
