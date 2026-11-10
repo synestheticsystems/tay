@@ -268,7 +268,12 @@ async fn watch(
             tokio::time::sleep(AGAIN).await;
         }
     }
-    let ended = Ended::of(&inspected);
+    let mut ended = Ended::of(&inspected);
+    if let Some(started) = Ended::killed_since(&inspected)
+        && docker.killed_for_memory(container, started).await?
+    {
+        ended.killed_for_memory();
+    }
     note(
         log,
         &format!("attempt {attempt}, container: {}", ended.how()),

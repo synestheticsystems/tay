@@ -5,6 +5,10 @@ use bollard::models::ContainerInspectResponse;
 
 use crate::clock;
 
+/// The exit code of a container whose program was killed outright, as a
+/// memory kill does: 128 and the number of `SIGKILL`.
+const KILLED: i64 = 128 + 9;
+
 /// How a container ended, as Docker says.
 pub struct Ended {
     code: i64,
@@ -29,6 +33,22 @@ impl Ended {
                 .and_then(|state| state.error.clone())
                 .filter(|error| !error.is_empty()),
         }
+    }
+
+    /// When it started, in nanoseconds since 1970, if it was killed by
+    /// the signal a memory kill sends and Docker has not yet said it was
+    /// one: Docker learns of a memory kill apart from the end.
+    pub fn killed_since(inspected: &ContainerInspectResponse) -> Option<u64> {
+        let state = inspected.state.as_ref()?;
+        let unsaid = state.exit_code == Some(KILLED) && state.oom_killed != Some(true);
+        unsaid
+            .then(|| state.started_at.as_deref().and_then(clock::nanos_of))
+            .flatten()
+    }
+
+    /// Takes in that Docker has since said it was killed for memory.
+    pub fn killed_for_memory(&mut self) {
+        self.out_of_memory = true;
     }
 
     pub fn succeeded(&self) -> bool {
@@ -100,5 +120,26 @@ mod tests {
             ended(127, false, Some("exec: \"x\": not found")).how(),
             "exited with 127: exec: \"x\": not found"
         );
+    }
+
+    #[test]
+    fn a_container_killed_outright_is_asked_about_memory_only_while_docker_has_not_said() {
+        let inspected = |code, oom_killed| ContainerInspectResponse {
+            state: Some(bollard::models::ContainerState {
+                exit_code: Some(code),
+                oom_killed: Some(oom_killed),
+                started_at: Some("2026-11-10T06:42:51.000000005Z".to_string()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert_eq!(
+            Ended::killed_since(&inspected(137, false)),
+            Some(1_794_292_971_000_000_005)
+        );
+        // Docker has said it already, or it was not killed outright.
+        assert_eq!(Ended::killed_since(&inspected(137, true)), None);
+        assert_eq!(Ended::killed_since(&inspected(143, false)), None);
+        assert_eq!(Ended::killed_since(&inspected(1, false)), None);
     }
 }
