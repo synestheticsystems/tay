@@ -173,3 +173,17 @@ fn every_file_under_outputs_must_exist_once_a_command_is_done() {
         )
     );
 }
+
+#[test]
+fn a_run_that_writes_no_values_gives_none_though_an_earlier_one_did() {
+    let machine = Machine::new();
+    let root = machine.stack("commands");
+    let first = machine.at(&root, "up", &["once-values"]);
+    assert_eq!(first.code, 0, "{}{}", first.stdout, first.stderr);
+    let second = machine.at(&root, "up", &["once-values"]);
+    assert_eq!(second.code, 1, "{}", second.stdout);
+    assert_eq!(
+        second.last_change("once-values"),
+        "failed done: it ran and exited with 0, but it gave no value for `id`, which it lists under `produces`"
+    );
+}

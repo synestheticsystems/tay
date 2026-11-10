@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use super::description::Runs;
 use super::operations::{
-    Checking, Driving, Failure, Found, Outcome, Running, Steps, UnderWay, UnitPlace,
+    Driving, Failure, Found, Outcome, ReadinessCommand, Running, Steps, UnderWay, UnitPlace,
 };
 use crate::disk::Layout;
 
@@ -73,7 +73,7 @@ impl NotRunnable {
 }
 
 impl Running for NotRunnable {
-    fn start(self: Arc<Self>, _: UnitPlace, _: u32, _: bool, _: Steps) -> Driving {
+    fn start(self: Arc<Self>, _: UnitPlace, _: u32, _: Steps) -> Driving {
         let reason = self.reason();
         Box::pin(async move { Outcome::Failed(reason) })
     }
@@ -87,7 +87,12 @@ impl Running for NotRunnable {
         Box::pin(async move { Outcome::Failed(reason) })
     }
 
-    fn check(self: Arc<Self>, _: UnitPlace, _: Vec<String>, _: Duration) -> Checking {
+    fn readiness_command(
+        self: Arc<Self>,
+        _: UnitPlace,
+        _: Vec<String>,
+        _: Duration,
+    ) -> ReadinessCommand {
         let reason = self.reason();
         Box::pin(async move { Err(reason) })
     }

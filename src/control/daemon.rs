@@ -15,11 +15,12 @@ mod routes;
 mod serve;
 mod up;
 
+use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use tokio::net::UnixListener;
 use tokio::sync::watch;
@@ -30,7 +31,7 @@ use crate::definition::read::THIS_TAY;
 use crate::diagnostic::Diagnostics;
 use crate::diagnostic::source::Sources;
 use crate::disk::{Asked, DiskError, Environment, Identity, Intent, Layout, Lock, Machine};
-use crate::engine::{self, Supervisor, Told, UnitState};
+use crate::engine::{self, Counts, Supervisor, Told, UnitState};
 use crate::plan::{self, Plan, PlannedUnit};
 use crate::print;
 
@@ -73,6 +74,9 @@ enum CannotStart {
 /// leaves it to that one, which is as it should be.
 pub fn run(root: &Path) -> bool {
     let layout = Layout::of(root);
+    // The command that starts the daemon gives it this log as its standard
+    // error. It is set once, as the daemon starts.
+    let _ = LOG.set(layout.daemon_log());
     let lock = match Lock::try_take(&layout.daemon_lock()) {
         Ok(Some(lock)) => lock,
         Ok(None) => {
@@ -153,6 +157,10 @@ async fn start(layout: Layout) -> Result<(Arc<Daemon>, UnixListener, Socket), Ca
         about.pid,
         about.root.display()
     ));
+    let counts = Counts::read(&environment.layout).unwrap_or_else(|error| {
+        log(&format!("{error}; attempts are counted afresh"));
+        Counts::none(&environment.layout)
+    });
     let environment = Arc::new(environment);
     let daemon = Arc::new_cyclic(|daemon: &Weak<Daemon>| {
         let daemon = Weak::clone(daemon);
@@ -163,7 +171,7 @@ async fn start(layout: Layout) -> Result<(Arc<Daemon>, UnixListener, Socket), Ca
             }
         });
         Daemon {
-            supervisor: Arc::new(Supervisor::new(Arc::clone(&environment), told)),
+            supervisor: Arc::new(Supervisor::new(Arc::clone(&environment), counts, told)),
             environment,
             about,
             change: Mutex::new(None),
@@ -313,9 +321,48 @@ impl Daemon {
     }
 }
 
-/// Writes a line to the daemon's log, with its time.
+/// A daemon's log longer than this is set aside and a new one begun, so
+/// that an environment brought up for months does not fill the disk. One
+/// file set aside is kept.
+const LOG_SIZE: u64 = 1 << 20;
+
+/// The daemon's log, the path it is at, once the daemon runs.
+static LOG: OnceLock<PathBuf> = OnceLock::new();
+
+/// The daemon's log at `path`, opened to be added to; a long one is set
+/// aside first.
+pub fn open_log(path: &Path) -> Result<File, DiskError> {
+    let folder = path
+        .parent()
+        .expect("the daemon's log is in the logs folder");
+    std::fs::create_dir_all(folder).map_err(DiskError::io(folder, "made"))?;
+    if std::fs::metadata(path).is_ok_and(|metadata| metadata.len() > LOG_SIZE) {
+        let set_aside = path.with_extension("log.1");
+        std::fs::rename(path, &set_aside).map_err(DiskError::io(path, "set aside"))?;
+    }
+    OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(DiskError::io(path, "opened"))
+}
+
+/// Writes a line to the daemon's log, which is its standard error, with its
+/// time, and begins a new log when it has grown too long.
 fn log(line: &str) {
     print::err(&format!("{}  {line}\n", clock::utc(clock::now())));
+    let Some(path) = LOG.get() else {
+        return;
+    };
+    let long = rustix::fs::fstat(rustix::stdio::stderr())
+        .is_ok_and(|stat| u64::try_from(stat.st_size).is_ok_and(|size| size > LOG_SIZE));
+    if long {
+        // A log that cannot be begun anew is written on as it is: there is
+        // nowhere else to say so.
+        if let Ok(file) = open_log(path) {
+            let _ = rustix::stdio::dup2_stderr(&file);
+        }
+    }
 }
 
 fn log_state(unit: &str, state: &UnitState) {

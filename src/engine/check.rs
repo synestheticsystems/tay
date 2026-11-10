@@ -18,7 +18,7 @@ use crate::module::{self, Found, Made, Operations, Outcome, UnitKind, UnitPlace,
 use crate::plan::PlannedUnit;
 
 /// A unit's state as a check found it.
-pub struct Checked {
+pub struct CheckedState {
     pub unit: String,
     pub state: UnitState,
 }
@@ -61,7 +61,7 @@ pub fn find_again(supervisor: &Arc<Supervisor>, units: &[Arc<PlannedUnit>], up: 
 /// that is made and was ready is checked again, and a group that was up is
 /// as its needs are. Any other unit is as its state was recorded, which for
 /// a unit that runs is as its task last saw it.
-pub fn check_now(units: &Units, environment: &Arc<Environment>) -> Vec<Checked> {
+pub fn check_now(units: &Units, environment: &Arc<Environment>) -> Vec<CheckedState> {
     let mut pass = Pass::default();
     units
         .iter()
@@ -83,7 +83,7 @@ pub fn check_now(units: &Units, environment: &Arc<Environment>) -> Vec<Checked> 
                 None => pass.made(planned, environment),
             };
             pass.record(planned, &state, &values);
-            Checked {
+            CheckedState {
                 unit: planned.name.clone(),
                 state,
             }

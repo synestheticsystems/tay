@@ -178,13 +178,18 @@ pub async fn run(
 /// Waits for the step under way to end. When `running` is given, it is
 /// told when the step's program has started.
 pub async fn wait(files: &StepFiles, running: Option<&Steps>) -> Result<StepEnd, Failure> {
-    if let Some(steps) = running
-        && let Look::Running(record) = files.child_started().await?
-    {
-        // The engine may have stopped listening; the step goes on.
-        let _ = steps.send(Step::Running {
-            since: record.begun,
-        });
+    if let Some(steps) = running {
+        // A program that has started is told of, whether or not it has
+        // ended by the time it is seen. The engine may have stopped
+        // listening; the step goes on.
+        if let Look::Running(record) | Look::Ended(record, _) | Look::Lost(record) =
+            files.child_started().await?
+            && record.child.is_some()
+        {
+            let _ = steps.send(Step::Running {
+                since: record.begun,
+            });
+        }
     }
     let end = match files.ended().await? {
         Look::Ended(_, ended) => return Ok(StepEnd::Ended(ended)),

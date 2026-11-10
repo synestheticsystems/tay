@@ -100,8 +100,7 @@ pub fn take(place: &UnitPlace, declared: &[(NameAt, bool)]) -> Result<Values, Fa
         };
     }
     keep(place, &plain, &secret)?;
-    fs::remove_file(&path)
-        .map_err(|error| ProducedError::Disk(DiskError::io(&path, "removed")(error)))?;
+    clear(place)?;
     values(declared, &plain, &secret)
 }
 

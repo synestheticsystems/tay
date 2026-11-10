@@ -64,3 +64,9 @@ units:
     uses: process
     with: { command: ["${environment.root}/services/ticker.sh"] }
     watch: [services]
+  doomed:
+    doc: Exits with 7 two seconds after it starts, before it is ever ready.
+    uses: process
+    with: { command: ["${environment.root}/services/exits.sh", "2", "7"] }
+    ready: { log: "never written", within: 20s }
+    restart: { on: failure, attempts: 2 }

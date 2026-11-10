@@ -32,6 +32,9 @@ pub enum Probe {
         since: String,
         /// The log, read as far as it has been looked at.
         following: Option<Following>,
+        /// Whether a line has had the text: a line once written stays
+        /// written.
+        found: bool,
     },
 }
 
@@ -50,6 +53,7 @@ impl Probe {
                 log,
                 since: clock::stamp(since),
                 following: None,
+                found: false,
             },
         }
     }
@@ -98,14 +102,16 @@ impl Probe {
             Probe::Tcp(address) => within(limit, connect(address)).await,
             Probe::Command(words) => {
                 Arc::clone(running)
-                    .check(place.clone(), words.clone(), limit)
+                    .readiness_command(place.clone(), words.clone(), limit)
                     .await
             }
+            Probe::Log { found: true, .. } => Ok(()),
             Probe::Log {
                 text,
                 log,
                 since,
                 following,
+                found,
             } => {
                 let mut lines = Vec::new();
                 match following {
@@ -118,7 +124,8 @@ impl Probe {
                 .map_err(|error| error.to_string())?;
                 let written =
                     |line: &Line| line.writer == Writer::Unit && line.text.contains(&*text);
-                match lines.iter().any(written) {
+                *found = lines.iter().any(written);
+                match found {
                     true => Ok(()),
                     false => Err("no line it wrote has it yet".to_string()),
                 }

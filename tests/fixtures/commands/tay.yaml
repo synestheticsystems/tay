@@ -43,3 +43,9 @@ units:
     with:
       run: { shell: "true" }
       outputs: { missing: "${environment.state}/never-written" }
+  once-values:
+    doc: Writes its values the first time it runs, and never again.
+    uses: command
+    with:
+      run: ["${environment.root}/services/issue-once.sh", "${environment.state}/issued-once"]
+      produces: [id]

@@ -97,3 +97,29 @@ fn a_unit_whose_keeper_was_lost_is_reported_so_and_what_is_left_of_its_group_is_
     }
     assert_eq!(in_group(), 0, "what was left of the group is stopped");
 }
+
+#[test]
+fn the_attempts_in_a_row_are_counted_on_by_a_daemon_started_afresh() {
+    let machine = Machine::new();
+    let root = machine.stack("services");
+    let up = machine.spawn_up(&root, &["doomed"]);
+    // Attempt 1 exits before it is ready; attempt 2 begins, and its daemon
+    // is killed.
+    let recorded = root.join(".tay/state/units/doomed/record.json");
+    assert!(eventually(Duration::from_secs(20), || {
+        recorded.exists() && record(&root, "doomed")["attempt"] == 2
+    }));
+    machine.kill_daemon(&root);
+    up.finish();
+    assert!(eventually(Duration::from_secs(20), || {
+        !record(&root, "doomed")["ended"].is_null()
+    }));
+    let state = machine.until_state(&root, "doomed", Duration::from_secs(20), |state| {
+        state.starts_with("failed")
+    });
+    assert!(
+        state.starts_with("failed attempt 2 exited with 7 at ")
+            && state.ends_with(", while no daemon ran; 2 attempts in a row did not become ready"),
+        "{state}"
+    );
+}

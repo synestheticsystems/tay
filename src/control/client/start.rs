@@ -4,22 +4,17 @@
 //! whether it is ready by one line on its standard output, which the
 //! command reads through a pipe rather than guessing with a sleep.
 
-use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader};
 use std::os::unix::process::CommandExt;
-use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
 
+use crate::control::daemon;
 use crate::disk::{DiskError, Environment};
 
 /// How long a daemon has to say it is ready.
 pub const START: Duration = Duration::from_secs(10);
-
-/// A log longer than this is set aside when a daemon is started, so that
-/// an environment brought up for months does not fill the disk.
-const LOG_SIZE: u64 = 1 << 20;
 
 /// What a started daemon said.
 pub enum Started {
@@ -50,7 +45,7 @@ pub enum NotStarted {
 pub fn start(environment: &Environment) -> Result<Started, NotStarted> {
     let binary = std::env::current_exe().map_err(NotStarted::NoBinary)?;
     let log_path = environment.layout.daemon_log();
-    let log = open_log(&log_path)?;
+    let log = daemon::open_log(&log_path)?;
     let mut command = Command::new(binary);
     command
         .arg("daemon")
@@ -97,21 +92,4 @@ pub fn start(environment: &Environment) -> Result<Started, NotStarted> {
         Ok(Err(_)) => Err(NotStarted::Silent(log_path)),
         Err(_) => Err(NotStarted::TooLate(log_path)),
     }
-}
-
-/// The daemon's log, opened to be added to; a long one is set aside first.
-fn open_log(path: &Path) -> Result<File, DiskError> {
-    let folder = path
-        .parent()
-        .expect("the daemon's log is in the logs folder");
-    std::fs::create_dir_all(folder).map_err(DiskError::io(folder, "made"))?;
-    if std::fs::metadata(path).is_ok_and(|metadata| metadata.len() > LOG_SIZE) {
-        let set_aside = path.with_extension("log.1");
-        std::fs::rename(path, &set_aside).map_err(DiskError::io(path, "set aside"))?;
-    }
-    OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .map_err(DiskError::io(path, "opened"))
 }

@@ -42,7 +42,8 @@ fn a_unit_outlives_its_daemon_goes_on_logging_and_is_found_again_without_startin
         state == "ready attempt 1, running"
     });
     machine.until_state(&root, "api", Duration::from_secs(20), |state| {
-        state == "ready attempt 1, log \"listening\" passes"
+        state
+            == "ready attempt 1, ready when it was found again; log \"listening\" is checked again"
     });
     assert_eq!(child(&root, "web"), web);
     assert!(alive(web));

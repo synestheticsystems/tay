@@ -219,12 +219,26 @@ impl Bringing<'_> {
         made
     }
 
-    /// Whether a unit that uses `unit`'s values runs now.
+    /// Whether a unit that uses `unit`'s values runs now, directly or
+    /// through units that use them in turn, as a process does that reads a
+    /// port from a file that is written with it.
     fn in_use(&self, unit: &str) -> bool {
-        self.units
+        let mut users = vec![unit.to_string()];
+        let mut grown = true;
+        while grown {
+            grown = false;
+            for user in self.units.iter() {
+                if !users.contains(&user.name)
+                    && user.needs.iter().any(|need| users.contains(&need.unit))
+                {
+                    users.push(user.name.clone());
+                    grown = true;
+                }
+            }
+        }
+        users[1..]
             .iter()
-            .filter(|user| user.needs.iter().any(|need| need.unit == unit))
-            .any(|user| self.supervisor.is_tended(&user.name))
+            .any(|user| self.supervisor.is_tended(user))
     }
 
     /// Settles each unit that runs that has become ready or failed, or can

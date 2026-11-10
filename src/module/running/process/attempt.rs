@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use crate::keeper::{Look, Program};
 use crate::module::operations::{
-    Checking, Driving, Failure, Found, Outcome, Running, Step, Steps, UnderWay, UnitPlace,
+    Driving, Failure, Found, Outcome, ReadinessCommand, Running, Step, Steps, UnderWay, UnitPlace,
 };
 use crate::module::running::host::{self, StepEnd};
 use crate::value::Filled;
@@ -31,13 +31,10 @@ enum From {
 }
 
 impl Running for ProcessSettings<Filled> {
-    fn start(
-        self: Arc<Self>,
-        place: UnitPlace,
-        attempt: u32,
-        prepare: bool,
-        steps: Steps,
-    ) -> Driving {
+    fn start(self: Arc<Self>, place: UnitPlace, attempt: u32, steps: Steps) -> Driving {
+        // A process prepares before its first attempt each time it is
+        // brought up, and not before a restart.
+        let prepare = attempt == 1;
         Box::pin(async move {
             self.drive(&place, attempt, From::Start { prepare }, &steps)
                 .await
@@ -50,13 +47,7 @@ impl Running for ProcessSettings<Filled> {
             Look::Never => Found::Never,
             Look::Running(record) => Found::UnderWay(UnderWay {
                 attempt: record.attempt,
-                step: match record.step.as_str() {
-                    COMMAND => Step::Running {
-                        since: record.begun,
-                    },
-                    _ => Step::Before(self.preparing(prepare_index(&record.step)?)?),
-                },
-                resumes_at: record.step,
+                step: record.step,
             }),
             Look::Ended(record, ended) => Found::Ended {
                 attempt: record.attempt,
@@ -78,14 +69,19 @@ impl Running for ProcessSettings<Filled> {
 
     fn resume(self: Arc<Self>, place: UnitPlace, under_way: UnderWay, steps: Steps) -> Driving {
         Box::pin(async move {
-            let from = From::UnderWay(under_way.resumes_at);
+            let from = From::UnderWay(under_way.step);
             self.drive(&place, under_way.attempt, from, &steps)
                 .await
                 .unwrap_or_else(|failure| Outcome::Failed(failure.to_string()))
         })
     }
 
-    fn check(self: Arc<Self>, place: UnitPlace, command: Vec<String>, limit: Duration) -> Checking {
+    fn readiness_command(
+        self: Arc<Self>,
+        place: UnitPlace,
+        command: Vec<String>,
+        limit: Duration,
+    ) -> ReadinessCommand {
         Box::pin(async move {
             let program = self
                 .program(&place, command)
@@ -113,6 +109,9 @@ impl ProcessSettings<Filled> {
             }
             From::UnderWay(step) => {
                 let index = prepare_index(&step)?;
+                // The engine has stopped listening only once it has dropped
+                // the attempt, which then goes no further.
+                let _ = steps.send(Step::Before(self.preparing(index)?));
                 let end = host::wait(&files, None).await?;
                 if let Some(failed) = self.prepare_failed(index, &end)? {
                     return Ok(failed);

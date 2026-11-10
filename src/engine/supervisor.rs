@@ -8,6 +8,8 @@
 //! after any change that started them, and they end with the daemon, which
 //! leaves what they look after running.
 
+mod counts;
+mod restarts;
 mod tending;
 
 use std::collections::HashMap;
@@ -24,6 +26,7 @@ use crate::disk::unit_log::UnitLog;
 use crate::module::{self, Running, Runs, UnitKind, UnitPlace, Values};
 use crate::plan::PlannedUnit;
 
+pub use counts::Counts;
 pub use tending::Begin;
 
 /// How many of the last lines a unit wrote are shown when it fails.
@@ -38,29 +41,32 @@ pub struct Supervisor {
     /// Counts the changes of state, for whoever waits on one.
     changes: watch::Sender<u64>,
     /// The task looking after each unit that runs, by unit.
-    tending: Mutex<HashMap<String, Tended>>,
+    tending: Mutex<HashMap<String, UnitTask>>,
+    /// What is counted of each unit's attempts.
+    counts: Counts,
     told: Told,
 }
 
 /// A unit's task, whether it has ended, and how it is asked to stop.
-struct Tended {
+struct UnitTask {
     ended: Arc<AtomicBool>,
     stop: mpsc::UnboundedSender<oneshot::Sender<Result<(), String>>>,
 }
 
-impl Tended {
+impl UnitTask {
     fn is_live(&self) -> bool {
         !self.ended.load(Ordering::SeqCst)
     }
 }
 
 impl Supervisor {
-    pub fn new(environment: Arc<Environment>, told: Told) -> Supervisor {
+    pub fn new(environment: Arc<Environment>, counts: Counts, told: Told) -> Supervisor {
         Supervisor {
             environment,
             units: Mutex::default(),
             changes: watch::Sender::new(0),
             tending: Mutex::default(),
+            counts,
             told,
         }
     }
@@ -109,7 +115,7 @@ impl Supervisor {
             .lock()
             .expect("the tasks are not poisoned")
             .get(unit)
-            .is_some_and(Tended::is_live)
+            .is_some_and(UnitTask::is_live)
     }
 
     /// Looks after `planned` with `running`, from `begin`, unless a task
@@ -123,7 +129,7 @@ impl Supervisor {
         restarts: bool,
     ) {
         let mut tending = self.tending.lock().expect("the tasks are not poisoned");
-        if tending.get(&planned.name).is_some_and(Tended::is_live) {
+        if tending.get(&planned.name).is_some_and(UnitTask::is_live) {
             return;
         }
         // A unit started afresh is starting from now, before its task runs,
@@ -147,14 +153,21 @@ impl Supervisor {
         let supervisor = Arc::clone(self);
         let ended = Arc::new(AtomicBool::new(false));
         let ends = Arc::clone(&ended);
+        let unit = planned.name.clone();
+        let task = tokio::spawn(tended);
         tokio::spawn(async move {
-            tended.await;
+            // A task that panicked is a fault in tay, which fails its unit
+            // rather than leave it looked after by nothing.
+            if let Err(error) = task.await {
+                let reason = format!("tay failed while looking after it: {error}");
+                supervisor.record(&unit, UnitState::new(State::Failed, reason), None);
+            }
             // A unit no longer looked after is a change to whoever waits on
             // it to settle.
             ends.store(true, Ordering::SeqCst);
             supervisor.changes.send_modify(|count| *count += 1);
         });
-        tending.insert(planned.name.clone(), Tended { ended, stop });
+        tending.insert(planned.name.clone(), UnitTask { ended, stop });
     }
 
     /// Stops `planned` and whatever it started, and waits until nothing of

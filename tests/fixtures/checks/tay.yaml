@@ -58,3 +58,14 @@ units:
     uses: process
     with: { command: ["${environment.root}/services/slow.sh", "300"] }
     ready: { command: ["${environment.root}/services/hang.sh"], within: 1m }
+  conf-port: { uses: port }
+  conf:
+    doc: Says which port the reader listens on.
+    uses: file
+    with: { content: "${conf-port.number}\n" }
+  reader:
+    doc: Listens on the port its file says, using the port only through the file.
+    uses: process
+    with:
+      command: ["python3", "${environment.root}/services/serve.py", "@${conf.path}"]
+    ready: { log: serving, within: 20s }

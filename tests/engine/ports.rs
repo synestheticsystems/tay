@@ -8,6 +8,7 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::net::TcpListener;
 use std::path::Path;
+use std::time::Duration;
 
 use crate::harness::{Machine, kept_ports};
 
@@ -212,4 +213,24 @@ fn a_port_the_environments_own_process_listens_on_is_not_taken_from_it() {
     let again = machine.at(&root, "up", &["pinned"]);
     assert_eq!(again.code, 0, "{}{}", again.stdout, again.stderr);
     assert_eq!(again.last_change("fixed-port"), format!("ready {free}"));
+}
+
+#[test]
+fn a_port_the_environments_own_process_holds_through_a_file_is_not_taken_from_it() {
+    let machine = Machine::new();
+    let root = machine.stack("checks");
+    assert_eq!(machine.at(&root, "up", &["reader"]).code, 0);
+    let number = kept_ports(&root)["conf-port"].clone();
+    // `reader` listens on the number its file gives, and uses the port
+    // only through the file.
+    assert!(crate::harness::eventually(Duration::from_secs(20), || {
+        std::net::TcpStream::connect(("127.0.0.1", number.as_u64().unwrap() as u16)).is_ok()
+    }));
+    let again = machine.at(&root, "up", &["reader"]);
+    assert_eq!(again.code, 0, "{}{}", again.stdout, again.stderr);
+    assert_eq!(
+        again.last_change("conf-port"),
+        format!("ready {number}, kept")
+    );
+    assert_eq!(kept_ports(&root)["conf-port"], number);
 }

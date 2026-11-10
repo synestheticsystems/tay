@@ -2,10 +2,8 @@
 //! stopped or can run no more: each attempt driven by its module, its
 //! readiness checked within its own `within`, counted from when its program
 //! started, and again for as long as it runs, so that `unready` and a return
-//! to `ready` are both seen; and when an attempt ends, its `restart` decides.
-//! `attempts` counts attempts in a row that did not reach ready; reaching
-//! ready starts the count again. A restart waits for everything the unit
-//! needs to be ready, and never starts it against a need that has failed.
+//! to `ready` are both seen; and when an attempt ends, its `restart` decides
+//! what follows, as `restarts.rs` says.
 
 use std::pin::Pin;
 use std::sync::Arc;
@@ -14,21 +12,17 @@ use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
 
+use super::counts::Count;
 use super::{Supervisor, stop_blocking};
 use crate::clock;
-use crate::diagnostic::quoted_list;
 use crate::disk::unit_log::UnitLog;
 use crate::engine::fill;
 use crate::engine::readiness::Probe;
 use crate::engine::state::{State, UnitState};
 use crate::module::{
-    Driving, Outcome, ReadyWithoutCheck, RestartOn, Running, Step, UnderWay, UnitKind, Values,
+    Driving, Outcome, ReadyWithoutCheck, Running, Step, UnderWay, UnitKind, Values,
 };
 use crate::plan::{PlannedUnit, Readiness};
-
-/// How long a unit waits before it is started again, so that one that ends
-/// at once does not start and end for ever without a pause.
-const RESTART_PAUSE: Duration = Duration::from_secs(1);
 
 /// How often a unit's check is made until it passes: about twice a second,
 /// as the document says.
@@ -62,19 +56,23 @@ enum Watched {
     Stopped,
 }
 
-/// A check being made, which gives the check back with what it found.
-type Making = Pin<Box<dyn Future<Output = (Probe, Result<(), String>)> + Send>>;
+/// A readiness check being made, which gives the check back with what it
+/// found.
+type CheckUnderWay = Pin<Box<dyn Future<Output = (Probe, Result<(), String>)> + Send>>;
 
-struct Tending {
-    supervisor: Arc<Supervisor>,
-    planned: Arc<PlannedUnit>,
-    running: Arc<dyn Running>,
-    restarts: bool,
-    stops: mpsc::UnboundedReceiver<Stop>,
+pub(super) struct Tending {
+    pub(super) supervisor: Arc<Supervisor>,
+    pub(super) planned: Arc<PlannedUnit>,
+    pub(super) running: Arc<dyn Running>,
+    pub(super) restarts: bool,
+    pub(super) stops: mpsc::UnboundedReceiver<Stop>,
     /// Attempts in a row that did not reach ready.
-    in_a_row: u64,
+    pub(super) in_a_row: u64,
     /// How the attempt before this one ended, as its details say it.
-    earlier: Option<String>,
+    pub(super) earlier: Option<String>,
+    /// Why the count of attempts could not be kept, said with each state
+    /// from then on.
+    pub(super) unkept: Option<String>,
 }
 
 /// Looks after `planned` with `running` from `begin`, telling `supervisor`
@@ -96,25 +94,37 @@ pub async fn tend(
         stops,
         in_a_row: 0,
         earlier: None,
+        unkept: None,
     };
     tending.run(begin).await;
 }
 
 impl Tending {
     async fn run(&mut self, begin: Begin) {
+        // An attempt found is counted as the daemon that began it counted.
+        let found = |attempt| self.supervisor.counts.of(&self.planned.name, attempt);
         let (mut attempt, mut watched) = match begin {
-            Begin::Fresh => (1, self.attempt(1, None).await),
-            Begin::UnderWay(under_way) => (
-                under_way.attempt,
-                self.attempt(under_way.attempt, Some(under_way)).await,
-            ),
-            Begin::Ended { attempt, outcome } => (
-                attempt,
-                Watched::Came {
-                    outcome,
-                    ready: false,
-                },
-            ),
+            Begin::Fresh => (1, self.attempt(1, None, false).await),
+            Begin::UnderWay(under_way) => {
+                let count = found(under_way.attempt).unwrap_or_default();
+                self.in_a_row = count.in_a_row;
+                let attempt = under_way.attempt;
+                (
+                    attempt,
+                    self.attempt(attempt, Some(under_way), count.ready).await,
+                )
+            }
+            Begin::Ended { attempt, outcome } => {
+                let count = found(attempt).unwrap_or_default();
+                self.in_a_row = count.in_a_row;
+                (
+                    attempt,
+                    Watched::Came {
+                        outcome,
+                        ready: count.ready,
+                    },
+                )
+            }
             Begin::Lost { attempt } => {
                 let outcome = match self.stop_now().await {
                     Ok(()) => Outcome::Failed(format!(
@@ -143,15 +153,15 @@ impl Tending {
                 return;
             }
             attempt += 1;
-            watched = self.attempt(attempt, None).await;
+            watched = self.attempt(attempt, None, false).await;
         }
     }
 
-    fn unit(&self) -> &str {
+    pub(super) fn unit(&self) -> &str {
         &self.planned.name
     }
 
-    fn record(&self, state: State, detail: String, values: Option<Values>) {
+    pub(super) fn record(&self, state: State, detail: String, values: Option<Values>) {
         self.supervisor
             .record(self.unit(), UnitState::new(state, detail), values);
     }
@@ -159,17 +169,38 @@ impl Tending {
     /// What a person is told of attempt `attempt` doing `doing`, with how
     /// the one before it ended.
     fn detail(&self, attempt: u32, doing: &str) -> String {
-        match &self.earlier {
-            Some(earlier) => format!("attempt {attempt}, {doing}; {earlier}"),
-            None => format!("attempt {attempt}, {doing}"),
+        let mut detail = format!("attempt {attempt}, {doing}");
+        for more in [&self.earlier, &self.unkept].into_iter().flatten() {
+            detail.push_str("; ");
+            detail.push_str(more);
+        }
+        detail
+    }
+
+    /// Keeps the count of attempt `attempt`, which is `ready` or not yet.
+    fn keep_count(&mut self, attempt: u32, ready: bool) {
+        let count = Count {
+            attempt,
+            in_a_row: self.in_a_row,
+            ready,
+        };
+        if let Err(error) = self.supervisor.counts.keep(&self.planned.name, count) {
+            self.unkept = Some(format!("its count of attempts cannot be kept: {error}"));
         }
     }
 
     /// Runs attempt `attempt`, begun now or found `under_way`, and watches
-    /// it until it comes out or is stopped.
-    async fn attempt(&mut self, attempt: u32, under_way: Option<UnderWay>) -> Watched {
-        let mechanism = self
-            .planned
+    /// it until it comes out or is stopped. One found under way that `was
+    /// ready` is judged as a ready unit is: a check that fails makes it
+    /// unready, and it is not stopped for not becoming ready in time.
+    async fn attempt(
+        &mut self,
+        attempt: u32,
+        under_way: Option<UnderWay>,
+        was_ready: bool,
+    ) -> Watched {
+        let planned = Arc::clone(&self.planned);
+        let mechanism = planned
             .mechanism
             .as_ref()
             .expect("a unit that runs has a mechanism");
@@ -209,24 +240,20 @@ impl Tending {
         let (steps, mut told) = mpsc::unbounded_channel();
         let mut driving: Driving = match under_way {
             None => {
+                self.keep_count(attempt, false);
                 self.record(State::Starting, self.detail(attempt, "starting"), None);
-                let prepares = attempt == 1;
-                Arc::clone(&self.running).start(place.clone(), attempt, prepares, steps)
+                Arc::clone(&self.running).start(place.clone(), attempt, steps)
             }
-            Some(under_way) => {
-                // The step it was found at is the first it is told.
-                let _ = steps.send(under_way.step.clone());
-                Arc::clone(&self.running).resume(place.clone(), under_way, steps)
-            }
+            Some(under_way) => Arc::clone(&self.running).resume(place.clone(), under_way, steps),
         };
         let mut probe: Option<Probe> = None;
-        let mut making: Option<Making> = None;
+        let mut making: Option<CheckUnderWay> = None;
         let mut next_check: Option<Instant> = None;
         let mut deadline: Option<Instant> = None;
         // Whether the check passes now, whether it ever has, and whether it
         // has been made at all: an attempt found under way past its
         // `within` is judged by one check made now. Why it last did not.
-        let (mut passing, mut ready, mut made_once) = (false, false, false);
+        let (mut passing, mut ready, mut made_once) = (was_ready, was_ready, false);
         let mut last_why = String::new();
         let never = Instant::now() + Duration::from_secs(365 * 24 * 3600);
         loop {
@@ -246,8 +273,11 @@ impl Tending {
                         (Some((filled, within, _)), _) => {
                             let log = UnitLog::at(self.supervisor.environment.layout.unit_log(self.unit()));
                             let made = Probe::of(filled, log, since);
-                            let doing = format!("waiting to be ready: {}", made.words());
-                            self.record(State::Starting, self.detail(attempt, &doing), None);
+                            let (state, doing) = match ready {
+                                true => (State::Ready, format!("ready when it was found again; {} is checked again", made.words())),
+                                false => (State::Starting, format!("waiting to be ready: {}", made.words())),
+                            };
+                            self.record(state, self.detail(attempt, &doing), None);
                             let gone = Duration::from_millis(clock::now_millis().saturating_sub(since));
                             deadline = Some(Instant::now() + within.saturating_sub(gone));
                             probe = Some(made);
@@ -257,6 +287,7 @@ impl Tending {
                             passing = true;
                             ready = true;
                             self.in_a_row = 0;
+                            self.keep_count(attempt, true);
                             self.record(State::Ready, self.detail(attempt, "running"), None);
                         }
                         (None, _) => {
@@ -274,12 +305,15 @@ impl Tending {
                         (Ok(()), false) => {
                             passing = true;
                             let again = if ready { " again" } else { "" };
+                            if !ready {
+                                self.keep_count(attempt, true);
+                            }
                             ready = true;
                             self.in_a_row = 0;
                             self.record(State::Ready, self.detail(attempt, &format!("{words} passes{again}")), None);
                             next_check = (!stays).then(|| Instant::now() + CHECK_READY);
                         }
-                        (Ok(()), true) => next_check = Some(Instant::now() + CHECK_READY),
+                        (Ok(()), true) => next_check = (!stays).then(|| Instant::now() + CHECK_READY),
                         (Err(why), false) => {
                             last_why = why;
                             next_check = Some(Instant::now() + if ready { CHECK_READY } else { CHECK_STARTING });
@@ -330,129 +364,9 @@ impl Tending {
         }
     }
 
-    /// Records how attempt `attempt` came out, and whether its restart
-    /// policy starts it again.
-    fn restart_after(&mut self, attempt: u32, outcome: Outcome, ready: bool) -> bool {
-        let (failed, detail) = match outcome {
-            Outcome::Done { values, detail } => {
-                let detail = match &self.earlier {
-                    Some(earlier) => format!("{detail}; {earlier}"),
-                    None => detail,
-                };
-                self.record(State::Ready, detail, Some(values));
-                return false;
-            }
-            // Of an environment that is down, what does not run is stopped.
-            Outcome::Failed(reason) => {
-                let state = match self.restarts {
-                    true => State::Failed,
-                    false => State::Stopped,
-                };
-                self.record(state, reason, None);
-                return false;
-            }
-            Outcome::Ended { failed, detail } => (failed, detail),
-        };
-        if !ready {
-            self.in_a_row += 1;
-        }
-        let ended = format!("attempt {attempt} {detail}");
-        if !self.restarts {
-            self.record(State::Stopped, ended, None);
-            return false;
-        }
-        let restart = &self
-            .planned
-            .mechanism
-            .as_ref()
-            .expect("a unit that runs has a mechanism")
-            .restart;
-        let why_not = match restart.on {
-            RestartOn::Always => None,
-            RestartOn::Failure if failed => None,
-            on => Some(format!(
-                "it is not started again, since its `restart` is `{}`",
-                on.word()
-            )),
-        };
-        let used_up = restart
-            .attempts
-            .filter(|attempts| self.in_a_row >= *attempts);
-        match (why_not, used_up) {
-            (Some(why_not), _) => {
-                self.record(State::Failed, format!("{ended}; {why_not}"), None);
-                false
-            }
-            (None, Some(attempts)) => {
-                self.record(
-                    State::Failed,
-                    format!("{ended}; {attempts} attempts in a row did not become ready"),
-                    None,
-                );
-                false
-            }
-            (None, None) => {
-                self.earlier = Some(ended);
-                true
-            }
-        }
-    }
-
-    /// Waits until everything the unit needs is ready and a short pause has
-    /// passed; false when it may not start again: a need has failed, or it
-    /// was stopped.
-    async fn ready_to_restart(&mut self, attempt: u32) -> bool {
-        let mut changes = self.supervisor.changes();
-        loop {
-            let mut waiting = Vec::new();
-            let mut failed = Vec::new();
-            for need in &self.planned.needs {
-                match self.supervisor.state(&need.unit).map(|state| state.state) {
-                    Some(State::Ready) => {}
-                    Some(State::Failed) => failed.push(need.unit.clone()),
-                    _ => waiting.push(need.unit.clone()),
-                }
-            }
-            if !failed.is_empty() {
-                let failed = quoted_list(&failed);
-                self.record(
-                    State::Waiting,
-                    format!("blocked: {failed} failed before attempt {attempt}"),
-                    None,
-                );
-                return false;
-            }
-            if waiting.is_empty() {
-                break;
-            }
-            let waiting = quoted_list(&waiting);
-            self.record(
-                State::Waiting,
-                format!("for {waiting}, to start attempt {attempt}"),
-                None,
-            );
-            tokio::select! {
-                Some(stop) = self.stops.recv() => {
-                    let _ = stop.send(self.stop_now().await);
-                    return false;
-                }
-                changed = changes.changed() => if changed.is_err() {
-                    return false;
-                },
-            }
-        }
-        tokio::select! {
-            Some(stop) = self.stops.recv() => {
-                let _ = stop.send(self.stop_now().await);
-                false
-            }
-            () = tokio::time::sleep(RESTART_PAUSE) => true,
-        }
-    }
-
     /// Stops what of the unit runs, whatever step it is at, and waits until
     /// nothing of it is left.
-    async fn stop_now(&self) -> Result<(), String> {
+    pub(super) async fn stop_now(&self) -> Result<(), String> {
         let place = self.supervisor.place(self.unit());
         let mechanism = self
             .planned

@@ -85,7 +85,7 @@ fn an_http_check_of_an_https_address_fails_saying_tay_cannot_make_it_yet() {
 }
 
 #[test]
-fn a_ready_unit_found_again_after_its_within_has_passed_is_judged_by_a_check_made_then() {
+fn a_ready_unit_found_again_after_its_within_has_passed_is_judged_as_a_ready_unit() {
     let machine = Machine::new();
     let root = machine.stack("checks");
     let up = machine.at(&root, "up", &["brief"]);
@@ -97,8 +97,8 @@ fn a_ready_unit_found_again_after_its_within_has_passed_is_judged_by_a_check_mad
         !state.starts_with("starting")
     });
     assert!(
-        found.starts_with("ready attempt 1, http http://127.0.0.1:")
-            && found.ends_with("/health passes"),
+        found.starts_with("ready attempt 1, ready when it was found again; http http://127.0.0.1:")
+            && found.ends_with("/health is checked again"),
         "{found}"
     );
     assert_eq!(
@@ -106,4 +106,15 @@ fn a_ready_unit_found_again_after_its_within_has_passed_is_judged_by_a_check_mad
         brief,
         "it was not started again"
     );
+    // One that was ready and whose check fails now is unready, not stopped.
+    machine.kill_daemon(&root);
+    fs::remove_file(root.join(".tay/state/healthy")).unwrap();
+    let unready = machine.until_state(&root, "brief", Duration::from_secs(20), |state| {
+        state.starts_with("unready")
+    });
+    assert!(
+        unready.ends_with("it answered 503 Service Unavailable"),
+        "{unready}"
+    );
+    assert_eq!(crate::harness::child(&root, "brief"), brief);
 }

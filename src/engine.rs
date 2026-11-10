@@ -17,5 +17,5 @@ mod units;
 pub use bring_up::{Decision, bring_up};
 pub use check::{check_now, find_again};
 pub use state::{State, UnitState};
-pub use supervisor::{Supervisor, Told};
+pub use supervisor::{Counts, Supervisor, Told};
 pub use take_down::{Left, take_down};

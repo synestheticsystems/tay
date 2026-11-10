@@ -13,7 +13,8 @@ use std::time::Duration;
 
 use crate::keeper::{Ending, Look, Program};
 use crate::module::operations::{
-    self, Checking, Driving, Failure, Found, Outcome, Running, Step, Steps, UnderWay, UnitPlace,
+    self, Driving, Failure, Found, Outcome, ReadinessCommand, Running, Step, Steps, UnderWay,
+    UnitPlace,
 };
 use crate::module::running::host::{self, StepEnd};
 use crate::value::Filled;
@@ -32,8 +33,17 @@ const VALUES: &str = "TAY_VALUES";
 #[error("its record says it was at the step `{0}`, which a command does not have")]
 struct UnknownStep(String);
 
+/// Whether a command that is done and wrote no values gives those kept when
+/// it was last done. A check that finds it done may write none, while a run
+/// that writes none gives none.
+#[derive(Clone, Copy)]
+enum Kept {
+    Given,
+    NotGiven,
+}
+
 /// What follows a check that has ended.
-enum Checked {
+enum AfterCheck {
     /// The command is done.
     Done,
     /// It is not done: `run` runs.
@@ -43,7 +53,7 @@ enum Checked {
 }
 
 impl Running for CommandSettings<Filled> {
-    fn start(self: Arc<Self>, place: UnitPlace, attempt: u32, _: bool, steps: Steps) -> Driving {
+    fn start(self: Arc<Self>, place: UnitPlace, attempt: u32, steps: Steps) -> Driving {
         Box::pin(async move {
             let from = match self.check {
                 Some(_) => CHECK,
@@ -60,27 +70,22 @@ impl Running for CommandSettings<Filled> {
             Look::Never => Found::Never,
             Look::Running(record) => Found::UnderWay(UnderWay {
                 attempt: record.attempt,
-                step: match record.step.as_str() {
-                    CHECK => Step::Before("checking".to_string()),
-                    RUN => Step::Running {
-                        since: record.begun,
-                    },
-                    other => return Err(UnknownStep(other.to_string()).into()),
-                },
-                resumes_at: record.step,
+                step: record.step,
             }),
             Look::Ended(record, ended) => {
                 let end = StepEnd::Ended(ended);
                 let outcome = match record.step.as_str() {
                     CHECK => match self.checked(&end) {
-                        Checked::Done => self.done(place, "done: its check exited with 0")?,
-                        Checked::NotDone => Outcome::Failed(format!(
+                        AfterCheck::Done => {
+                            self.done(place, "done: its check exited with 0", Kept::Given)?
+                        }
+                        AfterCheck::NotDone => Outcome::Failed(format!(
                             "not done: attempt {} found it not done, and its daemon ended before it ran",
                             record.attempt
                         )),
-                        Checked::Outcome(outcome) => outcome,
+                        AfterCheck::Outcome(outcome) => outcome,
                     },
-                    RUN => self.ran(place, &end, ", while no daemon ran")?,
+                    RUN => self.ran(place, &end, ", while no daemon ran", Kept::Given)?,
                     other => return Err(UnknownStep(other.to_string()).into()),
                 };
                 Found::Ended {
@@ -96,7 +101,7 @@ impl Running for CommandSettings<Filled> {
 
     fn resume(self: Arc<Self>, place: UnitPlace, under_way: UnderWay, steps: Steps) -> Driving {
         Box::pin(async move {
-            let at = match under_way.resumes_at.as_str() {
+            let at = match under_way.step.as_str() {
                 CHECK => CHECK,
                 RUN => RUN,
                 other => return Outcome::Failed(UnknownStep(other.to_string()).to_string()),
@@ -107,7 +112,12 @@ impl Running for CommandSettings<Filled> {
         })
     }
 
-    fn check(self: Arc<Self>, place: UnitPlace, command: Vec<String>, limit: Duration) -> Checking {
+    fn readiness_command(
+        self: Arc<Self>,
+        place: UnitPlace,
+        command: Vec<String>,
+        limit: Duration,
+    ) -> ReadinessCommand {
         Box::pin(async move {
             let program = self
                 .program(&place, command, None)
@@ -130,6 +140,9 @@ impl CommandSettings<Filled> {
     ) -> Result<Outcome, Failure> {
         let files = host::files(place);
         if from == CHECK {
+            // The engine has stopped listening only once it has dropped the
+            // attempt, which then goes no further.
+            let _ = steps.send(Step::Before("checking".to_string()));
             let end = match under_way {
                 true => host::wait(&files, None).await?,
                 false => {
@@ -137,9 +150,6 @@ impl CommandSettings<Filled> {
                         .check
                         .as_ref()
                         .ok_or_else(|| UnknownStep(CHECK.to_string()))?;
-                    // The engine has stopped listening only once it has
-                    // dropped the attempt, which then goes no further.
-                    let _ = steps.send(Step::Before("checking".to_string()));
                     produced::clear(place)?;
                     let argv = host::run_form(check, "`check`")?;
                     let program = self.program(place, argv, None)?;
@@ -147,9 +157,11 @@ impl CommandSettings<Filled> {
                 }
             };
             match self.checked(&end) {
-                Checked::Done => return self.done(place, "done: its check exited with 0"),
-                Checked::NotDone => {}
-                Checked::Outcome(outcome) => return Ok(outcome),
+                AfterCheck::Done => {
+                    return self.done(place, "done: its check exited with 0", Kept::Given);
+                }
+                AfterCheck::NotDone => {}
+                AfterCheck::Outcome(outcome) => return Ok(outcome),
             }
         }
         let end = match under_way && from == RUN {
@@ -165,36 +177,44 @@ impl CommandSettings<Filled> {
                 host::run(&files, attempt, RUN, program, Some(steps)).await?
             }
         };
-        self.ran(place, &end, "")
+        self.ran(place, &end, "", Kept::NotGiven)
     }
 
     /// What follows a check that ended so.
-    fn checked(&self, end: &StepEnd) -> Checked {
+    fn checked(&self, end: &StepEnd) -> AfterCheck {
         match end {
             StepEnd::Ended(ended) => match &ended.how {
-                Ending::Code { code: 0 } => Checked::Done,
-                Ending::Code { code: 1 } => Checked::NotDone,
+                Ending::Code { code: 0 } => AfterCheck::Done,
+                Ending::Code { code: 1 } => AfterCheck::NotDone,
                 exit @ Ending::NotStarted { .. } => {
-                    Checked::Outcome(Outcome::Failed(format!("its check {exit}")))
+                    AfterCheck::Outcome(Outcome::Failed(format!("its check {exit}")))
                 }
-                _ => Checked::Outcome(Outcome::Failed(format!(
+                _ => AfterCheck::Outcome(Outcome::Failed(format!(
                     "its check {}: whether it is done cannot be told, so `run` did not run",
                     host::ended_words(ended)
                 ))),
             },
-            StepEnd::Lost => Checked::Outcome(Outcome::Failed(
+            StepEnd::Lost => AfterCheck::Outcome(Outcome::Failed(
                 "its check ended with no record of how: its keeper was lost".to_string(),
             )),
-            StepEnd::Gone => Checked::Outcome(Outcome::Failed(host::GONE.to_string())),
+            StepEnd::Gone => AfterCheck::Outcome(Outcome::Failed(host::GONE.to_string())),
         }
     }
 
     /// The outcome of an attempt whose run ended so; `after` is said after
-    /// how it ended.
-    fn ran(&self, place: &UnitPlace, end: &StepEnd, after: &str) -> Result<Outcome, Failure> {
+    /// how it ended. `kept` is whether the values kept when it was last done
+    /// are given if the run wrote none, as they are when a daemon finds a
+    /// run done that an earlier one saw end and took the values of.
+    fn ran(
+        &self,
+        place: &UnitPlace,
+        end: &StepEnd,
+        after: &str,
+        kept: Kept,
+    ) -> Result<Outcome, Failure> {
         match end {
             StepEnd::Ended(ended) if ended.how.succeeded() => {
-                self.done(place, "done: it ran and exited with 0")
+                self.done(place, "done: it ran and exited with 0", kept)
             }
             _ => Ok(match host::ending(end, after) {
                 Outcome::Ended { failed, detail } => Outcome::Ended {
@@ -207,9 +227,9 @@ impl CommandSettings<Filled> {
     }
 
     /// The command is done: every file under `outputs` must exist, and the
-    /// values it gives are what it wrote, or else what was kept when it was
-    /// done before.
-    fn done(&self, place: &UnitPlace, detail: &str) -> Result<Outcome, Failure> {
+    /// values it gives are what it wrote, or else, when `kept` says so,
+    /// what was kept when it was done before.
+    fn done(&self, place: &UnitPlace, detail: &str, kept: Kept) -> Result<Outcome, Failure> {
         for (name, path) in &self.outputs {
             let path = operations::text(path, "outputs")?;
             if !Path::new(path).exists() {
@@ -219,10 +239,11 @@ impl CommandSettings<Filled> {
                 )));
             }
         }
-        let values = match produced::written(place) {
-            true => produced::take(place, &self.produces),
-            false if self.produces.is_empty() => Ok(Default::default()),
-            false => produced::kept(place, &self.produces),
+        let values = match (produced::written(place), kept) {
+            (false, Kept::Given) if !self.produces.is_empty() => {
+                produced::kept(place, &self.produces)
+            }
+            _ => produced::take(place, &self.produces),
         };
         Ok(match values {
             Ok(values) => Outcome::Done {
