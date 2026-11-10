@@ -20,7 +20,7 @@ Words used here: a **stack** is everything one `tay.yaml` describes. An **enviro
 | `stack/profiles/<name>.yaml` | A named set of choices: what comes up, which way units run, values of settings |
 | `.tay/` | This environment's own choices and state. Never committed. `tay plan` reads it and never writes it |
 
-A path that begins `./` is relative to the folder of the file it is written in. Any other relative path is relative to the stack's root.
+A path that begins `./` is relative to the folder of the file it is written in. Any other relative path is relative to the stack's root. This holds wherever a setting is a path: a `workdir`, a mount's `from`, a `template`, a `stdin`, a build's `context`, an entry in `outputs` or `watch`. The value a unit gives for such a path is the whole path. Text that merely contains a path, such as an argument in a `command`, is left as written.
 
 ### `tay.yaml`
 
@@ -111,7 +111,7 @@ run:
 - The unit's own `needs`, `after` and `gives` apply to every way and are joined with the way's.
 - The unit's own `ready`, `restart` and `watch` are what a way has when it writes none of its own.
 - The unit's own `with` is joined with the way's, setting by setting, the way's winning. A setting that maps names to values (`env`, `secret_env`, `labels`, `volumes`, `publish`) is joined entry by entry. Each way is then checked against its module, so a setting written for the whole unit must be one that every way's module has.
-- After joining, every way of a unit must give the same value names. If one gives `api` and another does not, that is an error: a consumer must not break when the unit is switched.
+- After joining, every way of a unit must give the same value names, and the names a way lists under `produces` count among them. If one gives `api` and another does not, that is an error: a consumer must not break when the unit is switched.
 - Which way is used is a choice of the environment (see Choices). A unit must have a usable way only if the plan reaches it: it comes up, something that comes up uses one of its values, or a reference asks for its view with `@`.
 
 ### Templates
@@ -140,7 +140,7 @@ app-db: { from: postgres-database, params: { name: app } }
 
 - A template's `unit` may be anything a unit may be, ways included, except that it may not itself use `from`.
 - A unit made `from` a template may have only `doc`, `from`, `params`, `needs` and `after`; its `needs` and `after` are joined with the template's.
-- A parameter's value may be any YAML value and may contain references. They mean what they would mean written in the unit that is made.
+- A parameter's value may be any YAML value and may contain references. They mean what they would mean written in the unit that is made. Parameters are put in place before anything else is read from the unit, so a mapping passed as a parameter joins as one written out would.
 - A missing required parameter, or a parameter the template does not declare, is an error.
 
 ### Actions
@@ -198,7 +198,7 @@ Three of them **run** something: `process`, `container` and `command`. The other
 
 Every container joins the environment's one network. That network belongs to the environment, not to any unit, and has no definition; `${environment.network}` is its name. Every container carries the labels `tay.environment`, the environment's id, and `tay.unit`, the unit's name.
 
-A mount's `from` that lies inside the environment's state folder is created as a folder if it is missing. Anywhere else it must exist when `tay plan` runs, unless it is built from a value produced by running. Mounting another unit's volume orders nothing: if the units must start in an order, `needs` says so.
+A mount's `from` inside the environment's state folder or shared folder need not exist when `tay plan` runs; if it is still missing when the unit starts, tay creates it as a folder. Anywhere else it must exist when `tay plan` runs, unless it is built from a value produced by running. Mounting another unit's volume orders nothing: if the units must start in an order, `needs` says so.
 
 ### `command`: something run once
 
@@ -207,7 +207,7 @@ A mount's `from` that lies inside the environment's state folder is created as a
 | `run` | Required. A list (program and arguments), or `{ shell: "..." }` when a shell is wanted |
 | `check` | Same form. Exit 0: already done, do not run. Exit 1: not done, run. Any other exit: cannot tell, and the unit fails. With no `check`, the command runs every time the environment is brought up |
 | `undo` | Same form. What wiping this unit runs |
-| `when_removed` | `keep` (the default) or `undo`. With `undo`, tay runs `undo` when the unit leaves the plan of an environment that had run it. Requires `undo` |
+| `when_removed` | `keep` (the default) or `undo`. With `undo`, tay runs `undo` when the unit leaves the plan of an environment that had run it, with what the unit last ran with and while the units it needed are still up. Requires `undo` |
 | `in` | Run inside this container unit's container. At most one of `in` and `image`. It is a need for that unit and is not written again in `needs` |
 | `image` | Run as a one-off container from this image, on the environment's network. `run` is then the whole command, in place of the image's entrypoint. With it: `mounts` as for `container` |
 | `user` | With `in` or `image`: the user to run as |
@@ -238,7 +238,7 @@ Gives `number`.
 | `mode` | Permissions, as a string such as `"0600"`. Default `"0644"`, or `"0600"` if the content uses a secret. A `mode` that is written wins |
 | `overwrite` | `false` for a file another program rewrites: tay writes it once and then leaves it alone. Default `true` |
 
-The file is written inside the environment's state folder, at `files/<folder>/<name>`, never among the checkout's own files. Gives `path` and `dir`. Two file units with the same `folder` and the same `name` are an error.
+The file is written inside the environment's state folder, at `files/<folder>/<name>`, never among the checkout's own files. Gives `path` and `dir`, the folder. Two file units with the same `folder` and the same `name` are an error. Using `dir` brings in this unit's file only: a unit that wants the folder's other files needs their units.
 
 ### `secret`: a value generated once and kept
 
@@ -246,7 +246,7 @@ The file is written inside the environment's state folder, at `files/<folder>/<n
 |---|---|
 | `kind` | `password`, `bytes` or `keypair` |
 | `length` | For `password`: how many characters, default 32. For `bytes`: how many bytes, default 32 |
-| `encoding` | For `bytes`: `hex` (the default), `base64` or `base64url` |
+| `encoding` | For `bytes`: `hex` (the default), `base64` (padded) or `base64url` (not padded) |
 | `algorithm` | For `keypair`: `ed25519` or `rsa-2048` |
 
 A `password` is letters and digits only, so it is safe inside a URL, a JSON string or a shell word. Gives `value` (for `password` and `bytes`), or `public` and `private` (for `keypair`, as PEM text). Everything a `secret` unit gives is secret, except a key pair's `public`.
@@ -282,8 +282,8 @@ A unit gives values; other units use them by reference. A reference is `${...}` 
 | `${environment.label}` | What tells this environment's hostnames from another's: the folder's name with the stack's name and a hyphen taken off the front, cut down to what a hostname allows. Empty when the folder is named after the stack. A choice may set it |
 | `${environment.label_suffix}`, `${environment.label_prefix}` | `-label` and `label-`, or nothing when the label is empty |
 | `${environment.root}`, `${environment.state}` | The stack's root folder, and this environment's state folder, which is `.tay/state` under the root |
-| `${environment.logs}` | The folder tay writes each unit's log in |
-| `${environment.shared}` | A folder shared by all of one person's environments of this stack, for what is costly to fetch and safe to share |
+| `${environment.logs}` | The folder tay writes logs in, one folder per unit. It is `.tay/logs` under the root |
+| `${environment.shared}` | A folder shared by all of one person's environments of this stack, for what is costly to fetch and safe to share. It is `~/.local/share/tay/<stack>` |
 | `${environment.network}` | The name of the environment's Docker network |
 | `${environment.profile}` | The profile in use |
 
@@ -320,7 +320,7 @@ An endpoint is used through its parts.
 | Reference | Gives |
 |---|---|
 | `${unit.api}` | `host:port` |
-| `${unit.api.url}` | `scheme://host:port/path`. The port is left out when it is the scheme's usual one, and with no `path` nothing follows the port. An endpoint with no `scheme` has no `.url` |
+| `${unit.api.url}` | `scheme://host:port/path`. The port is left out when it is the scheme's usual one (80 for `http`, 443 for `https`, and no other), and with no `path` nothing follows the port. An endpoint with no `scheme` has no `.url` |
 | `${unit.api.host}`, `${unit.api.port}` | The two halves |
 
 Unless the endpoint writes its `host`, each part depends on where the unit that finally uses it runs. A `gives` built from an endpoint, such as `"${self.api.url}/health"`, is carried the same way: it is worked out for whoever uses it, not for the unit that gives it.
@@ -336,7 +336,7 @@ A view may be asked for by name, whatever the user is. It may be written on a re
 - `${unit.api.url@net}` is the address as a container of this environment sees it.
 - `${wiki.web.url@proxy}` is the address as the unit `proxy` sees it, under the way that unit is running. It is for an address one unit writes down and another uses: a setup step that records, for the proxy, where the wiki is. The unit named must be one that runs.
 
-A unit that is made runs nowhere, so an address used in a `file` unit's content must name its view.
+A unit that is made runs nowhere, so an address used in a `file` unit's content must name its view, unless the endpoint writes its `host`.
 
 **An address that is the same for everyone.** An endpoint that writes its `host` has no views: every user gets that host and that port. This is the form for an address a browser uses.
 
@@ -347,7 +347,7 @@ gives:
 
 In a checkout named `example-fix-login`, with the port set to 8443, `${portal.public.url}` is `https://portal-fix-login.example.test:8443`. In the checkout named `example`, with the port 443, it is `https://portal.example.test`.
 
-**When a published port is opened.** A port in `publish` is opened on the host only if something in the plan uses that endpoint from the host: a unit on the host that uses it, a readiness check tay makes itself, or a reference that asks with `@host` or with `@` a unit that runs on the host. It is opened on 127.0.0.1, or on the long form's `address`. `always: true` in the long form opens it with no such use, for a port that a person or another machine uses. The plan says, for each published port, whether it is opened and what opens it.
+**When a published port is opened.** A port in `publish` is opened on the host only if something in the plan uses that endpoint from the host: a unit on the host that uses it, a readiness check tay makes itself, or a reference that asks with `@host` or with `@` a unit that runs on the host. It is opened on 127.0.0.1, or on the long form's `address`. `always: true` in the long form opens it with no such use, for a port that a person or another machine uses. The plan says, for each published port, whether it is opened and what opens it. An entry that is not opened uses nothing: a `port` unit named only there does not come into the plan.
 
 ## Readiness and restarts
 
@@ -421,7 +421,7 @@ production: true
 require: [base_domain, licence_key]
 ```
 
-A setting in `require` must be set and not empty under that profile, whether or not a unit in the plan uses it.
+A setting in `require` must be given a value that is not empty by a choice: the profile, the environment's file or `--set`. The stack's default does not count, and it does not matter whether a unit in the plan uses the setting.
 
 ### Production profiles
 
@@ -430,7 +430,7 @@ A profile with `production: true` is checked after every choice is applied, and 
 - a `process` unit, or a `command` unit that runs on the host;
 - a `container` with `build`;
 - a unit with `watch`;
-- a mount whose source is neither under the stack's own folders nor under the environment's state folder, and does not begin with a setting's value, written there directly or reached through a value that begins with one.
+- a mount whose source is neither under the stack's root nor in the environment's shared folder, and does not begin with a setting's value, written there directly or reached through a value that begins with one.
 
 ## Secrets
 
