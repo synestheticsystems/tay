@@ -120,14 +120,18 @@ impl Value {
                 let mut text = String::new();
                 let mut secret = false;
                 for bit in bits {
-                    match bit {
-                        Bit::Text(written) => text.push_str(written),
-                        Bit::Placeholder(placeholder) => {
-                            let value = filled(placeholder)?;
-                            secret |= value.is_secret();
-                            text.push_str(&value.reveal());
+                    let value = match bit {
+                        Bit::Text(written) => {
+                            text.push_str(written);
+                            continue;
                         }
-                    }
+                        Bit::Placeholder(placeholder) => filled(placeholder)?,
+                        Bit::UrlPort { scheme, port } => {
+                            url_port(&scheme.fill(&mut filled)?, port.fill(&mut filled)?)
+                        }
+                    };
+                    secret |= value.is_secret();
+                    text.push_str(&value.reveal());
                 }
                 Ok(match secret {
                     true => Filled::secret(text),
@@ -135,6 +139,23 @@ impl Value {
                 })
             }
         }
+    }
+}
+
+/// The port of a URL of `scheme`, filled: `:` and the number, or nothing
+/// when it is the scheme's usual one. A secret is never compared, and the
+/// text holds a secret when the port is one.
+fn url_port(scheme: &Filled, port: Filled) -> Filled {
+    let usual = match (scheme.plain(), port.plain()) {
+        (Some(Exact::Text(scheme)), Some(Exact::Number(number))) => {
+            super::usual_port(scheme) == Some(*number)
+        }
+        _ => false,
+    };
+    match (usual, port) {
+        (true, _) => Filled::text(""),
+        (false, Filled::Plain(port)) => Filled::text(format!(":{}", port.as_text())),
+        (false, Filled::Secret(Secret(port))) => Filled::secret(format!(":{}", port.as_text())),
     }
 }
 
@@ -211,6 +232,37 @@ mod tests {
         let mut from_setting = |_: &Placeholder| Ok(Filled::text("hunter2"));
         let filled = Value::Placeholder(setting).fill(&mut from_setting).unwrap();
         assert!(!format!("{filled:?}").contains("hunter2"));
+    }
+
+    #[test]
+    fn a_urls_port_is_left_out_when_it_is_filled_with_the_schemes_usual_one() {
+        let url = |scheme: &str| {
+            Value::Text(vec![
+                Bit::Text(format!("{scheme}://127.0.0.1")),
+                Bit::UrlPort {
+                    scheme: Box::new(Value::text(scheme)),
+                    port: Box::new(Value::Placeholder(port())),
+                },
+                Bit::Text("/health".into()),
+            ])
+        };
+        let filled_with = |number: i64| {
+            move |_: &Placeholder| -> Result<Filled, Unfilled> { Ok(Filled::number(number)) }
+        };
+        let cases = [
+            ("https", 443, "https://127.0.0.1/health"),
+            ("https", 8443, "https://127.0.0.1:8443/health"),
+            ("http", 80, "http://127.0.0.1/health"),
+            ("http", 443, "http://127.0.0.1:443/health"),
+        ];
+        for (scheme, number, wanted) in cases {
+            let filled = url(scheme).fill(&mut filled_with(number)).unwrap();
+            assert_eq!(filled, Filled::text(wanted));
+        }
+        assert_eq!(
+            url("https").shown(),
+            "https://127.0.0.1:<port: web-port>/health"
+        );
     }
 
     #[test]

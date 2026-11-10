@@ -27,6 +27,24 @@ pub enum Value {
 pub enum Bit {
     Text(String),
     Placeholder(Placeholder),
+    /// The port of a URL: `:` and the number, or nothing when the number is
+    /// the scheme's usual one. Which, is known once both are filled.
+    UrlPort {
+        scheme: Box<Value>,
+        port: Box<Value>,
+    },
+}
+
+/// The schemes whose usual port a URL leaves out, and those ports. No other
+/// scheme has one.
+const USUAL_PORTS: [(&str, i64); 2] = [("http", 80), ("https", 443)];
+
+/// The port a URL of `scheme` leaves out, if it has one.
+pub fn usual_port(scheme: &str) -> Option<i64> {
+    USUAL_PORTS
+        .iter()
+        .find(|(name, _)| *name == scheme)
+        .map(|(_, port)| *port)
 }
 
 /// A part of a value that is not known before start, or is not shown.
@@ -180,13 +198,18 @@ impl Value {
         }
     }
 
+    /// Every placeholder in the value, those a URL's port is decided by
+    /// among them.
     pub fn placeholders(&self) -> Vec<&Placeholder> {
         match self {
             Value::Text(bits) => bits
                 .iter()
-                .filter_map(|bit| match bit {
-                    Bit::Placeholder(placeholder) => Some(placeholder),
-                    Bit::Text(_) => None,
+                .flat_map(|bit| match bit {
+                    Bit::Placeholder(placeholder) => vec![placeholder],
+                    Bit::Text(_) => Vec::new(),
+                    Bit::UrlPort { scheme, port } => {
+                        [scheme.placeholders(), port.placeholders()].concat()
+                    }
                 })
                 .collect(),
             Value::Placeholder(placeholder) => vec![placeholder],
@@ -220,7 +243,7 @@ impl Value {
                 .iter()
                 .map_while(|bit| match bit {
                     Bit::Text(text) => Some(text.as_str()),
-                    Bit::Placeholder(_) => None,
+                    Bit::Placeholder(_) | Bit::UrlPort { .. } => None,
                 })
                 .collect(),
             _ => String::new(),
@@ -234,7 +257,7 @@ impl Value {
                 .iter()
                 .map(|bit| match bit {
                     Bit::Text(text) => Some(text.as_str()),
-                    Bit::Placeholder(_) => None,
+                    Bit::Placeholder(_) | Bit::UrlPort { .. } => None,
                 })
                 .collect(),
             _ => None,
@@ -258,6 +281,7 @@ impl Value {
             .map(|bit| match bit {
                 Bit::Text(text) => text.clone(),
                 Bit::Placeholder(placeholder) => placeholder.shown(),
+                Bit::UrlPort { port, .. } => format!(":{}", port.shown()),
             })
             .collect()
     }

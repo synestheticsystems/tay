@@ -15,15 +15,11 @@ use crate::syntax::expr::{Expr, Part, Reference};
 
 use super::{Asker, Fail, Res, Resolver, Scope, ViewProblem};
 use crate::plan::resolve::resolved::{ReachedEntry, Resolved};
-use crate::value::{Bit, Exact, Value};
+use crate::value::{Bit, Exact, Value, usual_port};
 
 /// The host's own address, which a unit on the host reaches another at and
 /// a published port is opened on unless its entry names another.
 pub const LOOPBACK: &str = "127.0.0.1";
-
-/// The schemes whose usual port a URL leaves out, and those ports. No other
-/// scheme has one.
-const USUAL_PORTS: [(&str, i64); 2] = [("http", 80), ("https", 443)];
 
 impl<'s> Resolver<'s> {
     pub(super) fn endpoint(
@@ -95,10 +91,7 @@ impl<'s> Resolver<'s> {
                 bits.extend(scheme.value.bits());
                 bits.push(Bit::Text("://".to_string()));
                 bits.extend(host.value.bits());
-                if !is_usual_port(scheme, &seen_port) {
-                    bits.push(Bit::Text(":".to_string()));
-                    bits.extend(seen_port.value.bits());
-                }
+                bits.extend(url_port(&scheme.value, &seen_port.value));
                 if let Some(path) = &path {
                     bits.extend(path.value.bits());
                 }
@@ -213,13 +206,59 @@ impl<'s> Resolver<'s> {
     }
 }
 
-/// Whether `port` is the usual one of `scheme`, which a URL leaves out.
-/// Both must be known before start to tell.
-fn is_usual_port(scheme: &Resolved, port: &Resolved) -> bool {
-    let (Some(Exact::Text(scheme)), Some(Exact::Number(port))) =
-        (scheme.value.exact(), port.value.exact())
-    else {
-        return false;
-    };
-    USUAL_PORTS.contains(&(scheme.as_str(), port))
+/// The port of a URL: `:` and the number, or nothing when it is the
+/// scheme's usual one. When the scheme has a usual port and either is not
+/// known before start, which it is is decided once both are filled.
+fn url_port(scheme: &Value, port: &Value) -> Vec<Bit> {
+    let written = || [vec![Bit::Text(":".to_string())], port.bits()].concat();
+    match (scheme.exact(), port.exact()) {
+        (Some(Exact::Text(scheme)), Some(Exact::Number(number)))
+            if usual_port(&scheme) == Some(number) =>
+        {
+            Vec::new()
+        }
+        (Some(Exact::Text(scheme)), _) if usual_port(&scheme).is_none() => written(),
+        (Some(_), Some(_)) => written(),
+        _ => vec![Bit::UrlPort {
+            scheme: Box::new(scheme.clone()),
+            port: Box::new(port.clone()),
+        }],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::value::Placeholder;
+
+    fn port() -> Value {
+        Value::Placeholder(Placeholder::Port {
+            unit: "web-port".into(),
+            name: "number".into(),
+        })
+    }
+
+    #[test]
+    fn a_urls_port_is_left_out_now_when_both_are_known_and_once_filled_when_not() {
+        assert_eq!(url_port(&Value::text("https"), &Value::Number(443)), []);
+        assert_eq!(
+            url_port(&Value::text("https"), &Value::Number(8443)),
+            [Bit::Text(":".into()), Bit::Text("8443".into())]
+        );
+        // A scheme with no usual port always shows its port.
+        assert_eq!(
+            url_port(&Value::text("postgres"), &port()),
+            [
+                Bit::Text(":".into()),
+                Bit::Placeholder(port().placeholders()[0].clone())
+            ]
+        );
+        assert_eq!(
+            url_port(&Value::text("https"), &port()),
+            [Bit::UrlPort {
+                scheme: Box::new(Value::text("https")),
+                port: Box::new(port()),
+            }]
+        );
+    }
 }

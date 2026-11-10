@@ -203,10 +203,11 @@ mod tests {
             ),
             "{web}"
         );
-        // The API's address as the host, where `web` runs, sees it.
+        // The API's address as the host, where `web` runs, sees it: its
+        // port is left out if it is filled with 80.
         assert!(
             web.contains(
-                r#"("API_URL", Text([Text("http://127.0.0.1:"), Placeholder(Port { unit: "api-port", name: "number" })]))"#
+                r#"("API_URL", Text([Text("http://127.0.0.1"), UrlPort { scheme: Text([Text("http")]), port: Placeholder(Port { unit: "api-port", name: "number" }) }]))"#
             ),
             "{web}"
         );
