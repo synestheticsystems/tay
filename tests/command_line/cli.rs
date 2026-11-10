@@ -68,13 +68,12 @@ fn the_stack_is_found_by_walking_up_from_the_current_folder() {
 
 #[test]
 fn a_folder_with_no_stack_above_it_exits_2() {
-    let empty = std::env::temp_dir();
-    let run = tay(&empty, &home(), &["plan"]);
+    // The root of the file system has no folder above it to hold a stack.
+    let run = tay(Path::new("/"), &home(), &["plan"]);
     assert_eq!(run.code, 2);
-    assert!(
-        run.stderr.contains("there is no tay.yaml in"),
-        "{}",
-        run.stderr
+    assert_eq!(
+        run.stderr,
+        "tay plan: there is no tay.yaml in / or any folder above it\n"
     );
 }
 

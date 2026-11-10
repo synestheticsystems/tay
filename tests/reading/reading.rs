@@ -103,3 +103,18 @@ fn a_units_own_fields_are_checked_as_written_whether_or_not_it_comes_up() {
         ]
     );
 }
+
+#[test]
+fn a_folder_tay_yaml_names_must_exist_though_a_default_one_may_be_absent() {
+    let run = plan("folder-missing", &[]);
+    let root = crate::support::fixture("folder-missing")
+        .canonicalize()
+        .unwrap();
+    assert_eq!(
+        run.errors(),
+        [format!(
+            "tay.yaml:3:12: the folder `{}/stack/nowhere` does not exist",
+            root.display()
+        )]
+    );
+}

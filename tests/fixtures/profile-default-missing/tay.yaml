@@ -1,0 +1,5 @@
+format: 1
+stack: profile-default-missing
+default_profile: staging
+units:
+  web: { uses: port }

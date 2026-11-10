@@ -40,8 +40,8 @@ Options of tay plan:
   --root FOLDER       look for tay.yaml from FOLDER instead of the current one
   --profile NAME      use this profile instead of the stack's default one
   --set PLACE=VALUE   make one choice, after every other place. PLACE is up,
-                      up_add, up_remove, run.default (lists written with
-                      commas), run.units.UNIT, settings.NAME or label
+                      up_add, up_remove, run.default, run.units.UNIT,
+                      settings.NAME or label; a list is written with commas
   --json              print the plan as JSON, schema 1, for programs
 
 Exit codes: 0 the plan is sound; 2 the definitions or the command line have

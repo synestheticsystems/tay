@@ -1,0 +1,12 @@
+format: 1
+stack: ways-outputs
+up: []
+units:
+  server:
+    run:
+      built:
+        uses: command
+        with: { run: [build], outputs: { binary: target/server } }
+      fetched:
+        uses: command
+        with: { run: [fetch] }

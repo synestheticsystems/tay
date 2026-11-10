@@ -72,10 +72,12 @@ pub fn plan(root: &Path, options: &Options, sources: &mut Sources, d: &mut Diagn
     // With a file that did not parse, the set of units is not known, and
     // every reference to a unit in it would be reported as missing; nor is
     // it known whether a place gives `up` or a required setting.
-    // A profile that is named and missing has been reported, and what it
-    // would have said is not known.
-    let profile_missing =
-        profile.is_none() && (options.profile.is_some() || stack.default_profile.is_some());
+    // A profile that is named and missing, or that must be named and is
+    // not, has been reported, and what it would have said is not known.
+    let profile_missing = profile.is_none()
+        && (options.profile.is_some()
+            || stack.default_profile.is_some()
+            || stack.profiles.len() > 1);
     if every_file_parsed {
         read::cross_references::check(&stack, &places.in_order(), d);
         if !profile_missing {

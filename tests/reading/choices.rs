@@ -165,3 +165,21 @@ fn production_and_require_may_be_written_only_in_a_profile() {
         assert!(line.is_some(), "{errors:?}");
     }
 }
+
+#[test]
+fn with_more_than_one_profile_the_default_must_be_named_and_must_exist() {
+    // Which profile would say what comes up is not known, so that is not
+    // reported as well.
+    let run = crate::support::plan("profiles-unnamed", &[]);
+    assert_eq!(
+        run.errors(),
+        [
+            "tay.yaml:1:1: there is more than one profile (`deploy`, `dev`), so `default_profile` is required"
+        ]
+    );
+    let run = crate::support::plan("profile-default-missing", &[]);
+    assert_eq!(
+        run.errors(),
+        ["tay.yaml:3:18: there is no profile `staging`; the profiles are `dev`"]
+    );
+}

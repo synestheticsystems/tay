@@ -97,3 +97,15 @@ fn names_a_way_produces_count_among_the_values_it_gives() {
         ]
     );
 }
+
+#[test]
+fn files_a_way_builds_count_among_the_values_it_gives() {
+    let run = plan("ways-outputs", &[]);
+    assert_eq!(
+        run.errors(),
+        [
+            "tay.yaml:10:7: way `fetched` of `server` does not give `outputs.binary`, which way `built` gives; every way gives the same values",
+            "  tay.yaml:9:42: `built` gives it here",
+        ]
+    );
+}
