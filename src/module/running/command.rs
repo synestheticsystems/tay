@@ -8,7 +8,7 @@ use crate::syntax::yaml::Node;
 use crate::value::Value;
 
 use super::command_line::{RunForm, run_form};
-use super::mounts::{Mount, mounts};
+use super::mounts::{self, Mount, mounts};
 use super::variables::{Variables, variables};
 use crate::module::description::{
     Description, ModuleGive, ModuleValue, Output, ReadyWithoutCheck, RestartOn, Runs, UnitKind,
@@ -147,9 +147,12 @@ impl Module for Command {
                 path: path.expr.clone(),
             })
             .collect();
+        let (volume_mounts, production) = mounts::described(&settings.mounts);
         Some(Description {
             gives,
             outputs,
+            volume_mounts,
+            production,
             ..Description::new(
                 UnitKind::Runs(runs),
                 Box::new(settings),
@@ -390,6 +393,21 @@ mod tests {
         );
         let read = settings("run: [x]\nimage: alpine\nmounts: [{ from: a, to: /a }]\n");
         assert_eq!((read.image.is_some(), read.mounts.len()), (true, 1));
+        // The mounts of a container made for the run are described as a
+        // container's are: a volume to check, a host path to judge.
+        let description = check(
+            "command",
+            "run: [x]\nimage: alpine\nmounts: [{ from: a, to: /a }, { volume: db/data, to: /d }]\n",
+        )
+        .0
+        .unwrap();
+        assert_eq!(
+            (
+                description.volume_mounts.len(),
+                description.production.len()
+            ),
+            (1, 1)
+        );
     }
 
     #[test]

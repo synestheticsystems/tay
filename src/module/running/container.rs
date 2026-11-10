@@ -6,7 +6,7 @@ use crate::syntax::names::NameAt;
 use crate::syntax::yaml::Node;
 use crate::value::Value;
 
-use super::mounts::Mount;
+use super::mounts::{self, Mount};
 use super::variables::Variables;
 use crate::module::description::{
     Concern, Description, ReadyWithoutCheck, RestartOn, Runs, UnitKind,
@@ -177,13 +177,8 @@ impl Module for Container {
             .iter()
             .map(|volume| volume.name.clone())
             .collect();
-        let volume_mounts = settings
-            .mounts
-            .iter()
-            .filter_map(|mount| mount.volume().cloned())
-            .collect();
-        let mut production: Vec<Concern> = built_at.map(Concern::BuildsImage).into_iter().collect();
-        production.extend(settings.mounts.iter().filter_map(Mount::concern));
+        let (volume_mounts, mut production) = mounts::described(&settings.mounts);
+        production.extend(built_at.map(Concern::BuildsImage));
         Some(Description {
             published,
             volumes,

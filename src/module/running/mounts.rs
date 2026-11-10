@@ -47,22 +47,18 @@ impl<V> Mount<V> {
     }
 }
 
-impl Mount<Slot> {
-    /// What a production profile refuses in this mount: a host path.
-    pub fn concern(&self) -> Option<Concern> {
-        match &self.source {
-            Source::Host(from) => Some(Concern::MountsHostPath(from.expr.clone())),
-            Source::Volume(_) => None,
+/// What mounting these tells the planner: the other units' volumes they
+/// mount, and each host path, which a production profile judges.
+pub fn described(mounts: &[Mount<Slot>]) -> (Vec<VolumeMount>, Vec<Concern>) {
+    let mut volumes = Vec::new();
+    let mut concerns = Vec::new();
+    for mount in mounts {
+        match &mount.source {
+            Source::Host(from) => concerns.push(Concern::MountsHostPath(from.expr.clone())),
+            Source::Volume(volume) => volumes.push(volume.clone()),
         }
     }
-
-    /// The other unit's volume this mount makes visible.
-    pub fn volume(&self) -> Option<&VolumeMount> {
-        match &self.source {
-            Source::Volume(volume) => Some(volume),
-            Source::Host(_) => None,
-        }
-    }
+    (volumes, concerns)
 }
 
 /// `mounts`: each a host file or folder made visible in a container,
