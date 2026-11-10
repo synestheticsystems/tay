@@ -1,17 +1,18 @@
 //! tay: Topology Automation via YAML.
 //!
-//! The library reads a stack's definitions and plans it; the `tay` binary is
-//! its command line.
+//! The crate reads a stack's definitions and plans it. Only the command line
+//! is public, because the `tay` binary is the only user of the rest so far;
+//! keeping the rest private lets the compiler report what nothing uses.
 
 pub mod cli;
-pub mod definition;
-pub mod diagnostic;
-pub mod expr;
-pub mod fields;
-pub mod module;
-pub mod names;
-pub mod output;
-pub mod plan;
-pub mod read;
-pub mod source;
-pub mod yaml;
+mod definition;
+mod diagnostic;
+mod expr;
+mod fields;
+mod module;
+mod names;
+mod output;
+mod plan;
+mod read;
+mod source;
+mod yaml;

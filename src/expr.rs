@@ -53,13 +53,6 @@ pub enum Piece {
 }
 
 impl Expr {
-    pub fn text(loc: Loc, text: &str) -> Expr {
-        Expr {
-            loc,
-            kind: ExprKind::Text(vec![Piece::Lit(text.to_string())]),
-        }
-    }
-
     /// Every reference in the value.
     pub fn references(&self) -> Vec<&Reference> {
         match &self.kind {

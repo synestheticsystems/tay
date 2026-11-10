@@ -16,7 +16,7 @@ pub struct Fields<'n> {
 
 impl<'n> Fields<'n> {
     /// Opens `node` as a mapping whose fields are `allowed`. `what` names the
-    /// thing for messages ("a unit", "a `process` unit's settings").
+    /// thing for messages ("a unit", "a profile").
     pub fn of(
         node: &'n Node,
         what: &'static str,

@@ -132,7 +132,6 @@ pub struct Endpoint {
 
 #[derive(Clone, Debug)]
 pub struct Ready {
-    pub loc: Loc,
     pub check: Check,
     pub within: Expr,
 }

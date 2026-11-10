@@ -10,14 +10,14 @@ mod port;
 mod process;
 mod secret;
 pub mod shape;
+mod want;
 
 use crate::diagnostic::Diagnostics;
 use crate::source::Loc;
 use crate::yaml::Node;
 
-pub use shape::{
-    Concern, Form, Given, GivenValue, Place, Published, RestartDefault, Runs, Slot, UnitShape, Want,
-};
+pub use shape::{Concern, GivenValue, Place, RestartDefault, Runs, UnitShape};
+pub use want::{Form, Want};
 
 /// One mechanism a unit can use.
 pub trait Module: Sync {

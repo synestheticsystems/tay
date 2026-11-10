@@ -8,13 +8,18 @@
 //! never hands it an address meant for another.
 
 mod endpoint;
+mod environment;
+mod settings;
+mod unit_values;
+
+pub use environment::Environment;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
-use crate::definition::{GiveValue, SettingValue, Stack};
+use crate::definition::Stack;
 use crate::diagnostic::{Diagnostic, Diagnostics};
-use crate::expr::{EnvField, Expr, ExprKind, Part, Piece, Reference, Target, Type, UnitRef, View};
-use crate::module::{GivenValue, Runs};
+use crate::expr::{Expr, ExprKind, Part, Piece, Reference, Target, Type, View};
+use crate::module::Runs;
 use crate::source::Loc;
 
 use super::choices::{self, Layered};
@@ -76,16 +81,6 @@ pub struct Scope {
 enum Key {
     Give(usize, String),
     Setting(String),
-}
-
-/// The facts about this environment that references can use.
-#[derive(Debug)]
-pub struct Environment {
-    pub name: String,
-    pub label: String,
-    pub root: String,
-    pub state: String,
-    pub profile: Option<String>,
 }
 
 pub struct Resolver<'s> {
@@ -225,226 +220,9 @@ impl<'s> Resolver<'s> {
             }
             Target::Output { unit, name } => {
                 let owner = self.owner(unit, reference, scope)?;
-                let stack = self.stack;
-                let (variant, _) = self.variant(owner).ok_or(Fail::Reported)?;
-                let unit_name = &stack.units[owner].name.name;
-                if !stack.units[owner].variants[variant]
-                    .outputs
-                    .iter()
-                    .any(|output| output.name == *name)
-                {
-                    return self.fail(
-                        reference.loc,
-                        format!(
-                            "`{}`: unit `{unit_name}` builds no output `{name}`",
-                            reference.written()
-                        ),
-                    );
-                }
-                let mut value = Resolved::known(Shape::Opaque {
-                    ty: Some(Type::Text),
-                    hole: Hole::Output {
-                        unit: unit_name.clone(),
-                        name: name.clone(),
-                    },
-                });
-                value
-                    .producers
-                    .insert(unit_name.clone(), format!("{unit_name}.outputs.{name}"));
-                Ok(value)
+                self.output(owner, name, reference)
             }
         }
-    }
-
-    fn owner(
-        &mut self,
-        unit: &UnitRef,
-        reference: &Reference,
-        scope: Scope,
-    ) -> Result<usize, Fail> {
-        match unit {
-            UnitRef::This => match scope.unit {
-                Some(unit) => Ok(unit),
-                None => self.fail(
-                    reference.loc,
-                    format!(
-                        "`{}`: `self` is used only inside a unit",
-                        reference.written()
-                    ),
-                ),
-            },
-            UnitRef::Named(name) => match self.unit_index(name) {
-                Some(unit) => Ok(unit),
-                None => self.fail(
-                    reference.loc,
-                    format!("`{}`: there is no unit `{name}`", reference.written()),
-                ),
-            },
-        }
-    }
-
-    fn give(
-        &mut self,
-        owner: usize,
-        name: &str,
-        part: Option<Part>,
-        asker: Asker,
-        reference: &Reference,
-    ) -> Res {
-        let stack = self.stack;
-        let (variant, _) = self.variant(owner).ok_or(Fail::Reported)?;
-        let unit = &stack.units[owner];
-        let Some(give) = unit.variants[variant].give(name) else {
-            return self.fail(
-                reference.loc,
-                format!(
-                    "`{}`: unit `{}` gives no `{name}`",
-                    reference.written(),
-                    unit.name.name
-                ),
-            );
-        };
-        if part.is_some() && !matches!(give.value, GiveValue::Endpoint(_)) {
-            return self.fail(
-                reference.loc,
-                format!(
-                    "`{}`: `{name}` is not an endpoint, so it has no `.url`, `.host` or `.port`",
-                    reference.written()
-                ),
-            );
-        }
-        let key = Key::Give(owner, name.to_string());
-        let scope = Scope {
-            unit: Some(owner),
-            asker,
-        };
-        match &give.value {
-            GiveValue::Value(expr) => self.keyed(key, None, reference.loc, asker, |this| {
-                this.resolve(expr, scope)
-            }),
-            GiveValue::Module(GivenValue::Expr(expr)) => {
-                self.keyed(key, None, reference.loc, asker, |this| {
-                    this.resolve(expr, scope)
-                })
-            }
-            GiveValue::Endpoint(endpoint) => self.keyed(key, part, reference.loc, asker, |this| {
-                this.endpoint(owner, endpoint, part, asker, reference)
-            }),
-            GiveValue::Module(GivenValue::Port) => Ok(Resolved::known(Shape::Opaque {
-                ty: Some(Type::Number),
-                hole: Hole::Port(unit.name.name.clone()),
-            })),
-            GiveValue::Module(GivenValue::Secret) => {
-                let mut value = Resolved::known(Shape::Opaque {
-                    ty: Some(Type::Text),
-                    hole: Hole::Secret,
-                });
-                value.secrets.insert(format!("{}.{name}", unit.name.name));
-                Ok(value)
-            }
-            GiveValue::Module(GivenValue::Produced) => {
-                let mut value = Resolved::known(Shape::Opaque {
-                    ty: None,
-                    hole: Hole::Produced {
-                        unit: unit.name.name.clone(),
-                        name: name.to_string(),
-                    },
-                });
-                value
-                    .producers
-                    .insert(unit.name.name.clone(), format!("{}.{name}", unit.name.name));
-                Ok(value)
-            }
-            GiveValue::Module(GivenValue::Output) => {
-                unreachable!("outputs are not among the values a unit gives")
-            }
-        }
-    }
-
-    fn setting(&mut self, name: &str, at: Loc, asker: Asker) -> Res {
-        let Some(decl) = self.stack.setting(name) else {
-            return self.fail(at, format!("no setting `{name}` is declared in tay.yaml"));
-        };
-        let value = match (self.layered.settings.get(name), &decl.default) {
-            (Some(value), _) => value.clone(),
-            (None, Some(default)) => SettingValue::Written(default.clone()),
-            (None, None) => {
-                self.unset.entry(name.to_string()).or_default().push(at);
-                return Err(Fail::Reported);
-            }
-        };
-        let scope = Scope { unit: None, asker };
-        let resolved = self.keyed(Key::Setting(name.to_string()), None, at, asker, |this| {
-            this.resolve(value.expr(), scope)
-        })?;
-        let ty = match decl.ty {
-            Some(ty) => Some(ty),
-            None => match &decl.default {
-                Some(default) => self.resolve(default, scope)?.ty(),
-                None => None,
-            },
-        };
-        let mut resolved = match (&value, ty) {
-            (SettingValue::Argument(expr), Some(ty)) => {
-                argument(resolved, ty, name, expr.loc, &mut self.d)?
-            }
-            _ => resolved,
-        };
-        if let (Some(ty), Some(got)) = (ty, resolved.ty())
-            && ty != got
-        {
-            return self.fail(
-                value.expr().loc,
-                format!(
-                    "setting `{name}` is {}; this value is {}",
-                    ty.describe(),
-                    got.describe()
-                ),
-            );
-        }
-        if decl.secret {
-            resolved.shape = Shape::Opaque {
-                ty: resolved.ty(),
-                hole: Hole::Secret,
-            };
-            resolved.secrets.insert(format!("settings.{name}"));
-        }
-        Ok(resolved)
-    }
-
-    fn environment_field(&mut self, field: EnvField, reference: &Reference) -> Res {
-        let environment = &self.environment;
-        Ok(match field {
-            EnvField::Name => Resolved::text(&environment.name),
-            EnvField::Label => {
-                if environment.label.is_empty() {
-                    return self.fail(
-                        reference.loc,
-                        format!(
-                            "`{}`: the environment's name `{}` leaves nothing a hostname may hold",
-                            reference.written(),
-                            environment.name
-                        ),
-                    );
-                }
-                Resolved::text(&environment.label)
-            }
-            EnvField::Root => Resolved::text(&environment.root),
-            EnvField::State => Resolved::text(&environment.state),
-            EnvField::Id => Resolved::known(Shape::Opaque {
-                ty: Some(Type::Text),
-                hole: Hole::EnvironmentId,
-            }),
-            EnvField::Profile => match &environment.profile {
-                Some(profile) => Resolved::text(profile),
-                None => {
-                    return self.fail(
-                        reference.loc,
-                        format!("`{}`: this stack has no profiles", reference.written()),
-                    );
-                }
-            },
-        })
     }
 
     /// Resolves the value `key` names, remembering the result for this part
@@ -503,38 +281,5 @@ impl<'s> Resolver<'s> {
     fn fail<T>(&mut self, loc: Loc, message: String) -> Result<T, Fail> {
         self.d.push(Diagnostic::new(loc, message));
         Err(Fail::Reported)
-    }
-}
-
-/// The text of a `--set`, typed as its setting is.
-fn argument(resolved: Resolved, ty: Type, name: &str, loc: Loc, d: &mut Diagnostics) -> Res {
-    let Some(text) = resolved
-        .exact_text()
-        .filter(|_| resolved.producers.is_empty())
-    else {
-        return Ok(resolved);
-    };
-    let shape = match ty {
-        Type::Text => return Ok(resolved),
-        Type::Number => text.parse().ok().map(Shape::Number),
-        Type::Bool => match text.as_str() {
-            "true" => Some(Shape::Bool(true)),
-            "false" => Some(Shape::Bool(false)),
-            _ => None,
-        },
-    };
-    match shape {
-        Some(shape) => Ok(Resolved { shape, ..resolved }),
-        // The message does not quote the value: it may be a secret.
-        None => {
-            d.error(
-                loc,
-                format!(
-                    "setting `{name}` is {}, and this value is not",
-                    ty.describe()
-                ),
-            );
-            Err(Fail::Reported)
-        }
     }
 }

@@ -3,21 +3,22 @@
 
 mod choices;
 mod discover;
+mod files;
 mod settings;
 mod template;
 mod unit;
 mod unit_parts;
 mod version;
 
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::definition::{Choices, Profile, Stack, Unit};
 use crate::diagnostic::{Diagnostic, Diagnostics};
 use crate::fields::{self, Fields};
 use crate::names::{self, NameAt, RESERVED_UNIT_NAMES};
 use crate::source::{Loc, Sources};
-use crate::yaml::{self, Node};
+
+use files::Reader;
 
 pub use choices::{assignment, choices_file};
 pub use discover::{STACK_FILE, find_root};
@@ -53,12 +54,7 @@ const STACK_FIELDS: &[&str] = &[
 ];
 
 pub fn read(root: &Path, sources: &mut Sources, d: &mut Diagnostics) -> Outcome {
-    let mut reader = Reader {
-        root,
-        sources,
-        d,
-        every_file_parsed: true,
-    };
+    let mut reader = Reader::new(root, sources, d);
     let Some(node) = reader.parse(&root.join(STACK_FILE)) else {
         return Outcome::Unreadable;
     };
@@ -122,208 +118,9 @@ pub fn optional_choices(
     if !path.is_file() {
         return None;
     }
-    let mut reader = Reader {
-        root,
-        sources,
-        d,
-        every_file_parsed: true,
-    };
+    let mut reader = Reader::new(root, sources, d);
     let node = reader.parse(path)?;
     choices_file(&node, reader.d)
-}
-
-struct Reader<'a> {
-    root: &'a Path,
-    sources: &'a mut Sources,
-    d: &'a mut Diagnostics,
-    every_file_parsed: bool,
-}
-
-/// A definitions folder, and where `tay.yaml` names it when it does.
-struct Folder {
-    path: PathBuf,
-    named_at: Option<Loc>,
-}
-
-impl Reader<'_> {
-    fn parse(&mut self, path: &Path) -> Option<Node> {
-        let source = self.sources.add_file(path, self.root);
-        match fs::read_to_string(path) {
-            Ok(text) => {
-                let node = yaml::parse(&text, source, self.d);
-                self.every_file_parsed &= node.is_some();
-                node
-            }
-            Err(error) => {
-                self.d.error(
-                    Loc::new(source, 1, 1),
-                    format!("this file cannot be read: {error}"),
-                );
-                self.every_file_parsed = false;
-                None
-            }
-        }
-    }
-
-    fn folder(&mut self, file: &Fields<'_>, key: &str, default: &str) -> Folder {
-        match file.get(key) {
-            Some(node) => Folder {
-                path: self
-                    .root
-                    .join(fields::text(node, &format!("`{key}`"), self.d).unwrap_or(default)),
-                named_at: Some(node.loc),
-            },
-            None => Folder {
-                path: self.root.join(default),
-                named_at: None,
-            },
-        }
-    }
-
-    /// The entries of a definitions folder. A folder `tay.yaml` names must
-    /// exist; one it leaves at the default may be absent, as in a small stack
-    /// that keeps everything in `tay.yaml`.
-    fn entries(&mut self, folder: &Folder) -> Vec<discover::Entry> {
-        match discover::entries(&folder.path) {
-            Ok(Some(entries)) => entries,
-            Ok(None) => {
-                if let Some(loc) = folder.named_at {
-                    self.d.error(
-                        loc,
-                        format!("the folder `{}` does not exist", folder.path.display()),
-                    );
-                }
-                Vec::new()
-            }
-            Err(error) => {
-                let loc = folder.named_at.unwrap_or_else(|| {
-                    Loc::new(self.sources.add_file(&folder.path, self.root), 1, 1)
-                });
-                self.d
-                    .error(loc, format!("this folder cannot be read: {error}"));
-                self.every_file_parsed = false;
-                Vec::new()
-            }
-        }
-    }
-
-    fn not_a_definition(&mut self, path: &Path, holds: &str) {
-        let loc = Loc::new(self.sources.add_file(path, self.root), 1, 1);
-        let hint = if path.extension().is_some_and(|ext| ext == "yml") {
-            " (tay reads `.yaml`, not `.yml`)"
-        } else {
-            ""
-        };
-        self.d.error(
-            loc,
-            format!("this is not a definition: this folder holds {holds}{hint}"),
-        );
-    }
-
-    /// The name a file or folder gives what it defines.
-    fn file_name(&mut self, path: &Path, node: &Node, what: &str) -> Option<NameAt> {
-        let name = discover::stem(path);
-        match names::name_problem(&name) {
-            None => Some(NameAt {
-                name,
-                loc: node.loc,
-            }),
-            Some(problem) => {
-                self.d.error(
-                    node.loc,
-                    format!("the file's name is {what}'s name: {problem}"),
-                );
-                None
-            }
-        }
-    }
-
-    fn templates(&mut self, folder: Folder) -> Vec<template::Template> {
-        let mut templates = Vec::new();
-        for entry in self.entries(&folder) {
-            match entry {
-                discover::Entry::File(path) => {
-                    let Some(node) = self.parse(&path) else {
-                        continue;
-                    };
-                    let Some(name) = self.file_name(&path, &node, "the template") else {
-                        continue;
-                    };
-                    templates.extend(template::read(name, &node, self.d));
-                }
-                discover::Entry::Folder(path) | discover::Entry::Other(path) => {
-                    self.not_a_definition(&path, "one `<name>.yaml` file per template");
-                }
-            }
-        }
-        templates
-    }
-
-    fn unit_files(&mut self, folder: Folder, templates: &[template::Template]) -> Vec<Unit> {
-        let mut units = Vec::new();
-        for entry in self.entries(&folder) {
-            match entry {
-                discover::Entry::Folder(path) => {
-                    let file = path.join("unit.yaml");
-                    if !file.is_file() {
-                        self.not_a_definition(&path, "`<name>/unit.yaml` and `<anything>.yaml`, and this folder has no `unit.yaml`");
-                        continue;
-                    }
-                    let Some(node) = self.parse(&file) else {
-                        continue;
-                    };
-                    let Some(name) = self.file_name(&path, &node, "the unit") else {
-                        continue;
-                    };
-                    units.push(unit::read(name, &node, templates, self.d));
-                }
-                discover::Entry::File(path) => {
-                    let Some(node) = self.parse(&path) else {
-                        continue;
-                    };
-                    for (name, unit) in
-                        fields::keyed(&node, "a unit's name", names::name_problem, self.d)
-                    {
-                        units.push(unit::read(name, unit, templates, self.d));
-                    }
-                }
-                discover::Entry::Other(path) => {
-                    self.not_a_definition(&path, "`<name>/unit.yaml` and `<anything>.yaml`");
-                }
-            }
-        }
-        units
-    }
-
-    fn profiles(&mut self, folder: Folder) -> Vec<Profile> {
-        let mut profiles = Vec::new();
-        for entry in self.entries(&folder) {
-            match entry {
-                discover::Entry::File(path) => {
-                    let Some(node) = self.parse(&path) else {
-                        continue;
-                    };
-                    let Some(name) = self.file_name(&path, &node, "the profile") else {
-                        continue;
-                    };
-                    profiles.extend(choices::profile(name, &node, self.d));
-                }
-                discover::Entry::Folder(path) | discover::Entry::Other(path) => {
-                    self.not_a_definition(&path, "one `<name>.yaml` file per profile");
-                }
-            }
-        }
-        profiles
-    }
-
-    fn environment_choices(&mut self) -> Option<Choices> {
-        let path = self.root.join(ENVIRONMENT_FOLDER).join("choices.yaml");
-        if !path.is_file() {
-            return None;
-        }
-        let node = self.parse(&path)?;
-        choices_file(&node, self.d)
-    }
 }
 
 /// Unit names are unique across the stack, and none is a name references use.

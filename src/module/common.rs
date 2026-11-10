@@ -7,7 +7,8 @@ use crate::fields::{self, Fields};
 use crate::names;
 use crate::yaml::Node;
 
-use super::shape::{Concern, Form, Place, Slot, Want};
+use super::shape::{Concern, Place, Slot};
+use super::want::{Form, Want};
 
 pub const COMMAND_LINE: Place = Place::Readable("a command line");
 const ENV: Place =

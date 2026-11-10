@@ -6,7 +6,8 @@ use crate::names;
 use crate::yaml::{Kind, Node, Scalar};
 
 use super::common::{self, argv, environment, value};
-use super::shape::{Concern, Place, Published, RestartDefault, Runs, Slot, UnitShape, Want};
+use super::shape::{Concern, Place, Published, RestartDefault, Runs, Slot, UnitShape};
+use super::want::Want;
 use super::{Cx, Module};
 
 pub struct Container;
@@ -228,7 +229,6 @@ fn publish_settings(node: &Node, slots: &mut Vec<Slot>, d: &mut Diagnostics) -> 
         };
         published.push(Published {
             container_port,
-            loc: entry.key.loc,
             host_port: host_port.expr.clone(),
         });
         slots.push(host_port);

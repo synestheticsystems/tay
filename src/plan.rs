@@ -4,27 +4,25 @@
 //! asks which module a unit uses.
 
 mod choices;
+mod given;
 mod model;
 mod order;
 mod production;
 mod reach;
 mod references;
 mod resolve;
-mod unit_plan;
 mod usage;
 mod value;
+mod visit;
 
 use std::path::{Path, PathBuf};
 
 use crate::definition::{Choices, Profile, Stack};
 use crate::diagnostic::{Diagnostic, Diagnostics};
-use crate::read::{self, ENVIRONMENT_FOLDER};
+use crate::read;
 use crate::source::{Loc, Sources};
 
-pub use model::{
-    After, Because, GivenLine, Need, Plan, PlannedUnit, Readiness, RestartPolicy, Running, Seen,
-    Shown, Way,
-};
+pub use model::{Because, GivenLine, Plan, PlannedUnit, Readiness, Running, Seen, Shown, Way};
 pub use value::Exact;
 
 use resolve::{Environment, Resolver};
@@ -97,7 +95,7 @@ pub fn plan(root: &Path, options: &Options, sources: &mut Sources, d: &mut Diagn
         return Outcome::Errors;
     }
     let layered = choices::layer(places);
-    let Some(environment) = environment(&stack, profile, d) else {
+    let Some(environment) = Environment::of(&stack, profile, d) else {
         return Outcome::Errors;
     };
     let mut planner = Planner {
@@ -150,56 +148,6 @@ fn choose_profile<'s>(
     }
 }
 
-fn environment(
-    stack: &Stack,
-    profile: Option<&Profile>,
-    d: &mut Diagnostics,
-) -> Option<Environment> {
-    let Some(root) = stack.root.to_str() else {
-        d.error(
-            stack.loc,
-            "the path of the stack's folder is not valid UTF-8, so it cannot be used as a value",
-        );
-        return None;
-    };
-    let name = stack
-        .root
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or_default()
-        .to_string();
-    Some(Environment {
-        label: hostname_label(&name),
-        name,
-        root: root.to_string(),
-        state: stack
-            .root
-            .join(ENVIRONMENT_FOLDER)
-            .join("state")
-            .to_str()
-            .expect("the root is UTF-8, and so is this path under it")
-            .to_string(),
-        profile: profile.map(|profile| profile.name.name.clone()),
-    })
-}
-
-/// A name cut down to what a hostname label allows: lower-case letters,
-/// digits and single hyphens, at most 63 characters.
-fn hostname_label(name: &str) -> String {
-    let mut label = String::new();
-    for c in name.to_lowercase().chars() {
-        if c.is_ascii_lowercase() || c.is_ascii_digit() {
-            label.push(c);
-        } else if !label.ends_with('-') {
-            label.push('-');
-        }
-    }
-    let label = label.trim_matches('-');
-    label[..label.len().min(63)]
-        .trim_end_matches('-')
-        .to_string()
-}
-
 impl Planner<'_> {
     fn report_unset_settings(&mut self) {
         let stack = self.resolver.stack;
@@ -219,18 +167,5 @@ impl Planner<'_> {
             }
             self.resolver.d.push(error);
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_folder_name_is_cut_down_to_a_hostname_label() {
-        assert_eq!(hostname_label("Feature_Login"), "feature-login");
-        assert_eq!(hostname_label("--a..b--"), "a-b");
-        assert_eq!(hostname_label("___"), "");
-        assert_eq!(hostname_label(&"x".repeat(70)).len(), 63);
     }
 }

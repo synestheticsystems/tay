@@ -1,6 +1,6 @@
 //! Where a piece of a definition came from, so that every error can point at it.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// Identifies one entry in [`Sources`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -9,15 +9,11 @@ pub struct SourceId(u32);
 /// A place definitions are read from: a file, or one `--set` argument.
 #[derive(Debug)]
 pub enum Source {
-    File {
-        path: PathBuf,
-        shown: String,
-    },
+    /// A file, kept as it is shown: relative to the stack's root when it is inside it.
+    File { shown: String },
     /// A command-line argument, kept as it is shown in errors: a `--set` is
     /// shown by its key only, since its value may be a secret.
-    Argument {
-        shown: String,
-    },
+    Argument { shown: String },
 }
 
 /// Every source read in one run. Errors refer to sources by [`SourceId`].
@@ -34,10 +30,7 @@ impl Sources {
             Ok(relative) => relative.display().to_string(),
             Err(_) => path.display().to_string(),
         };
-        self.push(Source::File {
-            path: path.to_path_buf(),
-            shown,
-        })
+        self.push(Source::File { shown })
     }
 
     pub fn add_argument(&mut self, shown: &str) -> SourceId {
@@ -54,13 +47,6 @@ impl Sources {
 
     pub fn get(&self, id: SourceId) -> &Source {
         &self.list[id.0 as usize]
-    }
-
-    /// The name a person sees for a source: a path, or an argument.
-    pub fn shown(&self, id: SourceId) -> &str {
-        match self.get(id) {
-            Source::File { shown, .. } | Source::Argument { shown } => shown,
-        }
     }
 }
 

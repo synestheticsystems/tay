@@ -1,16 +1,13 @@
-//! One unit's part of the plan: every value it uses resolved where it runs,
+//! Visiting one unit that comes up: every value it uses resolved where it runs,
 //! what it needs and why, how it is known to be ready, and what it gives.
 
-use crate::definition::{Check, GiveValue, Variant};
-use crate::expr::{Expr, ExprKind, Part, Reference, Target, UnitRef};
+use crate::definition::{Check, Variant};
 use crate::module::{Place, RestartDefault, Runs, Want};
 use crate::source::Loc;
 
 use super::Planner;
-use super::model::{
-    Because, GivenLine, PlannedUnit, Readiness, RestartPolicy, Running, Seen, Shown, Way,
-};
-use super::resolve::{Asker, Fail, Scope, ViewProblem};
+use super::model::{Because, PlannedUnit, Readiness, RestartPolicy, Running, Shown, Way};
+use super::resolve::Asker;
 use super::usage::{ProducedUse, User};
 use super::value::Resolved;
 
@@ -25,7 +22,8 @@ pub struct NeedEdge {
     pub because: Because,
 }
 
-pub struct UnitPlan {
+/// What visiting one unit adds to the plan.
+pub struct Visit {
     /// `None` when one of its values could not be resolved; that is reported.
     pub planned: Option<PlannedUnit>,
     pub needs: Vec<NeedEdge>,
@@ -33,7 +31,7 @@ pub struct UnitPlan {
 }
 
 impl Planner<'_> {
-    pub fn plan_unit(&mut self, unit: usize, variant: usize) -> UnitPlan {
+    pub fn visit(&mut self, unit: usize, variant: usize) -> Visit {
         let stack = self.resolver.stack;
         let definition = &stack.units[unit];
         let variant = &definition.variants[variant];
@@ -99,7 +97,7 @@ impl Planner<'_> {
                 gives: gives.into_iter().collect::<Option<_>>()?,
             })
         })();
-        UnitPlan {
+        Visit {
             planned,
             needs,
             after,
@@ -231,78 +229,6 @@ impl Planner<'_> {
                 Some(Shown::of(&value))
             })
             .collect()
-    }
-
-    /// Each value the unit gives, as the host and as a container would see it.
-    fn gives(&mut self, unit: usize, variant: &Variant) -> Vec<Option<GivenLine>> {
-        let unit_name = &self.resolver.stack.units[unit].name.name;
-        let mut lines = Vec::new();
-        for give in &variant.gives {
-            let endpoint = matches!(give.value, GiveValue::Endpoint(_));
-            let has_scheme = matches!(&give.value, GiveValue::Endpoint(e) if e.scheme.is_some());
-            let target = Target::Value {
-                unit: UnitRef::Named(unit_name.clone()),
-                name: give.name.name.clone(),
-                part: has_scheme.then_some(Part::Url),
-                view: None,
-            };
-            lines.push(self.given_line(give.name.name.clone(), give.name.loc, target, endpoint));
-        }
-        for output in &variant.outputs {
-            let target = Target::Output {
-                unit: UnitRef::Named(unit_name.clone()),
-                name: output.name.clone(),
-            };
-            lines.push(self.given_line(
-                format!("outputs.{}", output.name),
-                output.loc,
-                target,
-                false,
-            ));
-        }
-        lines
-    }
-
-    fn given_line(
-        &mut self,
-        name: String,
-        loc: Loc,
-        target: Target,
-        endpoint: bool,
-    ) -> Option<GivenLine> {
-        let reference = Expr {
-            loc,
-            kind: ExprKind::Ref(Reference {
-                loc,
-                inner: name.clone(),
-                target,
-            }),
-        };
-        let mut seen = |asker: Asker| -> Option<(Seen, Option<Resolved>)> {
-            let scope = Scope { unit: None, asker };
-            match self.resolver.resolve(&reference, scope) {
-                Ok(value) => Some((Seen::Value(Shown::of(&value)), Some(value))),
-                Err(Fail::View(ViewProblem::NotPublished { port, .. })) => Some((
-                    Seen::Unreachable(format!("its port {port} is not published to the host")),
-                    None,
-                )),
-                Err(Fail::View(ViewProblem::NeedsView { .. })) | Err(Fail::Reported) => None,
-            }
-        };
-        let (from_host, host_value) = seen(Asker::Host)?;
-        let (from_containers, container_value) = seen(Asker::Container)?;
-        let value = host_value.or(container_value);
-        Some(GivenLine {
-            name,
-            endpoint,
-            producers: value
-                .as_ref()
-                .map(|v| v.producers.keys().cloned().collect())
-                .unwrap_or_default(),
-            secret: value.as_ref().is_some_and(Resolved::is_secret),
-            from_host,
-            from_containers,
-        })
     }
 
     /// The needs as written, then each unit whose produced value is used.

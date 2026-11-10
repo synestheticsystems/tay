@@ -90,11 +90,7 @@ pub fn ready(node: &Node, d: &mut Diagnostics) -> Option<Ready> {
     let within = fields
         .require("within", d)
         .and_then(|n| expr::from_node(n, d))?;
-    Some(Ready {
-        loc: node.loc,
-        check,
-        within,
-    })
+    Some(Ready { check, within })
 }
 
 pub fn restart(node: &Node, d: &mut Diagnostics) -> Option<Restart> {

@@ -136,9 +136,9 @@ impl Resolver<'_> {
         Ok(value)
     }
 
-    /// The host port published for `port` of `container`'s container, if any.
-    fn published(&mut self, container: usize, port: &Resolved) -> Result<Option<Resolved>, Fail> {
-        let Some(Runs::OwnContainer { published }) = self.runs(container) else {
+    /// The host port published for `port` of the container `unit` runs in, if any.
+    fn published(&mut self, unit: usize, port: &Resolved) -> Result<Option<Resolved>, Fail> {
+        let Some(Runs::OwnContainer { published }) = self.runs(unit) else {
             return Ok(None);
         };
         let Form::Number(Some(port)) = port.form() else {
@@ -148,7 +148,7 @@ impl Resolver<'_> {
             return Ok(None);
         };
         let scope = Scope {
-            unit: Some(container),
+            unit: Some(unit),
             asker: Asker::Container,
         };
         Ok(Some(self.resolve(&entry.host_port, scope)?))

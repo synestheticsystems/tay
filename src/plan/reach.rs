@@ -12,12 +12,12 @@ use super::Planner;
 use super::model::{After, Because, Need, Plan};
 use super::order::{self, Edge, EdgeKind};
 use super::production::Chosen;
-use super::unit_plan::UnitPlan;
+use super::visit::Visit;
 
 pub struct Reached {
     /// The units that come up, in the order they were found.
     pub chosen: Vec<Chosen>,
-    plans: Vec<(usize, UnitPlan)>,
+    plans: Vec<(usize, Visit)>,
 }
 
 impl Planner<'_> {
@@ -40,7 +40,7 @@ impl Planner<'_> {
             let Some((variant, chosen_at)) = self.resolver.variant(unit) else {
                 continue;
             };
-            let plan = self.plan_unit(unit, variant);
+            let plan = self.visit(unit, variant);
             for need in &plan.needs {
                 let needed = &stack.units[need.unit];
                 if needed.action && !named.contains(&need.unit) {
@@ -98,7 +98,7 @@ impl Planner<'_> {
         }
         let units: Vec<usize> = reached.plans.iter().map(|(unit, _)| *unit).collect();
         let order = order::order(&units, &name, &edges, &mut self.resolver.d)?;
-        let mut plans: HashMap<usize, UnitPlan> = reached.plans.into_iter().collect();
+        let mut plans: HashMap<usize, Visit> = reached.plans.into_iter().collect();
         let mut planned = Vec::new();
         for unit in order {
             let plan = plans.remove(&unit)?;

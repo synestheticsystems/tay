@@ -5,7 +5,8 @@ use crate::names::NameAt;
 use crate::yaml::Node;
 
 use super::common::value;
-use super::shape::{Given, GivenValue, Place, RestartDefault, Runs, UnitShape, Want};
+use super::shape::{Given, GivenValue, Place, RestartDefault, Runs, UnitShape};
+use super::want::Want;
 use super::{Cx, Module};
 
 pub struct Secret;

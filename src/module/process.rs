@@ -5,7 +5,8 @@ use crate::names;
 use crate::yaml::Node;
 
 use super::common::{self, argv, argv_list, environment};
-use super::shape::{Concern, Place, RestartDefault, Runs, UnitShape, Want};
+use super::shape::{Concern, Place, RestartDefault, Runs, UnitShape};
+use super::want::Want;
 use super::{Cx, Module};
 
 pub struct Process;
