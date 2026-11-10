@@ -1,10 +1,19 @@
 //! What an environment was asked for stays asked: the profile, each `--set`
 //! and the units named on `tay up` are remembered, so that a later plain
 //! `tay up`, a `tay status`, a `tay plan` and a daemon started afresh all
-//! see the same stack.
+//! see the same stack. A `tay up` hands the daemon only what it adds, which
+//! the daemon joins with what is remembered when it takes the change, so a
+//! `tay set` made meanwhile is not lost.
 
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::fs::PermissionsExt;
+use std::os::unix::net::UnixListener;
+use std::path::Path;
+use std::thread::JoinHandle;
+
+use rustix::fs::{FlockOperation, flock};
+use serde_json::{Value, json};
 
 use crate::harness::Machine;
 
@@ -189,4 +198,110 @@ fn set_with_no_daemon_starts_none_and_never_prints_a_secret_settings_value() {
     for printed in [&set.stdout, &set.stderr, &json.stdout, &unset.stdout] {
         assert!(!printed.contains("hunter2"), "{printed}");
     }
+}
+
+/// A daemon of this tay played by the test: it holds the environment's
+/// lock, says who it is, and answers the first change it is asked for as
+/// done at once. The thread gives the body of that request.
+fn stand_in(machine: &Machine, root: &Path) -> JoinHandle<Value> {
+    let lock = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(root.join(".tay/daemon.lock"))
+        .unwrap();
+    flock(&lock, FlockOperation::NonBlockingLockExclusive).unwrap();
+    let socket = machine.socket(root);
+    let _ = fs::remove_file(&socket);
+    let listener = UnixListener::bind(&socket).unwrap();
+    let about = json!({
+        "tay": env!("CARGO_PKG_VERSION"),
+        "pid": std::process::id(),
+        "root": root,
+        "id": machine.id(root),
+        "started": 0,
+    })
+    .to_string();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let mut stream = stream.unwrap();
+            let mut reader = BufReader::new(&stream);
+            let mut request = String::new();
+            reader.read_line(&mut request).unwrap();
+            let mut length = 0;
+            loop {
+                let mut header = String::new();
+                reader.read_line(&mut header).unwrap();
+                if header.trim().is_empty() {
+                    break;
+                }
+                if let Some((name, value)) = header.split_once(':')
+                    && name.eq_ignore_ascii_case("content-length")
+                {
+                    length = value.trim().parse().unwrap();
+                }
+            }
+            let mut body = vec![0; length];
+            reader.read_exact(&mut body).unwrap();
+            let change = request.starts_with("POST ");
+            let answer = match change {
+                true => "{\"event\":\"decided\",\"decision\":\"ready\"}\n".to_string(),
+                false => about.clone(),
+            };
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{answer}",
+                answer.len()
+            )
+            .unwrap();
+            if change {
+                fs::remove_file(&socket).unwrap();
+                drop(lock);
+                return serde_json::from_slice(&body).unwrap();
+            }
+        }
+        unreachable!("the listener takes connections until it is closed")
+    })
+}
+
+#[test]
+fn tay_up_hands_the_daemon_only_what_its_command_line_adds() {
+    let machine = Machine::new();
+    let root = machine.stack("remembered");
+    assert_eq!(machine.at(&root, "up", &[]).code, 0);
+    assert_eq!(machine.at(&root, "down", &[]).code, 0);
+    assert_eq!(machine.at(&root, "set", &["settings.name=there"]).code, 0);
+    let daemon = stand_in(&machine, &root);
+    let up = machine.at(&root, "up", &["greeting", "--set", "settings.greeting=hi"]);
+    assert_eq!(up.code, 0, "{}{}", up.stdout, up.stderr);
+    let sent = daemon.join().unwrap();
+    assert_eq!(
+        (&sent["profile"], &sent["sets"], &sent["units"]),
+        (
+            &json!(null),
+            &json!(["settings.greeting=hi"]),
+            &json!(["greeting"])
+        )
+    );
+}
+
+#[test]
+fn the_daemon_joins_what_tay_up_adds_with_what_is_remembered_when_it_takes_the_change() {
+    let machine = Machine::new();
+    let root = machine.stack("remembered");
+    assert_eq!(machine.at(&root, "up", &[]).code, 0);
+    // Remembered after the `tay up` below read what is remembered, and
+    // before the daemon takes its change.
+    assert_eq!(machine.at(&root, "set", &["settings.name=there"]).code, 0);
+    let answer = machine.ask_daemon(
+        &root,
+        "/v1/up",
+        r#"{"profile":null,"sets":["settings.greeting=hi"],"units":[],"home":null}"#,
+    );
+    assert!(answer.contains(r#""decision":"ready""#), "{answer}");
+    assert_eq!(greeting(&root), "hi, there\n");
+    let listed = machine.at(&root, "set", &[]);
+    assert_eq!(
+        listed.stdout,
+        "set      settings.name=there\nset      settings.greeting=hi\n"
+    );
 }

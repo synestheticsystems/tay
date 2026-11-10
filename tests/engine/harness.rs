@@ -247,6 +247,24 @@ impl Machine {
             .join("daemon.sock")
     }
 
+    /// Asks the daemon of the environment at `root` for `path` with the
+    /// JSON `body`, as a command does, and gives all it answers, read until
+    /// it closes the connection: for a change, once the change has said its
+    /// last.
+    pub fn ask_daemon(&self, root: &Path, path: &str, body: &str) -> String {
+        use std::io::{Read, Write};
+        let mut stream = std::os::unix::net::UnixStream::connect(self.socket(root)).unwrap();
+        write!(
+            stream,
+            "POST {path} HTTP/1.1\r\nHost: tay\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+            body.len()
+        )
+        .unwrap();
+        let mut answer = String::new();
+        stream.read_to_string(&mut answer).unwrap();
+        answer
+    }
+
     /// The machine's list of environments.
     pub fn list(&self) -> Value {
         let text = fs::read_to_string(self.path("state/tay/environments.json")).unwrap();

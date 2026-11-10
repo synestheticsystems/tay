@@ -9,7 +9,7 @@ use crate::cli::output::change::Printer;
 use crate::cli::stack;
 use crate::control::client::Client;
 use crate::control::protocol::UpRequest;
-use crate::disk::{Environment, Layout};
+use crate::disk::{Asked, Environment, Layout};
 
 use super::plan::{no_stack, options, planned};
 use super::{block_on, client_problem, disk_problem, forget_what_is_gone, machine, problem};
@@ -41,8 +41,14 @@ pub fn run(args: Args) -> Exit {
         Ok(machine) => machine,
         Err(exit) => return exit,
     };
+    // The daemon joins what this command adds with what is remembered when
+    // it takes the change, which may be later than this command read it.
     let request = UpRequest {
-        asked: options.asked,
+        adds: Asked {
+            profile: args.profile,
+            sets: args.sets,
+            units: args.words,
+        },
         home: options.home,
     };
     let ended = block_on(COMMAND, async {

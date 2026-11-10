@@ -7,9 +7,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::disk::{self, Asked, DiskError, Layout};
+use crate::disk::{Asked, DiskError, Layout};
 use crate::engine::{Decision, Left, State};
-use crate::plan::Options;
 
 /// `GET`: who the daemon is, its [`About`]. Every version of tay answers it
 /// alike, so that a command can tell a daemon of another version.
@@ -44,28 +43,26 @@ pub struct About {
     pub started: u64,
 }
 
-/// What `tay up` asks for: what it plans with, exactly as `tay plan` would,
-/// which the environment remembers. It has no `Debug`, since a `--set` may
-/// give a secret setting its value.
+/// What `tay up` asks for: what its own command line adds to what the
+/// environment remembers being asked for. The daemon joins the two once it
+/// holds the place of the change under way, so that a `tay set` made after
+/// the command read what is remembered is not lost. It has no `Debug`,
+/// since a `--set` may give a secret setting its value.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UpRequest {
-    /// The profile, the `--set`s and the units, what the environment
-    /// remembered with what this `tay up` adds.
+    /// The profile, the `--set`s and the units this `tay up` names.
     #[serde(flatten)]
-    pub asked: Asked,
+    pub adds: Asked,
     /// The home folder of whoever asks, where their own choices are.
     pub home: Option<PathBuf>,
 }
 
 impl UpRequest {
-    /// What the daemon plans with: what was asked, and this machine's
-    /// folder of shared folders.
-    pub fn options(&self) -> Options {
-        Options {
-            asked: self.asked.clone(),
-            home: self.home.clone(),
-            shared_folders: disk::shared_folders(),
-        }
+    /// What is asked once this request is joined with what is
+    /// `remembered`.
+    pub fn joined(&self, remembered: Asked) -> Asked {
+        let adds = &self.adds;
+        remembered.with(adds.profile.clone(), &adds.sets, &adds.units)
     }
 }
 

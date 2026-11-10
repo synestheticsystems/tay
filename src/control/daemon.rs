@@ -27,14 +27,16 @@ use tokio::net::UnixListener;
 use tokio::sync::watch;
 
 use crate::clock;
-use crate::control::protocol::{self, Event, Refused, UpRequest};
+use crate::control::protocol::{self, Event, Refused};
 use crate::definition::read::THIS_TAY;
 use crate::diagnostic::Diagnostics;
 use crate::diagnostic::source::Sources;
-use crate::disk::{Asked, Counts, DiskError, Environment, Identity, Intent, Layout, Lock, Machine};
+use crate::disk::{
+    self, Asked, Counts, DiskError, Environment, Identity, Intent, Layout, Lock, Machine,
+};
 use crate::engine::{self, Supervisor, Told, UnitState};
 use crate::module::Occasion;
-use crate::plan::{self, Plan, PlannedUnit};
+use crate::plan::{self, Options, Plan, PlannedUnit};
 use crate::print;
 
 use change::{Change, NotBegun};
@@ -199,11 +201,8 @@ async fn found_again(supervisor: &Arc<Supervisor>) {
             return;
         }
     };
-    let request = UpRequest {
-        asked,
-        home: std::env::var_os("HOME").map(PathBuf::from),
-    };
-    let planned = match planned(layout.root(), &request) {
+    let options = options(asked, std::env::var_os("HOME").map(PathBuf::from));
+    let planned = match planned(layout.root(), &options) {
         Ok(plan) => plan,
         Err(unplanned) => {
             log(&format!(
@@ -239,15 +238,24 @@ struct Unplanned {
     too_old: bool,
 }
 
-/// Plans the stack at `root` as `tay plan` would with what `request` asks.
-fn planned(root: &Path, request: &UpRequest) -> Result<Plan, Unplanned> {
-    let options = request.options();
+/// What the daemon plans with: `asked`, with the choices of whoever has
+/// `home`, and this machine's folder of shared folders.
+fn options(asked: Asked, home: Option<PathBuf>) -> Options {
+    Options {
+        asked,
+        home,
+        shared_folders: disk::shared_folders(),
+    }
+}
+
+/// Plans the stack at `root` as `tay plan` would with `options`.
+fn planned(root: &Path, options: &Options) -> Result<Plan, Unplanned> {
     let mut sources = Sources::default();
     let mut d = Diagnostics::default();
     let rendered = |errors: Vec<crate::diagnostic::Diagnostic>, sources: &Sources| {
         errors.iter().map(|error| error.render(sources)).collect()
     };
-    match plan::plan(root, &options, &mut sources, &mut d) {
+    match plan::plan(root, options, &mut sources, &mut d) {
         plan::Outcome::Plan(plan) => Ok(plan),
         plan::Outcome::Errors => Err(Unplanned {
             lines: rendered(d.into_sorted(), &sources),

@@ -3,31 +3,39 @@
 use std::sync::Arc;
 
 use super::change::Change;
-use super::{Daemon, log, planned};
+use super::{Daemon, log, options, planned};
 use crate::control::protocol::{Event, UpRequest};
-use crate::disk::Intent;
+use crate::disk::{Asked, Intent};
 use crate::engine::{self, Decision};
 use crate::module::Occasion;
 use crate::plan::PlannedUnit;
 
 impl Daemon {
-    /// Brings up what `request` asks for, telling `change`'s followers each
-    /// change of state and, once it is decided, the decision.
+    /// Brings up what `request` asks for, joined with what the environment
+    /// remembers, telling `change`'s followers each change of state and,
+    /// once it is decided, the decision.
     pub async fn bring_up(self: Arc<Self>, change: Arc<Change>, request: UpRequest) {
         log(&format!("change: {}", change.describe()));
-        // The environment is meant to be up from now, and with what was
-        // asked, so that a daemon started after this one dies finds its
-        // units again, and every later command sees the same stack.
+        // What is remembered is read while this change holds its place, so
+        // that no `tay set` lands between reading and writing it. The
+        // environment is meant to be up from now, and with what was asked,
+        // so that a daemon started after this one dies finds its units
+        // again, and every later command sees the same stack.
         let layout = &self.environment.layout;
-        if let Err(error) = Intent::Up
-            .write(layout)
-            .and_then(|()| request.asked.write(layout))
-        {
+        let asked = match Asked::read(layout) {
+            Ok(remembered) => request.joined(remembered),
+            Err(error) => {
+                self.fail(&change, &error.to_string());
+                return;
+            }
+        };
+        if let Err(error) = Intent::Up.write(layout).and_then(|()| asked.write(layout)) {
             self.fail(&change, &error.to_string());
             return;
         }
         let root = self.environment.layout.root().to_path_buf();
-        let plan = match tokio::task::spawn_blocking(move || planned(&root, &request)).await {
+        let options = options(asked, request.home);
+        let plan = match tokio::task::spawn_blocking(move || planned(&root, &options)).await {
             Ok(Ok(plan)) => plan,
             Ok(Err(unplanned)) => {
                 change.say(Event::Errors {
