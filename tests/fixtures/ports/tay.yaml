@@ -1,0 +1,15 @@
+format: 1
+stack: ports
+settings:
+  preferred: { default: 24610 }
+up: [all-ports]
+units:
+  all-ports: { needs: [one, two, three, four, five, six, seven, eight] }
+  one: { uses: port, with: { prefer: "${settings.preferred}" } }
+  two: { uses: port, with: { prefer: "${settings.preferred}" } }
+  three: { uses: port, with: { prefer: "${settings.preferred}" } }
+  four: { uses: port, with: { prefer: "${settings.preferred}" } }
+  five: { uses: port }
+  six: { uses: port }
+  seven: { uses: port }
+  eight: { uses: port }

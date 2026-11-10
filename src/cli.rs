@@ -1,33 +1,58 @@
-//! The command line: `tay plan`, `tay --version` and `tay --help`.
+//! The command line: `tay plan`, `tay up`, `tay down`, `tay status`,
+//! `tay ls`, `tay --version` and `tay --help`, and `tay daemon`, which a
+//! command runs to start an environment's daemon.
 
+mod args;
+mod commands;
 mod output;
-mod print;
+mod stack;
 
 use std::ffi::OsString;
-use std::path::PathBuf;
 use std::process::ExitCode;
 
-use crate::definition::read::{self, STACK_FILE, THIS_TAY};
-use crate::diagnostic::Diagnostics;
-use crate::diagnostic::source::Sources;
-use crate::plan::{self, Options, Outcome};
-use output::{json, text};
-use print::{err, out};
+use crate::control::daemon;
+use crate::definition::read::THIS_TAY;
+use crate::print::{err, out};
 
-/// The plan is sound.
-const SOUND: u8 = 0;
-/// The definitions, or the command line, have errors.
-const ERRORS: u8 = 2;
-/// This tay is too old for the definitions.
-const TOO_OLD: u8 = 3;
+use args::{Takes, UnitsNamed};
+use commands::{down, ls, plan, status, up};
+
+/// How a command ends, as its exit code says it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Exit {
+    /// Done: the plan is sound, everything asked for is ready, or nothing
+    /// is left running.
+    Done = 0,
+    /// A unit failed, or something was left that could not be stopped.
+    Failed = 1,
+    /// The definitions, or the command line, have errors.
+    Errors = 2,
+    /// This tay is too old for the definitions.
+    TooOld = 3,
+    /// Refused: another change is running.
+    Refused = 4,
+    /// The daemon could not be started or reached.
+    Unreachable = 5,
+}
+
+impl From<Exit> for ExitCode {
+    fn from(exit: Exit) -> ExitCode {
+        ExitCode::from(exit as u8)
+    }
+}
 
 const HELP: &str = "\
 tay (Topology Automation via YAML) brings a stack of host processes and
-containers up in dependency order and reports their state. This version reads
-a stack's definitions and plans; it starts nothing.
+containers up in dependency order and reports their state. This version makes
+a stack's ports, secrets and files; it cannot run a process, a container or a
+command yet, and says so of each unit that would.
 
 Usage:
   tay plan [--root FOLDER] [--profile NAME] [--set PLACE=VALUE]... [--json]
+  tay up [UNIT...] [--root FOLDER] [--profile NAME] [--set PLACE=VALUE]... [--json]
+  tay down [--root FOLDER] [--json]
+  tay status [UNIT] [--root FOLDER] [--json]
+  tay ls [--root FOLDER] [--json]
   tay --version
   tay --help
 
@@ -38,189 +63,108 @@ what it needs and why, how it is known to be ready, the host ports it opens
 and what opens each, and the values it gives. Of the environment's .tay/
 folder it reads choices.yaml and nothing else, and it writes nothing.
 
-Options of tay plan:
-  --root FOLDER       look for tay.yaml from FOLDER instead of the current one
-  --profile NAME      use this profile instead of the stack's default one
-  --set PLACE=VALUE   make one choice, after every other place. PLACE is up,
-                      up_add, up_remove, run.default, run.units.UNIT,
-                      settings.NAME or label; a list is written with commas
-  --json              print the plan as JSON, schema 1, for programs
+tay up plans exactly as tay plan does, starts the environment's daemon if none
+runs, and has it bring up what the choices list under `up`, or the units named
+and what they need. It prints each change of state as it happens, and returns
+when everything asked for is ready or one of it can no longer become ready.
+--profile and --set apply to that tay up only, for now: a daemon started
+afresh plans with the stack's own choices.
 
-Exit codes: 0 the plan is sound; 2 the definitions or the command line have
-errors; 3 this tay is too old for the definitions.
+tay down stops everything the environment runs and says so; its daemon exits.
+tay status prints each unit's state, from a check made now. tay ls prints the
+environments tay knows on this machine, and marks with * the one it is run in.
+
+Options:
+  --root FOLDER       look for tay.yaml from FOLDER instead of the current one
+  --profile NAME      of plan and up: use this profile instead of the stack's
+                      default one
+  --set PLACE=VALUE   of plan and up: make one choice, after every other
+                      place. PLACE is up, up_add, up_remove, run.default,
+                      run.units.UNIT, settings.NAME or label; a list is
+                      written with commas
+  --json              print for programs, in schema 1: the plan, each event of
+                      up and down as a JSON object on a line, the units of
+                      status, and the environments of ls
+
+Exit codes: 0 done: the plan is sound, everything asked for is ready, or
+nothing is left running; 1 a unit failed, or something was left that could
+not be stopped; 2 the definitions or the command line have errors; 3 this tay
+is too old for the definitions; 4 refused: another change is running; 5 the
+daemon could not be started or reached.
 ";
+
+/// What `tay daemon` takes: the stack's root, which a command gives it.
+const DAEMON: Takes = Takes {
+    command: "tay daemon",
+    choices: false,
+    json: false,
+    units: UnitsNamed::None,
+};
 
 pub fn run(args: impl IntoIterator<Item = OsString>) -> ExitCode {
     let mut args = args.into_iter();
     let Some(verb) = args.next() else {
         err(HELP);
-        return ExitCode::from(ERRORS);
+        return Exit::Errors.into();
     };
-    match verb.to_str() {
+    let (takes, command): (&Takes, fn(args::Args) -> Exit) = match verb.to_str() {
         Some("--help" | "-h" | "help") => {
             out(HELP);
-            ExitCode::from(SOUND)
+            return Exit::Done.into();
         }
         Some("--version" | "-V") => {
             out(&format!("tay {THIS_TAY}\n"));
-            ExitCode::from(SOUND)
+            return Exit::Done.into();
         }
-        Some("plan") => match PlanArgs::parse(args) {
-            Ok(Some(plan_args)) => plan_args.run(),
-            Ok(None) => {
-                out(HELP);
-                ExitCode::from(SOUND)
-            }
-            Err(message) => {
-                err(&format!(
-                    "tay plan: {message}\nRun `tay --help` for how to use it.\n"
-                ));
-                ExitCode::from(ERRORS)
-            }
-        },
+        Some("plan") => (&plan::TAKES, plan::run),
+        Some("up") => (&up::TAKES, up::run),
+        Some("down") => (&down::TAKES, down::run),
+        Some("status") => (&status::TAKES, status::run),
+        Some("ls") => (&ls::TAKES, ls::run),
+        Some("daemon") => (&DAEMON, run_daemon),
+        Some("logs") => {
+            err(
+                "tay logs: not built yet. This version of tay runs no unit, so no unit writes anything.\n",
+            );
+            return Exit::Errors.into();
+        }
         Some(other) if other.starts_with('-') => {
             err(&format!(
                 "tay: unknown option `{other}`\nRun `tay --help` for how to use it.\n"
             ));
-            ExitCode::from(ERRORS)
+            return Exit::Errors.into();
         }
         _ => {
             err(&format!(
-                "tay {}: not built yet. This version of tay reads a stack's definitions and plans it (`tay plan`); it starts nothing.\n",
+                "tay: `{}` is not a command\nRun `tay --help` for how to use it.\n",
                 verb.to_string_lossy()
             ));
-            ExitCode::from(ERRORS)
+            return Exit::Errors.into();
         }
-    }
-}
-
-struct PlanArgs {
-    root: Option<PathBuf>,
-    profile: Option<String>,
-    sets: Vec<String>,
-    json: bool,
-}
-
-impl PlanArgs {
-    /// The arguments after `plan`; `None` when help is asked for.
-    fn parse(args: impl Iterator<Item = OsString>) -> Result<Option<PlanArgs>, String> {
-        let mut parsed = PlanArgs {
-            root: None,
-            profile: None,
-            sets: Vec::new(),
-            json: false,
-        };
-        let mut args = args.peekable();
-        while let Some(arg) = args.next() {
-            let arg_text = arg.to_string_lossy().into_owned();
-            let (flag, inline) = match arg_text.split_once('=') {
-                Some((flag, value)) if flag.starts_with("--") => {
-                    (flag.to_string(), Some(value.to_string()))
-                }
-                _ => (arg_text.clone(), None),
-            };
-            let mut value = |name: &str| -> Result<OsString, String> {
-                match &inline {
-                    Some(value) => Ok(OsString::from(value)),
-                    None => args.next().ok_or_else(|| format!("`{name}` needs a value")),
-                }
-            };
-            let text = |value: OsString, name: &str| {
-                value
-                    .into_string()
-                    .map_err(|_| format!("the value of `{name}` is not valid UTF-8"))
-            };
-            match flag.as_str() {
-                "--help" | "-h" => return Ok(None),
-                "--json" if inline.is_none() => parsed.json = true,
-                "--root" => parsed.root = Some(PathBuf::from(value("--root")?)),
-                "--profile" => parsed.profile = Some(text(value("--profile")?, "--profile")?),
-                "--set" => parsed.sets.push(text(value("--set")?, "--set")?),
-                _ => return Err(format!("`{arg_text}` is not an option of `tay plan`")),
-            }
+    };
+    match takes.read(args) {
+        Ok(Some(args)) => command(args).into(),
+        Ok(None) => {
+            out(HELP);
+            Exit::Done.into()
         }
-        Ok(Some(parsed))
-    }
-
-    fn run(self) -> ExitCode {
-        let start = match self.root.clone().map_or_else(std::env::current_dir, Ok) {
-            Ok(start) => start,
-            Err(error) => return self.fail(&format!("the current folder cannot be read: {error}")),
-        };
-        let start = match start.canonicalize() {
-            Ok(start) => start,
-            Err(error) => {
-                return self.fail(&format!(
-                    "the folder `{}` cannot be used: {error}",
-                    start.display()
-                ));
-            }
-        };
-        let Some(root) = read::find_root(&start) else {
-            return self.fail(&format!(
-                "there is no {STACK_FILE} in {} or any folder above it",
-                start.display()
+        Err(message) => {
+            err(&format!(
+                "{}: {message}\nRun `tay --help` for how to use it.\n",
+                takes.command
             ));
-        };
-        let options = Options {
-            profile: self.profile.clone(),
-            sets: self.sets.clone(),
-            home: std::env::var_os("HOME").map(PathBuf::from),
-            shared_folders: crate::disk::shared_folders(),
-        };
-        let mut sources = Sources::default();
-        let mut d = Diagnostics::default();
-        match plan::plan(&root, &options, &mut sources, &mut d) {
-            Outcome::Plan(plan) => {
-                if self.json {
-                    print_json(&json::plan(&plan));
-                } else {
-                    out(&text::plan(&plan));
-                }
-                ExitCode::from(SOUND)
-            }
-            Outcome::Errors => {
-                let errors = d.into_sorted();
-                if self.json {
-                    print_json(&json::errors("errors", &errors, &sources));
-                } else {
-                    for error in &errors {
-                        err(&format!("{}\n", error.render(&sources)));
-                    }
-                    let count = match errors.len() {
-                        1 => "1 error".to_string(),
-                        n => format!("{n} errors"),
-                    };
-                    err(&format!(
-                        "tay plan: {count} in the definitions; there is no plan.\n"
-                    ));
-                }
-                ExitCode::from(ERRORS)
-            }
-            Outcome::TooOld(reasons) => {
-                if self.json {
-                    print_json(&json::errors("too_old", &reasons, &sources));
-                } else {
-                    for reason in &reasons {
-                        err(&format!("{}\n", reason.render(&sources)));
-                    }
-                }
-                ExitCode::from(TOO_OLD)
-            }
+            Exit::Errors.into()
         }
-    }
-
-    fn fail(&self, message: &str) -> ExitCode {
-        if self.json {
-            print_json(&json::error_without_place(message));
-        } else {
-            err(&format!("tay plan: {message}\n"));
-        }
-        ExitCode::from(ERRORS)
     }
 }
 
-fn print_json(value: &serde_json::Value) {
-    let json = serde_json::to_string_pretty(value).expect("a JSON value always serializes");
-    out(&format!("{json}\n"));
+fn run_daemon(args: args::Args) -> Exit {
+    let Some(root) = args.root else {
+        err("tay daemon: `--root` is required: it is run by the command that starts it\n");
+        return Exit::Errors;
+    };
+    match daemon::run(&root) {
+        true => Exit::Done,
+        false => Exit::Failed,
+    }
 }

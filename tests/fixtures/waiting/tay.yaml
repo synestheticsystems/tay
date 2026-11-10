@@ -1,0 +1,8 @@
+format: 1
+stack: waiting
+up: [config]
+units:
+  config-port: { uses: port }
+  config:
+    uses: file
+    with: { content: "port: ${config-port.number}\n" }

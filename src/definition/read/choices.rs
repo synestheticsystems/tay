@@ -135,6 +135,33 @@ fn label(node: &Node, d: &mut Diagnostics) -> Option<String> {
     Some(text.to_string())
 }
 
+/// The units `tay up` names, as a place of choices that gives `up`; `None`
+/// when it names none.
+pub fn named_units(
+    units: &[String],
+    sources: &mut Sources,
+    d: &mut Diagnostics,
+) -> Option<Choices> {
+    if units.is_empty() {
+        return None;
+    }
+    let mut up = Vec::new();
+    for unit in units {
+        let loc = Loc::new(sources.add_argument(&format!("tay up {unit}")), 1, 1);
+        match names::name_problem(unit) {
+            None => up.push(NameAt {
+                name: unit.clone(),
+                loc,
+            }),
+            Some(problem) => d.error(loc, problem),
+        }
+    }
+    Some(Choices {
+        up: Some(up),
+        ..Choices::default()
+    })
+}
+
 /// One `--set PLACE=VALUE`, as a set of choices with that one choice in it.
 /// The place is a path in the shape the files use: `up`, `up_add`,
 /// `up_remove`, `run.default`, `run.units.UNIT`, `settings.NAME` or

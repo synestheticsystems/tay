@@ -1,0 +1,7 @@
+format: 1
+stack: fixed-port
+settings:
+  number: { default: 24620 }
+up: [listener-port]
+units:
+  listener-port: { uses: port, with: { fixed: "${settings.number}" } }

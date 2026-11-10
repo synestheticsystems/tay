@@ -25,7 +25,27 @@ impl Run {
     }
 
     pub fn json(&self) -> Value {
-        serde_json::from_str(&self.stdout).expect("tay printed JSON")
+        serde_json::from_str(&self.stdout)
+            .unwrap_or_else(|error| panic!("tay printed JSON ({error}): {}", self.stdout))
+    }
+
+    /// Each line of standard output that is a change of state, as
+    /// `unit state detail` with the spacing taken out.
+    pub fn changes(&self) -> Vec<String> {
+        self.stdout
+            .lines()
+            .filter(|line| line.starts_with("  "))
+            .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
+            .collect()
+    }
+
+    /// The last change of state `unit` printed, as `state detail`.
+    pub fn last_change(&self, unit: &str) -> String {
+        self.changes()
+            .into_iter()
+            .filter_map(|line| line.strip_prefix(&format!("{unit} ")).map(str::to_string))
+            .next_back()
+            .unwrap_or_else(|| panic!("`{unit}` changed state:\n{}", self.stdout))
     }
 }
 

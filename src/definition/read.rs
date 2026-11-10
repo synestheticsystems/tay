@@ -20,10 +20,10 @@ use crate::syntax::names::{self, NameAt, RESERVED_UNIT_NAMES};
 
 use files::Reader;
 
-use choices::assignment;
 pub use choices::choices_file;
+use choices::{assignment, named_units};
 pub use files::discover::{STACK_FILE, find_root};
-pub use version::THIS_TAY;
+pub use version::{THIS_TAY, parse_version};
 
 pub enum Outcome {
     /// The definitions, as far as they could be read. Errors are in the
@@ -108,13 +108,13 @@ pub fn read(root: &Path, sources: &mut Sources, d: &mut Diagnostics) -> Outcome 
 
 /// Reads every place choices are written for the stack under `profile`, in
 /// the order they are layered: this person's own file in `home`, unless the
-/// profile is a production one, the environment's file, and each `--set`.
-/// Gives whether every file in them parsed.
+/// profile is a production one, the environment's file, each `--set`, and
+/// the units `tay up` names. Gives whether every file in them parsed.
 pub fn places<'s>(
     stack: &'s Stack,
     profile: Option<&'s Profile>,
     home: Option<&Path>,
-    sets: &[String],
+    asked: &Asked,
     sources: &mut Sources,
     d: &mut Diagnostics,
 ) -> (Places<'s>, bool) {
@@ -130,18 +130,28 @@ pub fn places<'s>(
     };
     let environment = reader.choices_file(&Layout::of(&stack.root).choices());
     let every_file_parsed = reader.every_file_parsed;
-    let sets = sets
+    let sets = asked
+        .sets
         .iter()
         .filter_map(|set| assignment(set, sources, d))
         .collect();
+    let named = named_units(asked.units, sources, d);
     let places = Places {
         defaults: &stack.defaults,
         profile,
         personal,
         environment,
         sets,
+        named,
     };
     (places, every_file_parsed)
+}
+
+/// The choices a command makes: each `--set`, in the order written, and the
+/// units `tay up` names.
+pub struct Asked<'a> {
+    pub sets: &'a [String],
+    pub units: &'a [String],
 }
 
 /// Unit names are unique across the stack, and none is a name references use.

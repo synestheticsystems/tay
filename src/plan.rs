@@ -27,11 +27,13 @@ pub use model::{
 
 use resolve::{EnvironmentFacts, Resolver};
 
-/// What `tay plan` is asked for.
+/// What `tay plan` is asked for, or `tay up`, which plans as it does.
 pub struct Options {
     pub profile: Option<String>,
     /// Each `--set KEY=VALUE`, in the order given.
     pub sets: Vec<String>,
+    /// The units `tay up` names, in place of `up`.
+    pub units: Vec<String>,
     /// The home folder, where this person's own file of choices is.
     pub home: Option<PathBuf>,
     /// The folder that holds each stack's shared folder, when it is known.
@@ -69,7 +71,11 @@ pub fn plan(root: &Path, options: &Options, sources: &mut Sources, d: &mut Diagn
     let profile = choose_profile(&stack, options.profile.as_deref(), sources, d);
     let production = profile.and_then(|profile| profile.production);
     let home = options.home.as_deref();
-    let (places, places_parsed) = read::places(&stack, profile, home, &options.sets, sources, d);
+    let asked = read::Asked {
+        sets: &options.sets,
+        units: &options.units,
+    };
+    let (places, places_parsed) = read::places(&stack, profile, home, &asked, sources, d);
     let every_file_parsed = every_file_parsed && places_parsed;
     let layered = choices::layer(places.in_order());
     // With a file that did not parse, the set of units is not known, and
@@ -118,7 +124,8 @@ pub fn plan(root: &Path, options: &Options, sources: &mut Sources, d: &mut Diagn
     if let (Some(profile), Some(marked_at)) = (profile, production) {
         planner.refuse_for_production(&profile.name, marked_at, &reached);
     }
-    let plan = planner.finish(reached, &stack, &stack_name.name, profile);
+    let up: Vec<String> = layered.up.iter().map(|name| name.name.clone()).collect();
+    let plan = planner.finish(reached, &stack, &stack_name.name, profile, up);
     planner.resolver.report_unset_settings();
     d.extend(planner.resolver.d);
     match plan {
@@ -169,6 +176,7 @@ mod tests {
         let options = Options {
             profile: None,
             sets: sets.iter().map(|set| set.to_string()).collect(),
+            units: Vec::new(),
             home: Some(fixtures.join("homes/none")),
             shared_folders: Some(fixtures.join("homes/none/.local/share/tay")),
         };

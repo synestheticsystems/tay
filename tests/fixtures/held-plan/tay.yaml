@@ -1,0 +1,11 @@
+format: 1
+stack: held-plan
+up: [notice-port]
+units:
+  notice-port: { uses: port }
+  # Its template is a pipe the test makes and writes to, so that planning
+  # waits until the test lets it go on.
+  notice:
+    uses: file
+    needs: [notice-port]
+    with: { template: ./notice.fifo }

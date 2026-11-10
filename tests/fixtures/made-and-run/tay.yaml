@@ -1,0 +1,28 @@
+format: 1
+stack: made-and-run
+up: [site, jobs, notice]
+units:
+  site-port: { uses: port }
+  site-config:
+    uses: file
+    with: { content: "port: ${site-port.number}\n" }
+  site:
+    doc: The site's server, which tay cannot run yet.
+    uses: process
+    needs: [site-config]
+    with: { command: [serve, "${site-config.path}"] }
+  search:
+    uses: container
+    with: { image: example/search:1 }
+  index:
+    uses: command
+    needs: [search]
+    with: { run: [index, all] }
+  jobs:
+    doc: What runs once the site is up.
+    needs: [site, index]
+  notice:
+    doc: Written once the search has started or failed, whichever it does.
+    uses: file
+    after: [search]
+    with: { content: "the site is coming up\n" }

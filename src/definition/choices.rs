@@ -47,6 +47,8 @@ pub struct Places<'s> {
     pub environment: Option<Choices>,
     /// Each `--set`, in the order written.
     pub sets: Vec<Choices>,
+    /// The units `tay up` names, which replace `up`.
+    pub named: Option<Choices>,
 }
 
 impl Places<'_> {
@@ -64,6 +66,7 @@ impl Places<'_> {
             .chain(self.personal.as_ref())
             .chain(self.environment.as_ref())
             .chain(&self.sets)
+            .chain(self.named.as_ref())
             .collect()
     }
 }

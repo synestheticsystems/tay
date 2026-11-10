@@ -16,11 +16,11 @@ Four rules run through all of it.
 | Command | What it does | Built |
 |---|---|---|
 | `tay plan` | Reads and checks the definitions and prints the plan. Starts nothing | yes |
-| `tay up [UNIT...]` | Brings the units up, in order, and returns when all are ready or one has failed | no |
-| `tay down` | Stops everything the environment runs, checks that nothing is left, and says so | no |
-| `tay status [UNIT]` | Each unit's state, from a check | no |
+| `tay up [UNIT...]` | Brings the units up, in order, and returns when all are ready or one has failed | yes |
+| `tay down` | Stops everything the environment runs, checks that nothing is left, and says so | yes |
+| `tay status [UNIT]` | Each unit's state, from a check | yes |
 | `tay logs UNIT [--since 10m] [--follow]` | What the unit wrote, with the time of each line | no |
-| `tay ls` | The environments on this machine | no |
+| `tay ls` | The environments on this machine | yes |
 
 Every command takes `--root FOLDER`, and `--json` where it prints something a program would read. No command ever reads from the terminal. Without a terminal there is no colour, and nothing follows for ever unless asked to.
 
@@ -115,8 +115,6 @@ Per machine, outside any environment: a list of the environments tay knows, with
 An environment leaves the machine's list when a check finds nothing of it left: no process, no container, no volume, no network. A missing folder alone does not remove it.
 
 ## Units that are made
-
-*Not built.*
 
 **`port`.** A port unit promises a number that no other environment of tay on this machine will be given, tested as free when chosen, and remembered.
 

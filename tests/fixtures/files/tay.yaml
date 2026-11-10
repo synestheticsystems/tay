@@ -1,0 +1,19 @@
+format: 1
+stack: files
+settings:
+  greeting: { default: hello }
+  token: { secret: true, default: not-a-real-token }
+up: [plain, secret-holding, own-mode, written-once]
+units:
+  plain:
+    uses: file
+    with: { content: "greeting: ${settings.greeting}\n" }
+  secret-holding:
+    uses: file
+    with: { content: "token: ${settings.token}\n" }
+  own-mode:
+    uses: file
+    with: { content: "token: ${settings.token}\n", mode: "0640" }
+  written-once:
+    uses: file
+    with: { content: "greeting: ${settings.greeting}\n", overwrite: false }

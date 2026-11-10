@@ -1,0 +1,17 @@
+format: 1
+stack: notes
+up: [notes]
+units:
+  notes:
+    doc: Everything the notes site is made of.
+    needs: [notes-port, notes-key, notes-password, signing, notes-config]
+  notes-port: { uses: port, with: { prefer: 24601 } }
+  notes-key: { uses: secret, with: { kind: bytes, length: 16, encoding: base64url } }
+  notes-password: { uses: secret, with: { kind: password } }
+  signing: { uses: secret, with: { kind: keypair, algorithm: rsa-2048 } }
+  notes-config:
+    uses: file
+    with:
+      folder: config
+      name: notes.conf
+      content: "listen: ${notes-port.number}\nkey: ${notes-key.value}\n"

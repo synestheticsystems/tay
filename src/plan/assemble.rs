@@ -25,6 +25,7 @@ impl Planner<'_> {
         stack: &Stack,
         stack_name: &str,
         profile: Option<&Profile>,
+        up: Vec<String>,
     ) -> Option<Plan> {
         let name = |unit: usize| stack.units[unit].name.name.clone();
         let in_plan: HashSet<usize> = reached.visits.iter().map(|(unit, _)| *unit).collect();
@@ -89,6 +90,7 @@ impl Planner<'_> {
             root: self.resolver.environment.root.clone(),
             profile: profile.map(|profile| profile.name.name.clone()),
             production: self.production,
+            up,
             units,
         })
     }

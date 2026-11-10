@@ -20,6 +20,9 @@ pub struct Plan {
     pub root: String,
     pub profile: Option<String>,
     pub production: bool,
+    /// The units `up` names: bringing the plan up has succeeded when each
+    /// of them is ready.
+    pub up: Vec<String>,
     /// Every unit that comes up, in an order it could start in.
     pub units: Vec<PlannedUnit>,
 }
@@ -45,13 +48,6 @@ pub struct PlannedMechanism {
     pub way: Option<String>,
     pub kind: UnitKind,
     /// The module's own settings: what the unit is brought up from.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the engine, which is not built yet, brings each unit up from its settings"
-        )
-    )]
     pub settings: Box<dyn Settings>,
     pub ready: Readiness,
     pub restart: Restart,

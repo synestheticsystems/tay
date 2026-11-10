@@ -64,7 +64,8 @@ pub fn gate(stack: &Fields<'_>, d: &mut Diagnostics) -> Result<(), Vec<Diagnosti
     }
 }
 
-fn parse_version(text: &str) -> Option<(u64, u64, u64)> {
+/// A version of three numbers, as `requires` and tay write it.
+pub fn parse_version(text: &str) -> Option<(u64, u64, u64)> {
     let mut parts = text.split('.').map(|part| {
         (!part.is_empty() && part.chars().all(|c| c.is_ascii_digit()))
             .then(|| part.parse::<u64>().ok())

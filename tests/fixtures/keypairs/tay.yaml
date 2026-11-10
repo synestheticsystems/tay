@@ -1,0 +1,6 @@
+format: 1
+stack: keypairs
+up: [rsa-key, edwards-key]
+units:
+  rsa-key: { uses: secret, with: { kind: keypair, algorithm: rsa-2048 } }
+  edwards-key: { uses: secret, with: { kind: keypair, algorithm: ed25519 } }
