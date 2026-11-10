@@ -1,0 +1,4 @@
+format: 1
+requires: ">=99.0.0"
+stack: too-new
+future_field: something this tay does not know

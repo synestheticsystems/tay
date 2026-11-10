@@ -1,0 +1,8 @@
+format: 1
+stack: value-type-error
+settings:
+  port: { default: "8080" }
+units:
+  fixed-port:
+    uses: port
+    with: { fixed: "${settings.port}" }

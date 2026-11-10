@@ -1,0 +1,4 @@
+core:
+  doc: Everything the shop needs to serve a page.
+  needs: [web, app-db]
+app-db: { from: database, params: { name: app } }

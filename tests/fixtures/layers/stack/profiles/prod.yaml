@@ -1,0 +1,7 @@
+production: true
+up: [one, two]
+settings:
+  from.profile: profile
+  from.personal: profile
+  from.environment: profile
+  from.argument: profile

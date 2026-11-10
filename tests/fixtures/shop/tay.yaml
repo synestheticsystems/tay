@@ -1,0 +1,9 @@
+format: 1
+requires: ">=0.0.0"
+stack: shop
+default_profile: dev
+settings:
+  log.web: { default: info }
+  images.api: {}
+units:
+  web-port: { uses: port, with: { prefer: 5173 } }

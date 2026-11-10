@@ -1,0 +1,3 @@
+production: true
+up: [server]
+run: { default: image }

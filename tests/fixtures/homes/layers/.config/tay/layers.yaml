@@ -1,0 +1,5 @@
+up_add: [three]
+settings:
+  from.personal: personal
+  from.environment: personal
+  from.argument: personal

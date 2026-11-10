@@ -1,0 +1,9 @@
+uses: container
+with:
+  image: postgres:17.2
+  secret_env: { POSTGRES_PASSWORD: "${db-password.value}" }
+  publish: { 5432: "${db-port.number}" }
+  volumes: { data: /var/lib/postgresql/data }
+ready: { command: ["pg_isready", "-U", "postgres"], within: 2m }
+gives:
+  sql: { port: 5432 }

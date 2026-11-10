@@ -1,0 +1,35 @@
+format: 1
+stack: endpoints
+units:
+  host-port: { uses: port }
+  box-port: { uses: port }
+  on-host:
+    needs: [host-port]
+    uses: process
+    with: { command: [serve] }
+    gives:
+      api: { port: "${host-port.number}", scheme: http, path: /v1 }
+  in-box:
+    needs: [box-port]
+    uses: container
+    with: { image: example/box, publish: { 8080: "${box-port.number}" } }
+    gives:
+      api: { port: 8080, scheme: http }
+  relay:
+    uses: port
+    gives: { upstream: "${in-box.api.url}/v2" }
+  host-user:
+    needs: [on-host, in-box]
+    uses: process
+    with: { command: [use] }
+    ready:
+      command: [probe, "${on-host.api.url}", "${in-box.api}", "${in-box.api.url@net}", "${relay.upstream}", "${in-box.api.host}", "${in-box.api.port}"]
+      within: 1m
+  box-user:
+    needs: [on-host, in-box]
+    uses: container
+    with: { image: example/user }
+    ready:
+      command: [probe, "${on-host.api}", "${in-box.api.url}", "${on-host.api.url@host}", "${relay.upstream}", "${on-host.api.host}"]
+      within: 1m
+  all: { needs: [host-user, box-user] }

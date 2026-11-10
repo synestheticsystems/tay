@@ -1,0 +1,18 @@
+doc: The shop's API.
+needs: [database]
+run:
+  source:
+    uses: process
+    with:
+      command: ["${build.outputs.server}"]
+      env: { DATABASE_URL: "postgres://app@${database.sql}/app" }
+    gives:
+      http: { port: "${api-port.number}", scheme: http }
+  image:
+    uses: container
+    with:
+      image: "example/api@${settings.images.api}"
+      env: { DATABASE_URL: "postgres://app@${database.sql}/app" }
+      publish: { 8080: "${api-port.number}" }
+    gives:
+      http: { port: 8080, scheme: http }

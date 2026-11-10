@@ -1,0 +1,2 @@
+up: [core]
+run: { default: source }

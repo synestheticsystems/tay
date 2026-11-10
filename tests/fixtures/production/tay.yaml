@@ -1,0 +1,44 @@
+format: 1
+stack: production
+default_profile: dev
+settings:
+  certs: { default: /etc/example/certs }
+units:
+  site:
+    uses: process
+    with: { command: [serve], prepare: [[install]] }
+  migrate:
+    uses: command
+    with: { run: [migrate] }
+  builder:
+    uses: container
+    with: { build: { context: images/builder } }
+  watcher:
+    uses: container
+    with: { image: example/watcher }
+    watch: [src]
+  outside:
+    uses: container
+    with:
+      image: example/outside
+      mounts: [{ from: /etc/example, to: /config }]
+  inside:
+    uses: container
+    with:
+      image: example/inside
+      mounts:
+        - { from: config, to: /config }
+        - { from: "${settings.certs}", to: /certs }
+        - { from: "${environment.state}/inside", to: /state }
+  setup:
+    uses: command
+    with: { in: inside, run: [setup] }
+  server:
+    run:
+      source:
+        uses: process
+        with: { command: [server] }
+      image:
+        uses: container
+        with: { image: example/server }
+  all: { needs: [site, migrate, builder, watcher, outside, inside, setup, server] }

@@ -1,0 +1,12 @@
+format: 1
+stack: errors-many
+units:
+  web:
+    uses: process
+    with: { command: [serve], colour: red }
+  worker:
+    uses: process
+    with: { workdir: jobs }
+  Bad_Name: { uses: port }
+  settings: { uses: port }
+  api: { uses: port, needs: [nobody] }

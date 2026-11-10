@@ -1,0 +1,25 @@
+format: 1
+stack: known-and-produced
+units:
+  portal-port: { uses: port }
+  login-port: { uses: port }
+  portal:
+    needs: [portal-port, login]
+    uses: process
+    with:
+      command: [portal, --login, "${login.http.url}"]
+    gives:
+      http: { port: "${portal-port.number}", scheme: http }
+  login:
+    needs: [login-port]
+    uses: process
+    with:
+      command: [login, --return-to, "${portal.http.url}/done"]
+      env: { TOKEN: "${issuer.token}" }
+    gives:
+      http: { port: "${login-port.number}", scheme: http }
+  issuer:
+    uses: command
+    with:
+      run: [issue-token]
+      produces: [token]

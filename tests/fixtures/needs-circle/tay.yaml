@@ -1,0 +1,7 @@
+format: 1
+stack: needs-circle
+units:
+  a: { uses: port, needs: [b] }
+  b: { uses: port, needs: [c] }
+  c: { uses: port, needs: [a] }
+  d: { uses: port, needs: [a] }

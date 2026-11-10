@@ -1,0 +1,9 @@
+format: 1
+stack: settings-errors
+settings:
+  count: { default: 3 }
+  mode: { default: fast, type: number }
+units:
+  one:
+    uses: port
+    gives: { size: "${settings.size}" }

@@ -1,0 +1,21 @@
+format: 1
+stack: secrets-forbidden
+units:
+  db-password: { uses: secret, with: { kind: password } }
+  plain-port: { uses: port }
+  app:
+    uses: process
+    with:
+      command: [app, "--password=${db-password.value}"]
+      env: { PASSWORD: "${db-password.value}" }
+      secret_env: { PORT: "${plain-port.number}" }
+  box:
+    uses: container
+    with:
+      image: example/box
+      labels: { password: "${db-password.value}" }
+    ready: { command: [check, "${db-password.value}"], within: 1m }
+  shared-file:
+    uses: file
+    with: { content: "${db-password.value}", mode: "0644" }
+  all: { needs: [app, box, shared-file] }

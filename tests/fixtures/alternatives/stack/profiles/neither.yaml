@@ -1,0 +1,2 @@
+up: [server]
+run: { default: published }

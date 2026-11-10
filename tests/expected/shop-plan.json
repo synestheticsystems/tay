@@ -1,0 +1,322 @@
+{
+  "outcome": "plan",
+  "plan": {
+    "production": false,
+    "profile": "dev",
+    "root": "<root>",
+    "stack": "shop",
+    "units": [
+      {
+        "after": [],
+        "alternative": null,
+        "doc": null,
+        "gives": [
+          {
+            "endpoint": false,
+            "from_containers": {
+              "text": "<output: build.server>",
+              "value": null
+            },
+            "from_host": {
+              "text": "<output: build.server>",
+              "value": null
+            },
+            "known_before_start": false,
+            "name": "outputs.server",
+            "produced_by": [
+              "build"
+            ],
+            "secret": false
+          }
+        ],
+        "group": false,
+        "module": "command",
+        "name": "build",
+        "needs": [],
+        "ready": {
+          "check": null,
+          "without_check": "when it exits with 0"
+        },
+        "restart": {
+          "attempts": null,
+          "on": {
+            "text": "never",
+            "value": "never"
+          }
+        },
+        "runs": "host",
+        "runs_inside": null,
+        "watch": []
+      },
+      {
+        "after": [],
+        "alternative": null,
+        "doc": null,
+        "gives": [
+          {
+            "endpoint": true,
+            "from_containers": {
+              "text": "database:5432",
+              "value": "database:5432"
+            },
+            "from_host": {
+              "text": "127.0.0.1:<port: db-port>",
+              "value": null
+            },
+            "known_before_start": true,
+            "name": "sql",
+            "produced_by": [],
+            "secret": false
+          }
+        ],
+        "group": false,
+        "module": "container",
+        "name": "database",
+        "needs": [],
+        "ready": {
+          "check": "command",
+          "target": [
+            {
+              "text": "pg_isready",
+              "value": "pg_isready"
+            },
+            {
+              "text": "-U",
+              "value": "-U"
+            },
+            {
+              "text": "postgres",
+              "value": "postgres"
+            }
+          ],
+          "within": {
+            "text": "2m",
+            "value": "2m"
+          }
+        },
+        "restart": {
+          "attempts": {
+            "text": "5",
+            "value": 5
+          },
+          "on": {
+            "text": "failure",
+            "value": "failure"
+          }
+        },
+        "runs": "own_container",
+        "runs_inside": null,
+        "watch": []
+      },
+      {
+        "after": [],
+        "alternative": "source",
+        "doc": "The shop's API.",
+        "gives": [
+          {
+            "endpoint": true,
+            "from_containers": {
+              "text": "http://host.docker.internal:<port: api-port>",
+              "value": null
+            },
+            "from_host": {
+              "text": "http://127.0.0.1:<port: api-port>",
+              "value": null
+            },
+            "known_before_start": true,
+            "name": "http",
+            "produced_by": [],
+            "secret": false
+          }
+        ],
+        "group": false,
+        "module": "process",
+        "name": "api",
+        "needs": [
+          {
+            "because": "written",
+            "unit": "database"
+          },
+          {
+            "because": "uses_produced_value",
+            "unit": "build",
+            "value": "build.outputs.server"
+          }
+        ],
+        "ready": {
+          "check": null,
+          "without_check": "when it has started"
+        },
+        "restart": {
+          "attempts": {
+            "text": "5",
+            "value": 5
+          },
+          "on": {
+            "text": "failure",
+            "value": "failure"
+          }
+        },
+        "runs": "host",
+        "runs_inside": null,
+        "watch": []
+      },
+      {
+        "after": [],
+        "alternative": null,
+        "doc": null,
+        "gives": [],
+        "group": false,
+        "module": "command",
+        "name": "app-db",
+        "needs": [
+          {
+            "because": "written",
+            "unit": "database"
+          }
+        ],
+        "ready": {
+          "check": null,
+          "without_check": "when it exits with 0"
+        },
+        "restart": {
+          "attempts": null,
+          "on": {
+            "text": "never",
+            "value": "never"
+          }
+        },
+        "runs": "inside_unit",
+        "runs_inside": "database",
+        "watch": []
+      },
+      {
+        "after": [],
+        "alternative": null,
+        "doc": null,
+        "gives": [
+          {
+            "endpoint": false,
+            "from_containers": {
+              "text": "<port: web-port>",
+              "value": null
+            },
+            "from_host": {
+              "text": "<port: web-port>",
+              "value": null
+            },
+            "known_before_start": true,
+            "name": "number",
+            "produced_by": [],
+            "secret": false
+          }
+        ],
+        "group": false,
+        "module": "port",
+        "name": "web-port",
+        "needs": [],
+        "ready": {
+          "check": null,
+          "without_check": "when it is held"
+        },
+        "restart": {
+          "attempts": null,
+          "on": {
+            "text": "never",
+            "value": "never"
+          }
+        },
+        "runs": "tay",
+        "runs_inside": null,
+        "watch": []
+      },
+      {
+        "after": [],
+        "alternative": null,
+        "doc": "The shop's site, served by its development server.",
+        "gives": [
+          {
+            "endpoint": true,
+            "from_containers": {
+              "text": "http://host.docker.internal:<port: web-port>",
+              "value": null
+            },
+            "from_host": {
+              "text": "http://127.0.0.1:<port: web-port>",
+              "value": null
+            },
+            "known_before_start": true,
+            "name": "site",
+            "produced_by": [],
+            "secret": false
+          }
+        ],
+        "group": false,
+        "module": "process",
+        "name": "web",
+        "needs": [
+          {
+            "because": "written",
+            "unit": "web-port"
+          },
+          {
+            "because": "written",
+            "unit": "api"
+          }
+        ],
+        "ready": {
+          "check": "http",
+          "target": [
+            {
+              "text": "http://127.0.0.1:<port: web-port>/",
+              "value": null
+            }
+          ],
+          "within": {
+            "text": "2m",
+            "value": "2m"
+          }
+        },
+        "restart": {
+          "attempts": {
+            "text": "5",
+            "value": 5
+          },
+          "on": {
+            "text": "failure",
+            "value": "failure"
+          }
+        },
+        "runs": "host",
+        "runs_inside": null,
+        "watch": []
+      },
+      {
+        "after": [],
+        "alternative": null,
+        "doc": "Everything the shop needs to serve a page.",
+        "gives": [],
+        "group": true,
+        "module": null,
+        "name": "core",
+        "needs": [
+          {
+            "because": "written",
+            "unit": "web"
+          },
+          {
+            "because": "written",
+            "unit": "app-db"
+          }
+        ],
+        "ready": null,
+        "restart": null,
+        "runs": null,
+        "runs_inside": null,
+        "watch": []
+      }
+    ]
+  },
+  "schema": 1,
+  "tay": "0.0.0"
+}

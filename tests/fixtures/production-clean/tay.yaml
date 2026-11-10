@@ -1,0 +1,12 @@
+format: 1
+stack: production-clean
+default_profile: deploy
+units:
+  server:
+    run:
+      source:
+        uses: process
+        with: { command: [server] }
+      image:
+        uses: container
+        with: { image: example/server }

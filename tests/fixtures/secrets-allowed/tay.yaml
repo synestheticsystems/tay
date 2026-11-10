@@ -1,0 +1,21 @@
+format: 1
+stack: secrets-allowed
+settings:
+  licence_key: { secret: true }
+units:
+  db-password: { uses: secret, with: { kind: password } }
+  signing: { uses: secret, with: { kind: keypair, algorithm: ed25519 } }
+  database:
+    uses: container
+    with:
+      image: example/db
+      secret_env:
+        PASSWORD: "${db-password.value}"
+        LICENCE: "${settings.licence_key}"
+    gives:
+      dsn: "postgres://app:${db-password.value}@database/app"
+      licence: "${settings.licence_key}"
+  credentials:
+    uses: file
+    with: { content: "password=${db-password.value}" }
+  all: { needs: [database, credentials] }

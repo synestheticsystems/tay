@@ -1,0 +1,14 @@
+format: 1
+stack: value-types
+settings:
+  port: { default: 8080 }
+  verbose: { default: true }
+units:
+  fixed-port:
+    uses: port
+    with: { fixed: "${settings.port}" }
+    gives:
+      whole: "${settings.port}"
+      inside: "port ${settings.port}"
+      flag: "${settings.verbose}"
+      escaped: "$${settings.port} stays as written"

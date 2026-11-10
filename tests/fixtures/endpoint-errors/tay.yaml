@@ -1,0 +1,22 @@
+format: 1
+stack: endpoint-errors
+units:
+  hidden:
+    uses: container
+    with: { image: example/db }
+    gives:
+      db: { port: 5432 }
+  host-user:
+    uses: process
+    with:
+      command: [use]
+      env: { DB: "${hidden.db}", DB_NET: "${hidden.db@net}" }
+  box-user:
+    uses: container
+    with:
+      image: example/user
+      env: { DB: "${hidden.db}", DB_HOST: "${hidden.db@host}" }
+  config:
+    uses: file
+    with: { content: "db = ${hidden.db}" }
+  all: { needs: [host-user, box-user, config] }

@@ -1,0 +1,4 @@
+up_remove: [two]
+settings:
+  from.environment: environment
+  from.argument: environment

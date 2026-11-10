@@ -1,0 +1,21 @@
+format: 1
+stack: layers
+default_profile: dev
+settings:
+  from.stack: { default: stack }
+  from.profile: { default: stack }
+  from.personal: { default: stack }
+  from.environment: { default: stack }
+  from.argument: { default: stack }
+units:
+  one:
+    uses: port
+    gives:
+      stack: "${settings.from.stack}"
+      profile: "${settings.from.profile}"
+      personal: "${settings.from.personal}"
+      environment: "${settings.from.environment}"
+      argument: "${settings.from.argument}"
+  two: { uses: port }
+  three: { uses: port }
+  four: { uses: port }

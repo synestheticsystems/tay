@@ -1,0 +1,5 @@
+production: true
+up: [core]
+run: { default: image }
+settings:
+  images.api: "sha256:0123"

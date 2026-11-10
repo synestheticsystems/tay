@@ -1,0 +1,13 @@
+format: 1
+stack: actions
+default_profile: dev
+units:
+  seed:
+    uses: command
+    action: true
+    with: { run: [seed] }
+  logger: { uses: port }
+  app:
+    uses: port
+    after: [logger]
+  needs-seed: { uses: port, needs: [seed] }

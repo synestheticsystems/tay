@@ -1,0 +1,6 @@
+params:
+  name: {}
+unit:
+  uses: port
+  gives:
+    label: "${params.name}"

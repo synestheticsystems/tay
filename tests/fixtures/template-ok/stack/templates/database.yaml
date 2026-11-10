@@ -1,0 +1,8 @@
+params:
+  name: {}
+  owner: { default: app }
+unit:
+  uses: port
+  gives:
+    label: "${params.name} owned by ${params.owner}"
+    owner: "${params.owner}"

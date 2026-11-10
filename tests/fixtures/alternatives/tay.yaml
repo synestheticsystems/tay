@@ -1,0 +1,18 @@
+format: 1
+stack: alternatives
+default_profile: dev
+units:
+  server-port: { uses: port }
+  server:
+    needs: [server-port]
+    run:
+      source:
+        uses: process
+        with: { command: [serve] }
+        gives:
+          http: { port: "${server-port.number}", scheme: http }
+      image:
+        uses: container
+        with: { image: example/server, publish: { 80: "${server-port.number}" } }
+        gives:
+          http: { port: 80, scheme: http }

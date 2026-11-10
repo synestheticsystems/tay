@@ -1,0 +1,14 @@
+format: 1
+stack: alternatives-names
+units:
+  server:
+    gives: { name: server }
+    run:
+      source:
+        uses: process
+        with: { command: [serve] }
+        gives:
+          http: { port: 8080 }
+      image:
+        uses: container
+        with: { image: example/server }

@@ -1,0 +1,12 @@
+format: 1
+stack: value-circle
+units:
+  first:
+    uses: port
+    gives: { url: "http://${second.url}" }
+  second:
+    uses: port
+    gives: { url: "${first.url}/x" }
+  user:
+    uses: process
+    with: { command: [use, "${first.url}"] }

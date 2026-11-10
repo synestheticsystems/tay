@@ -1,0 +1,4 @@
+uses: command
+with:
+  run: ["cargo", "build"]
+  outputs: { server: target/debug/server }

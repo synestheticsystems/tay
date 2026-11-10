@@ -1,0 +1,18 @@
+format: 1
+stack: settings-unset
+settings:
+  region: {}
+  images.unused: {}
+  count: { default: 3 }
+  pin: { type: number, secret: true, default: 1234 }
+units:
+  one:
+    uses: port
+    gives:
+      where: "${settings.region}"
+      again: "in ${settings.region}"
+      count: "${settings.count}"
+      pin: "${settings.pin}"
+  unused:
+    uses: port
+    gives: { image: "${settings.images.unused}" }

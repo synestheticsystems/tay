@@ -1,0 +1,8 @@
+format: 1
+stack: secrets-literal
+units:
+  app:
+    uses: process
+    with:
+      command: [app]
+      secret_env: { TOKEN: hunter2-literal }
