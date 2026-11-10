@@ -289,20 +289,34 @@ impl Builder<'_, '_> {
     }
 
     fn string(&self, value: &str, style: ScalarStyle, span: Span) -> Scalar {
-        let (start, end) = (span.start.index(), span.end.index());
-        let one_line = span.start.line() == span.end.line();
         let quote = match style {
-            ScalarStyle::Plain => Some(0),
-            ScalarStyle::SingleQuoted | ScalarStyle::DoubleQuoted => Some(1),
-            ScalarStyle::Literal | ScalarStyle::Folded => None,
+            ScalarStyle::Plain => None,
+            ScalarStyle::SingleQuoted => Some('\''),
+            ScalarStyle::DoubleQuoted => Some('"'),
+            ScalarStyle::Literal | ScalarStyle::Folded => {
+                return Scalar::Str(Str {
+                    text: value.to_string(),
+                    content_column: None,
+                });
+            }
         };
-        let content_column = quote.and_then(|quote| {
-            let (from, to) = (start + quote, end.checked_sub(quote)?);
-            let written = self
-                .text
-                .get(*self.char_starts.get(from)?..*self.char_starts.get(to)?)?;
-            (one_line && written == value).then(|| column_of(span.start.col() + quote))
+        // Compared from the start and the value's length: the parser's end of
+        // a quoted scalar inside a flow mapping runs one character long.
+        let from = span.start.index() + usize::from(quote.is_some());
+        let to = from + value.chars().count();
+        let written = self
+            .char_starts
+            .get(from)
+            .zip(self.char_starts.get(to))
+            .and_then(|(from, to)| self.text.get(*from..*to));
+        let closed = quote.is_none_or(|quote| {
+            self.char_starts
+                .get(to)
+                .and_then(|at| self.text.get(*at..))
+                .is_some_and(|rest| rest.starts_with(quote))
         });
+        let content_column = (written == Some(value) && closed && !value.contains('\n'))
+            .then(|| column_of(span.start.col() + usize::from(quote.is_some())));
         Scalar::Str(Str {
             text: value.to_string(),
             content_column,
@@ -413,14 +427,19 @@ mod tests {
 
     #[test]
     fn content_column_is_known_only_when_the_value_is_written_out_as_is() {
-        let (node, _) = read("a: x ${y}\nb: \"x ${y}\"\nc: \"x\\t${y}\"\nd: |\n  x ${y}\n");
+        let (node, _) = read(
+            "a: x ${y}\nb: \"x ${y}\"\nc: \"x\\t${y}\"\nd: |\n  x ${y}\ne: { f: \"x ${y}\" }\ng: 'it''s ${y}'\n",
+        );
         let node = node.unwrap();
         let entries = node.as_map().unwrap();
-        let column = |i: usize| entries[i].value.as_str().unwrap().content_column;
-        assert_eq!(column(0), Some(4));
-        assert_eq!(column(1), Some(5));
-        assert_eq!(column(2), None);
-        assert_eq!(column(3), None);
+        let column = |i: usize| entries[i].value.as_str().map(|s| s.content_column);
+        assert_eq!(column(0), Some(Some(4)));
+        assert_eq!(column(1), Some(Some(5)));
+        assert_eq!(column(2), Some(None));
+        assert_eq!(column(3), Some(None));
+        let flow = entries[4].value.as_map().unwrap();
+        assert_eq!(flow[0].value.as_str().unwrap().content_column, Some(10));
+        assert_eq!(column(5), Some(None));
     }
 
     #[test]
