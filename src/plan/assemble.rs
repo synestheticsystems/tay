@@ -10,9 +10,9 @@ use crate::definition::{Profile, Stack};
 use crate::module::UnitKind;
 
 use super::Planner;
-use super::model::{After, Need, OpenedPort, Opener, Plan, PlannedUnit, PublishedPort};
+use super::model::{After, Need, Opener, Opening, Plan, PlannedUnit, PublishedPort};
 use super::order::{self, Edge, EdgeKind};
-use super::reach::visit::{OpenedAt, Visit};
+use super::reach::visit::{OpeningPlace, Visit};
 use super::reach::{Reached, opened_ports};
 use super::resolve::Chosen;
 
@@ -63,11 +63,11 @@ impl Planner<'_> {
         // through a published port that nothing opens is not shown as one.
         let opened = opened_ports(&reached.visits);
         let mut openers: HashMap<(String, i64), Vec<Opener>> = HashMap::new();
-        for opening in reached.visits.iter().flat_map(|(_, visit)| &visit.opens) {
+        for opening_use in reached.visits.iter().flat_map(|(_, visit)| &visit.opens) {
             openers
-                .entry((opening.container.clone(), opening.port))
+                .entry((opening_use.container.clone(), opening_use.port))
                 .or_default()
-                .push(opening.opener.clone());
+                .push(opening_use.opener.clone());
         }
         // Every unit is assembled, whatever the order and whether another
         // could not be, so that every error is reported.
@@ -115,29 +115,29 @@ impl Planner<'_> {
             None => Some(Vec::new()),
         };
         let publishes: Option<Vec<PublishedPort>> = mechanism
-            .map(|mechanism| &mechanism.description.published[..])
+            .map(|mechanism| &mechanism.description.publish[..])
             .unwrap_or_default()
             .iter()
-            .zip(visit.published)
-            .map(|(entry, used)| {
-                let Some(OpenedAt { address, host_port }) = used else {
+            .zip(visit.openings)
+            .map(|(entry, place)| {
+                let Some(OpeningPlace { address, host_port }) = place else {
                     return Some(PublishedPort {
                         container_port: entry.container_port,
-                        opened: None,
+                        opening: None,
                     });
                 };
-                let mut by = openers
+                let mut port_openers = openers
                     .remove(&(name(unit), entry.container_port))
                     .unwrap_or_default();
-                by.sort();
-                by.dedup();
+                port_openers.sort();
+                port_openers.dedup();
                 Some(PublishedPort {
                     container_port: entry.container_port,
-                    opened: Some(OpenedPort {
+                    opening: Some(Opening {
                         address: address?,
                         host_port: host_port?,
                         always: entry.always,
-                        by,
+                        openers: port_openers,
                     }),
                 })
             })

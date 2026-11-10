@@ -85,7 +85,7 @@ impl Planner<'_> {
             let problems = match self.resolver.resolve(&reference, scope) {
                 Ok(value) => {
                     let closed: Vec<Unreachable> = value
-                        .published_uses
+                        .reached_entries
                         .iter()
                         .filter(|used| {
                             !used.always && !opened.contains(&(used.container.clone(), used.port))

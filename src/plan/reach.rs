@@ -15,7 +15,7 @@ use super::Planner;
 use super::resolve::endpoint::LOOPBACK;
 use super::resolve::{Asker, Chosen};
 use usage::{User, Uses};
-use visit::{OpenedAt, Visit};
+use visit::{OpeningPlace, Visit};
 
 /// The published ports something in the plan opens, by container unit and
 /// container port.
@@ -23,7 +23,7 @@ pub fn opened_ports(visits: &[(usize, Visit<'_>)]) -> HashSet<(String, i64)> {
     visits
         .iter()
         .flat_map(|(_, visit)| &visit.opens)
-        .map(|opening| (opening.container.clone(), opening.port))
+        .map(|opening_use| (opening_use.container.clone(), opening_use.port))
         .collect()
 }
 
@@ -110,13 +110,13 @@ impl<'s> Planner<'s> {
             let Chosen::Mechanism { mechanism, .. } = reached.visits[index].1.chosen else {
                 continue;
             };
-            let published = &mechanism.description.published;
+            let publish = &mechanism.description.publish;
             let name = &stack.units[unit].name.name;
-            for (entry_index, entry) in published.iter().enumerate() {
+            for (entry_index, entry) in publish.iter().enumerate() {
                 let visit = &reached.visits[index].1;
                 let is_opened =
                     entry.always || opened.contains(&(name.clone(), entry.container_port));
-                if visit.published[entry_index].is_some() || !is_opened {
+                if visit.openings[entry_index].is_some() || !is_opened {
                     continue;
                 }
                 let user = User {
@@ -137,7 +137,7 @@ impl<'s> Planner<'s> {
                     None => Some(Value::text(LOOPBACK)),
                 };
                 let visit = &mut reached.visits[index].1;
-                visit.published[entry_index] = Some(OpenedAt { address, host_port });
+                visit.openings[entry_index] = Some(OpeningPlace { address, host_port });
                 let added = visit::add_needs(&mut visit.needs, unit, uses.needs);
                 visit.opens.extend(uses.opens);
                 let visit = &reached.visits[index].1;

@@ -113,22 +113,22 @@ fn unit(unit: &PlannedUnit) -> Value {
             })),
         })),
         "watch": mechanism.map_or(Vec::new(), |mechanism| mechanism.watch.iter().map(shown).collect()),
-        "publishes": mechanism.map_or(Vec::new(), |mechanism| mechanism.publishes.iter().map(published).collect()),
+        "publishes": mechanism.map_or(Vec::new(), |mechanism| mechanism.publishes.iter().map(published_port).collect()),
         "gives": unit.gives.iter().map(given).collect::<Vec<_>>(),
     })
 }
 
-fn published(published: &PublishedPort) -> Value {
-    let Some(opened) = &published.opened else {
+fn published_port(published: &PublishedPort) -> Value {
+    let Some(opening) = &published.opening else {
         return json!({ "container_port": published.container_port, "opened": false });
     };
     json!({
         "container_port": published.container_port,
         "opened": true,
-        "address": shown(&opened.address),
-        "host_port": shown(&opened.host_port),
-        "always": opened.always,
-        "opened_by": opened.by.iter().map(|opener| json!({
+        "address": shown(&opening.address),
+        "host_port": shown(&opening.host_port),
+        "always": opening.always,
+        "opened_by": opening.openers.iter().map(|opener| json!({
             "unit": opener.unit,
             "how": match opener.how {
                 OpenedBy::UnitOnHost => "unit_on_host",

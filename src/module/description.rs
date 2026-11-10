@@ -15,7 +15,7 @@ pub struct Description {
     /// The module's own settings, every value still to be resolved.
     pub settings: Box<dyn WrittenSettings>,
     /// The ports a unit in a container of its own publishes to the host.
-    pub published: Vec<Published>,
+    pub publish: Vec<PublishEntry>,
     /// The values the module gives, used as `${unit.name}`. Reading the unit
     /// moves them in among the values the unit gives.
     pub gives: Vec<ModuleGive>,
@@ -48,7 +48,7 @@ impl Description {
         Description {
             kind,
             settings,
-            published: Vec::new(),
+            publish: Vec::new(),
             gives: Vec::new(),
             outputs: Vec::new(),
             volumes: Vec::new(),
@@ -105,11 +105,12 @@ pub enum Runs {
     OneOffContainer,
 }
 
-/// A container port that may be made reachable from the host. It is opened
-/// only when something in the plan uses it from the host, or when `always`
-/// says so; until then nothing uses its values.
+/// One entry of a container's `publish`: a container port that may be made
+/// reachable from the host. It is opened only when something in the plan
+/// uses it from the host, or when `always` says so; until then nothing uses
+/// its values.
 #[derive(Clone, Debug)]
-pub struct Published {
+pub struct PublishEntry {
     pub container_port: i64,
     pub host_port: Slot,
     /// The host address it is opened on; `None` for 127.0.0.1.

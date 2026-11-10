@@ -61,7 +61,7 @@ fn exprs(mechanism: &Mechanism) -> Vec<&Expr> {
             .into_iter()
             .map(|slot| &slot.expr),
     );
-    for entry in &mechanism.description.published {
+    for entry in &mechanism.description.publish {
         all.push(&entry.host_port.expr);
         all.extend(entry.address.iter().map(|slot| &slot.expr));
     }

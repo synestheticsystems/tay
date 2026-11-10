@@ -110,13 +110,13 @@ fn mechanism_lines(lines: &mut Vec<String>, mechanism: &PlannedMechanism) {
 
 fn published_line(published: &PublishedPort) -> String {
     let port = published.container_port;
-    let Some(opened) = &published.opened else {
+    let Some(opening) = &published.opening else {
         return format!(
             "   publishes {port}: not opened, since nothing in the plan uses it from the host"
         );
     };
-    let mut by: Vec<String> = opened
-        .by
+    let mut by: Vec<String> = opening
+        .openers
         .iter()
         .map(|opener| match opener.how {
             OpenedBy::UnitOnHost => format!("{} (on the host)", opener.unit),
@@ -124,13 +124,13 @@ fn published_line(published: &PublishedPort) -> String {
             OpenedBy::View => format!("{} (through a view)", opener.unit),
         })
         .collect();
-    if opened.always {
+    if opening.always {
         by.insert(0, "always".to_string());
     }
     format!(
         "   publishes {port} at {}:{}, opened for {}",
-        opened.address.shown(),
-        opened.host_port.shown(),
+        opening.address.shown(),
+        opening.host_port.shown(),
         by.join(", ")
     )
 }

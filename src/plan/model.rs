@@ -11,7 +11,7 @@ use crate::module::{Duration, Module, ReadyWithoutCheck, RestartOn, Settings, Un
 use crate::value::Value;
 
 pub use needs::{After, Because, Need};
-pub use published::{OpenedBy, OpenedPort, Opener, PublishedPort};
+pub use published::{OpenedBy, Opener, Opening, PublishedPort};
 pub use values::{Given, Seen, Unreachable};
 
 #[derive(Debug)]

@@ -16,7 +16,7 @@ use crate::diagnostic::source::Loc;
 use crate::syntax::yaml::Node;
 
 pub use description::{
-    Concern, Description, ModuleValue, Output, Published, ReadyWithoutCheck, RestartOn, Runs,
+    Concern, Description, ModuleValue, Output, PublishEntry, ReadyWithoutCheck, RestartOn, Runs,
     UnitKind, VolumeMount,
 };
 pub use running::command_line::argv;

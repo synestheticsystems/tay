@@ -8,7 +8,7 @@ use crate::module::{Duration, RestartOn, Runs, Slot, UnitKind};
 use crate::syntax::names::NameAt;
 use crate::value::Value;
 
-use super::usage::{Opening, User, Uses};
+use super::usage::{OpeningUse, User, Uses};
 use crate::plan::Planner;
 use crate::plan::model::{Because, PlannedMechanism, PlannedUnit, Readiness, Restart};
 use crate::plan::resolve::{Asker, Chosen};
@@ -32,16 +32,16 @@ pub struct Visit<'s> {
     pub needs: Vec<NeedEdge>,
     pub after: Vec<(usize, Loc)>,
     /// The published ports of other units, or its own, that its uses open.
-    pub opens: Vec<Opening>,
-    /// For each of its own published ports, where it is opened, once
+    pub opens: Vec<OpeningUse>,
+    /// For each of its own `publish` entries, where it is opened, once
     /// something opens it and its values are used.
-    pub published: Vec<Option<OpenedAt>>,
+    pub openings: Vec<Option<OpeningPlace>>,
 }
 
-/// Where a published port is opened on the host. `None` for a value that
-/// could not be used, which has been reported.
+/// Where a published port is opened on the host, while the plan is made.
+/// `None` for a value that could not be used, which has been reported.
 #[derive(Clone)]
-pub struct OpenedAt {
+pub struct OpeningPlace {
     pub address: Option<Value>,
     pub host_port: Option<Value>,
 }
@@ -66,7 +66,7 @@ impl<'s> Planner<'s> {
                 needs: self.written_needs(needs),
                 after: Vec::new(),
                 opens: Vec::new(),
-                published: Vec::new(),
+                openings: Vec::new(),
             },
             Chosen::Mechanism { mechanism, way } => {
                 let user = User {
@@ -88,7 +88,7 @@ impl<'s> Planner<'s> {
                     needs: self.needs(unit, mechanism, uses.needs),
                     after,
                     opens: uses.opens,
-                    published: vec![None; mechanism.description.published.len()],
+                    openings: vec![None; mechanism.description.publish.len()],
                 }
             }
         }

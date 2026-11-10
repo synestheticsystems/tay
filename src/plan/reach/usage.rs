@@ -46,11 +46,11 @@ impl User<'_> {
 #[derive(Default)]
 pub struct Uses {
     pub needs: Vec<NeedEdge>,
-    pub opens: Vec<Opening>,
+    pub opens: Vec<OpeningUse>,
 }
 
-/// A published port that a use from the host opens.
-pub struct Opening {
+/// A use from the host of a published port, which opens it.
+pub struct OpeningUse {
     pub container: String,
     pub port: i64,
     pub opener: Opener,
@@ -115,8 +115,8 @@ impl Planner<'_> {
             (false, Asker::Host) => OpenedBy::UnitOnHost,
             (false, _) => OpenedBy::View,
         };
-        for used in &value.published_uses {
-            uses.opens.push(Opening {
+        for used in &value.reached_entries {
+            uses.opens.push(OpeningUse {
                 container: used.container.clone(),
                 port: used.port,
                 opener: Opener {

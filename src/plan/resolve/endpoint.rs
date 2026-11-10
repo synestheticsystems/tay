@@ -10,11 +10,11 @@
 
 use crate::definition::Endpoint;
 use crate::diagnostic::Diagnostic;
-use crate::module::{Form, HOST_IN_CONTAINERS, Published, Runs, UnitKind, Want};
+use crate::module::{Form, HOST_IN_CONTAINERS, PublishEntry, Runs, UnitKind, Want};
 use crate::syntax::expr::{Expr, Part, Reference};
 
 use super::{Asker, Fail, Res, Resolver, Scope, ViewProblem};
-use crate::plan::resolve::resolved::{PublishedUse, Resolved};
+use crate::plan::resolve::resolved::{ReachedEntry, Resolved};
 use crate::value::{Bit, Exact, Value};
 
 /// The host's own address, which a unit on the host reaches another at and
@@ -177,7 +177,7 @@ impl<'s> Resolver<'s> {
                 let Form::Number(Some(number)) = Form::of(&port.value) else {
                     return not_published(&port);
                 };
-                let Some(entry) = self.published(container, number) else {
+                let Some(entry) = self.publish_entry(container, number) else {
                     return not_published(&port);
                 };
                 let scope = Scope {
@@ -187,7 +187,7 @@ impl<'s> Resolver<'s> {
                 let mut host_port = self.resolve(&entry.host_port.expr, scope)?;
                 // Whether something opens the port is known only once the
                 // whole plan is: whoever uses the value judges that.
-                host_port.published_uses.insert(PublishedUse {
+                host_port.reached_entries.insert(ReachedEntry {
                     container: self.stack.units[container].name.name.clone(),
                     port: number,
                     always: entry.always,
@@ -204,10 +204,10 @@ impl<'s> Resolver<'s> {
     }
 
     /// The `publish` entry of the container `unit` for its port `port`, if any.
-    fn published(&mut self, unit: usize, port: i64) -> Option<&'s Published> {
+    fn publish_entry(&mut self, unit: usize, port: i64) -> Option<&'s PublishEntry> {
         self.mechanism(unit)?
             .description
-            .published
+            .publish
             .iter()
             .find(|entry| entry.container_port == port)
     }

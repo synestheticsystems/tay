@@ -8,7 +8,7 @@ use crate::syntax::yaml::{Kind, Node, Scalar};
 
 use super::{ContainerSettings, Image, Volume};
 use crate::module::Cx;
-use crate::module::description::Published;
+use crate::module::description::PublishEntry;
 use crate::module::running::command_line::{COMMAND_LINE, argv, words};
 use crate::module::running::mounts::mounts;
 use crate::module::running::variables::variables;
@@ -41,7 +41,7 @@ const SETTING: Destination = Destination::Readable("a container's settings");
 /// What a container unit's `with` says.
 pub struct Read {
     pub settings: ContainerSettings<Slot>,
-    pub published: Vec<Published>,
+    pub publish: Vec<PublishEntry>,
     /// Where `build` is written, when the image is built.
     pub built_at: Option<Loc>,
 }
@@ -57,9 +57,9 @@ pub fn read(with: Option<&Node>, cx: &mut Cx<'_>) -> Option<Read> {
     let errors_before = cx.d.len();
     let d = &mut *cx.d;
     let settings = Fields::of(with, "the settings of a `container` unit", FIELDS, d)?;
-    let published = settings
+    let publish = settings
         .get("publish")
-        .map(|node| publish_settings(node, d))
+        .map(|node| publish_entries(node, d))
         .unwrap_or_default();
     let (image, built_at) = match (settings.entry("image"), settings.entry("build")) {
         (Some((_, image)), None) => (
@@ -157,7 +157,7 @@ pub fn read(with: Option<&Node>, cx: &mut Cx<'_>) -> Option<Read> {
     };
     Some(Read {
         settings,
-        published,
+        publish,
         built_at,
     })
 }
@@ -245,7 +245,7 @@ fn volume_settings(node: &Node, d: &mut Diagnostics) -> Vec<Volume<Slot>> {
 /// `publish`: container ports, as keys, each made reachable at a host port
 /// when it is opened. Its values are not among the container's settings: an
 /// entry that is not opened uses nothing.
-fn publish_settings(node: &Node, d: &mut Diagnostics) -> Vec<Published> {
+fn publish_entries(node: &Node, d: &mut Diagnostics) -> Vec<PublishEntry> {
     const PUBLISHED: Destination = Destination::Readable("a published port");
     let Some(map) = node.as_map() else {
         d.error(
@@ -257,7 +257,7 @@ fn publish_settings(node: &Node, d: &mut Diagnostics) -> Vec<Published> {
         );
         return Vec::new();
     };
-    let mut published = Vec::new();
+    let mut entries = Vec::new();
     for entry in map {
         let container_port = match entry.key.kind {
             Kind::Scalar(Scalar::Int(port)) if (1..=65535).contains(&port) => port,
@@ -296,14 +296,14 @@ fn publish_settings(node: &Node, d: &mut Diagnostics) -> Vec<Published> {
         else {
             continue;
         };
-        published.push(Published {
+        entries.push(PublishEntry {
             container_port,
             host_port,
             address,
             always,
         });
     }
-    published
+    entries
 }
 
 fn label_key_problem(key: &str) -> Option<String> {

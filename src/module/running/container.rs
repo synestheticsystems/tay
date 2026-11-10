@@ -156,7 +156,7 @@ impl Module for Container {
     fn read(&self, with: Option<&Node>, cx: &mut Cx<'_>) -> Option<Description> {
         let read::Read {
             settings,
-            published,
+            publish,
             built_at,
         } = read::read(with, cx)?;
         let volumes = settings
@@ -167,7 +167,7 @@ impl Module for Container {
         let (volume_mounts, mut production) = mounts::described(&settings.mounts);
         production.extend(built_at.map(Concern::BuildsImage));
         Some(Description {
-            published,
+            publish,
             volumes,
             volume_mounts,
             production,
@@ -230,7 +230,7 @@ mod tests {
         ));
         assert_eq!(
             description
-                .published
+                .publish
                 .iter()
                 .map(|p| (p.container_port, p.address.is_some(), p.always))
                 .collect::<Vec<_>>(),
