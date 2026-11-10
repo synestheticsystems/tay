@@ -1,34 +1,26 @@
 //! The loop that brings a plan up: it starts each unit once everything it
-//! needs is ready, as many at once as their needs allow, reports each change
+//! needs is ready, as many at once as their needs allow, records each change
 //! of state, and says as soon as it is decided whether everything asked for
 //! is ready or one of those can no longer become ready.
+//!
+//! A unit that is made is made on the blocking pool. A unit that runs is
+//! handed to the supervisor, whose task looks after it from then on, and the
+//! loop waits for it to become ready or fail: an attempt that fails and is
+//! followed by one that becomes ready counts as ready.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 use tokio::task::JoinSet;
 
-use super::fill::{self, UnitValues};
+use super::fill;
 use super::settled::{Settled, Standing};
 use super::state::{State, UnitState};
-use crate::disk::Environment;
-use crate::module::{Exists, Operations, UnitKind, UnitPlace, Values};
+use super::supervisor::{Begin, Supervisor};
+use crate::module::{Exists, Made, Operations};
 use crate::plan::PlannedUnit;
-
-/// What happens while a plan is brought up.
-pub enum Progress {
-    /// A unit took a state; one that is made and ready gives `values`.
-    Changed {
-        unit: String,
-        state: UnitState,
-        values: Option<Values>,
-    },
-    /// The decision is made. Units that are not waiting on what failed
-    /// are still brought up as far as they can be.
-    Decided(Decision),
-}
 
 /// What bringing a plan up comes to for the units it was asked for,
 /// decided as soon as it can be.
@@ -41,80 +33,97 @@ pub enum Decision {
     Failed { failed: Vec<FailedUnit> },
 }
 
-/// A unit that failed, why, and every unit that was waiting on it.
+/// A unit that failed, why, the last lines it wrote, and every unit that
+/// was waiting on it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FailedUnit {
     pub unit: String,
     pub reason: String,
+    pub lines: Vec<String>,
     pub waiting: Vec<String>,
 }
 
 /// Brings up `units`, in their order, until each has settled or `cancel`
-/// says to stop. `asked` are the units the decision is judged by. Each
-/// change of state, and the decision once it is made, goes to `progress`.
-/// Gives the decision; `None` when it was stopped before it was made.
+/// says to stop. `asked` are the units the decision is judged by, which goes
+/// to `decided` once it is made. Gives the decision; `None` when it was
+/// stopped before it was made.
 pub async fn bring_up(
+    supervisor: &Arc<Supervisor>,
     units: &[Arc<PlannedUnit>],
     asked: &[String],
-    environment: &Arc<Environment>,
-    progress: &mut (dyn FnMut(Progress) + Send),
+    decided: &mut (dyn FnMut(Decision) + Send),
     mut cancel: watch::Receiver<bool>,
 ) -> Option<Decision> {
     let mut bringing = Bringing {
+        supervisor,
         units,
-        progress,
-        reported: vec![None; units.len()],
         started: vec![false; units.len()],
         settled: Settled::default(),
-        given: UnitValues::new(),
+        running: HashSet::new(),
+        handed: false,
+        joined: HashSet::new(),
     };
-    let mut acting = JoinSet::new();
-    // The unit each operation under way acts on, by its task.
-    let mut acting_on = HashMap::new();
-    let mut decided = None;
+    let mut making = JoinSet::new();
+    // The unit each one being made is, by its task.
+    let mut making_of = HashMap::new();
+    let mut changes = supervisor.changes();
+    let mut decision = None;
     // A change can be cancelled before it begins, while it is planned.
     let mut cancelled = *cancel.borrow();
     loop {
         cancelled |= *cancel.borrow();
-        if !cancelled {
-            for index in bringing.startable() {
-                let planned = Arc::clone(&units[index]);
-                let environment = Arc::clone(environment);
-                let given = bringing.given.clone();
-                let task = acting.spawn_blocking(move || act(&planned, &environment, &given));
-                acting_on.insert(task.id(), index);
+        // A unit that settles clears those that need it to start, and one
+        // that starts may be ready already, as one found again is.
+        let mut moved = true;
+        while moved {
+            moved = bringing.settle_running();
+            if !cancelled {
+                for (index, made) in bringing.start() {
+                    moved = true;
+                    let supervisor = Arc::clone(supervisor);
+                    let unit = units[index].name.clone();
+                    let task = making.spawn_blocking(move || made.make(&supervisor.place(&unit)));
+                    making_of.insert(task.id(), index);
+                }
+                moved |= bringing.handed;
+                bringing.handed = false;
             }
         }
         // A change cancelled before it was decided stays undecided, though
-        // what was under way when it was cancelled ends.
-        if decided.is_none() && !cancelled {
-            decided = bringing.decided(asked);
-            if let Some(decision) = &decided {
-                (bringing.progress)(Progress::Decided(decision.clone()));
+        // what was being made when it was cancelled ends.
+        if decision.is_none() && !cancelled {
+            decision = bringing.decided(asked);
+            if let Some(decision) = &decision {
+                decided(decision.clone());
             }
         }
-        if acting.is_empty() {
+        // What runs goes on under the supervisor whatever happens here.
+        let waits_on_running = !bringing.running.is_empty() && !cancelled;
+        if making.is_empty() && !waits_on_running {
             break;
         }
         tokio::select! {
-            // A cancel that comes as an operation ends is seen first, so
+            // A cancel that comes as a unit is made is seen first, so
             // nothing more starts after it.
             biased;
             () = until_cancelled(&mut cancel), if !cancelled => cancelled = true,
-            Some(joined) = acting.join_next_with_id() => {
-                let (task, acted) = match joined {
-                    Ok((task, acted)) => (task, acted),
+            Some(joined) = making.join_next_with_id() => {
+                let (task, made) = match joined {
+                    Ok((task, made)) => (task, made.map_err(|failure| failure.to_string())),
                     // An operation that panicked is a fault in tay, which
                     // fails its unit rather than the daemon.
-                    Err(error) => (error.id(), Err(format!("tay failed while acting on it: {error}"))),
+                    Err(error) => (error.id(), Err(format!("tay failed while making it: {error}"))),
                 };
-                if let Some(index) = acting_on.remove(&task) {
-                    bringing.acted(index, acted);
+                if let Some(index) = making_of.remove(&task) {
+                    bringing.made(index, made);
                 }
             }
+            changed = changes.changed(), if waits_on_running => if changed.is_err() {
+                break;
+            },
         }
     }
-    decided
+    decision
 }
 
 /// Waits until `cancel` says to stop; for ever, once nothing can say so.
@@ -126,20 +135,27 @@ async fn until_cancelled(cancel: &mut watch::Receiver<bool>) {
 
 /// One plan being brought up.
 struct Bringing<'a> {
+    supervisor: &'a Arc<Supervisor>,
     units: &'a [Arc<PlannedUnit>],
-    progress: &'a mut (dyn FnMut(Progress) + Send),
-    /// The state each unit was last reported in.
-    reported: Vec<Option<UnitState>>,
     started: Vec<bool>,
     settled: Settled,
-    given: UnitValues,
+    /// The units that run, handed to the supervisor, not yet ready or
+    /// failed.
+    running: HashSet<usize>,
+    /// Whether a unit that runs has been handed to the supervisor since
+    /// this was last cleared.
+    handed: bool,
+    /// The units that run that this change found running, and joined.
+    joined: HashSet<usize>,
 }
 
 impl Bringing<'_> {
-    /// The units that may start now. A group becomes ready at once, and a
-    /// unit that cannot start yet is reported waiting, or blocked.
-    fn startable(&mut self) -> Vec<usize> {
-        let mut startable = Vec::new();
+    /// Starts the units that may start now, and gives those that are made,
+    /// to be made. A group becomes ready at once, a unit that runs is handed
+    /// to the supervisor, and a unit that cannot start yet is recorded
+    /// waiting, or blocked.
+    fn start(&mut self) -> Vec<(usize, Box<dyn Made>)> {
+        let mut made = Vec::new();
         // A group made ready can clear the units after it.
         let mut moved = true;
         while moved {
@@ -153,61 +169,115 @@ impl Bringing<'_> {
                 if let Standing::Blocked(failed) = &standing {
                     self.settled.blocked(&planned.name, failed.clone());
                 }
+                // A unit that runs already is joined as it is once what it
+                // needs has settled, so that how those came out is said;
+                // nothing starts it again, and its state is its own.
+                let tended = self.supervisor.is_tended(&planned.name);
                 if let Some(waiting) = standing.waiting() {
-                    self.report(index, waiting, None);
+                    if !tended {
+                        self.record(index, waiting);
+                    }
+                    continue;
+                }
+                if tended {
+                    self.started[index] = true;
+                    self.running.insert(index);
+                    self.joined.insert(index);
+                    self.handed = true;
+                    moved = true;
                     continue;
                 }
                 self.started[index] = true;
                 moved = true;
-                match &planned.mechanism {
-                    None => self.report(
+                let Some(mechanism) = &planned.mechanism else {
+                    self.record(
                         index,
                         UnitState::new(State::Ready, "everything it needs is ready"),
-                        None,
-                    ),
-                    Some(mechanism) => {
-                        let doing = match mechanism.kind {
-                            UnitKind::Made => "making it",
-                            UnitKind::Runs(_) => "attempt 1, starting",
-                        };
-                        self.report(index, UnitState::new(State::Starting, doing), None);
-                        startable.push(index);
+                    );
+                    continue;
+                };
+                let given = self.supervisor.given();
+                let environment = &self.supervisor.environment;
+                let operations = mechanism
+                    .settings
+                    .fill(&mut |placeholder| fill::fill(placeholder, environment, &given));
+                match operations {
+                    Err(why) => self.record(index, UnitState::new(State::Failed, why.to_string())),
+                    Ok(Operations::Made(operations)) => {
+                        self.record(index, UnitState::new(State::Starting, "making it"));
+                        made.push((index, operations));
+                    }
+                    Ok(Operations::Running(running)) => {
+                        self.supervisor.tend(&planned, running, Begin::Fresh, true);
+                        self.running.insert(index);
+                        self.handed = true;
                     }
                 }
             }
         }
-        startable
+        made
     }
 
-    fn acted(&mut self, index: usize, acted: Result<Exists, String>) {
-        match acted {
+    /// Settles each unit that runs that has become ready or failed, or can
+    /// no longer start because a need of it failed; whether any settled. A
+    /// unit this change found running and joined, whose task has ended with
+    /// it not ready, is started afresh, once: it is not running now, and
+    /// `tay up` brings up what is not.
+    fn settle_running(&mut self) -> bool {
+        let before = self.running.len();
+        let running: Vec<usize> = self.running.iter().copied().collect();
+        for index in running {
+            let planned = &self.units[index];
+            let state = self
+                .supervisor
+                .state(&planned.name)
+                .map(|state| state.state);
+            let joined = self.joined.contains(&index);
+            match state {
+                Some(State::Ready) => self.settled.record(&planned.name, State::Ready),
+                Some(State::Failed) if !joined => self.settled.record(&planned.name, State::Failed),
+                _ if self.supervisor.is_tended(&planned.name) => continue,
+                _ if joined => {
+                    self.joined.remove(&index);
+                    self.started[index] = false;
+                }
+                // Its task ended without it ready or failed: a need of it
+                // failed before it could start again.
+                _ => match self.settled.standing(planned) {
+                    Standing::Blocked(failed) => self.settled.blocked(&planned.name, failed),
+                    Standing::Clear | Standing::Waiting(_) => {
+                        self.settled.record(&planned.name, State::Failed);
+                    }
+                },
+            }
+            self.running.remove(&index);
+        }
+        self.running.len() != before
+    }
+
+    fn made(&mut self, index: usize, made: Result<Exists, String>) {
+        match made {
             Ok(exists) => {
-                let name = self.units[index].name.clone();
-                self.given.insert(name, exists.values.clone());
-                self.report(
-                    index,
+                let unit = &self.units[index].name;
+                self.settled.record(unit, State::Ready);
+                self.supervisor.record(
+                    unit,
                     UnitState::new(State::Ready, exists.detail),
                     Some(exists.values),
                 );
             }
-            Err(reason) => self.report(index, UnitState::new(State::Failed, reason), None),
+            Err(reason) => self.record(index, UnitState::new(State::Failed, reason)),
         }
     }
 
-    fn report(&mut self, index: usize, state: UnitState, values: Option<Values>) {
+    /// Records the state the unit at `index` took, here and with the
+    /// supervisor.
+    fn record(&mut self, index: usize, state: UnitState) {
         let unit = &self.units[index].name;
         if state.state != State::Waiting {
             self.settled.record(unit, state.state);
         }
-        if self.reported[index].as_ref() == Some(&state) {
-            return;
-        }
-        self.reported[index] = Some(state.clone());
-        (self.progress)(Progress::Changed {
-            unit: unit.clone(),
-            state,
-            values,
-        });
+        self.supervisor.record(unit, state, None);
     }
 
     /// The decision, once it can be made.
@@ -225,12 +295,12 @@ impl Bringing<'_> {
         let failed = self
             .units
             .iter()
-            .zip(&self.reported)
-            .filter(|(planned, _)| failed.contains(&planned.name))
-            .filter_map(|(planned, reported)| Some((planned, reported.as_ref()?)))
+            .filter(|planned| failed.contains(&planned.name))
+            .filter_map(|planned| Some((planned, self.supervisor.state(&planned.name)?)))
             .map(|(planned, failure)| FailedUnit {
                 unit: planned.name.clone(),
-                reason: failure.detail.clone(),
+                reason: failure.detail,
+                lines: self.supervisor.last_lines(&planned.name),
                 waiting: self
                     .units
                     .iter()
@@ -246,33 +316,5 @@ impl Bringing<'_> {
             })
             .collect();
         Some(Decision::Failed { failed })
-    }
-}
-
-/// Makes or starts the unit, with its settings filled from what the units
-/// it needs gave. The reason, when it cannot be.
-fn act(
-    planned: &PlannedUnit,
-    environment: &Environment,
-    given: &UnitValues,
-) -> Result<Exists, String> {
-    let mechanism = planned
-        .mechanism
-        .as_ref()
-        .expect("a group is not acted on: it is ready once its needs are");
-    let operations = mechanism
-        .settings
-        .fill(&mut |placeholder| fill::fill(placeholder, environment, given))
-        .map_err(|why| why.to_string())?;
-    let place = UnitPlace {
-        unit: &planned.name,
-        environment,
-    };
-    match operations {
-        Operations::Made(made) => made.make(&place).map_err(|failure| failure.to_string()),
-        Operations::Running(running) => match running.start(&place) {
-            Ok(attempt) => match attempt {},
-            Err(failure) => Err(failure.to_string()),
-        },
     }
 }

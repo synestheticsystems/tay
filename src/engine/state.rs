@@ -12,6 +12,8 @@ pub enum State {
     /// It exists, for a unit that is made; its readiness check passes, for
     /// one that runs.
     Ready,
+    /// It was ready and is still running, but its check no longer passes.
+    Unready,
     /// It cannot become ready without a change.
     Failed,
     /// It is not running because it was stopped or never asked for.
@@ -24,6 +26,7 @@ impl State {
             State::Waiting => "waiting",
             State::Starting => "starting",
             State::Ready => "ready",
+            State::Unready => "unready",
             State::Failed => "failed",
             State::Stopped => "stopped",
         }

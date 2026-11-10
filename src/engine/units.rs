@@ -55,22 +55,25 @@ impl Units {
     }
 
     /// Records the state `unit` has taken, and what it gives if it gave
-    /// anything. A unit the table does not have is not recorded.
-    pub fn record(&mut self, unit: &str, state: UnitState, values: Option<Values>) {
+    /// anything; whether its state changed. A unit the table does not have
+    /// is not recorded.
+    pub fn record(&mut self, unit: &str, state: UnitState, values: Option<Values>) -> bool {
         let Some(known) = self
             .known
             .iter_mut()
             .find(|known| known.planned.name == unit)
         else {
-            return;
+            return false;
         };
         if values.is_some() {
             known.values = values;
         }
-        if known.state != state {
-            known.state = state;
-            known.since = SystemTime::now();
+        if known.state == state {
+            return false;
         }
+        known.state = state;
+        known.since = SystemTime::now();
+        true
     }
 
     pub fn get(&self, unit: &str) -> Option<&Known> {

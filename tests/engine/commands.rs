@@ -73,6 +73,7 @@ fn the_help_says_the_environment_remembers_what_up_was_asked() {
         "tay up [UNIT...] [--root FOLDER] [--profile NAME] [--set PLACE=VALUE]... [--json]",
         "tay down [--root FOLDER] [--json]",
         "tay status [UNIT] [--root FOLDER] [--json]",
+        "tay logs UNIT [--root FOLDER] [--since TIME] [--follow]",
         "tay ls [--root FOLDER] [--json]",
     ] {
         assert!(help.stdout.contains(usage), "{usage}");

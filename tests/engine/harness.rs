@@ -138,6 +138,28 @@ impl Machine {
             .collect()
     }
 
+    /// Waits until `tay status --json` at `root` gives `unit` a state and
+    /// detail, as `state detail`, for which `wanted` holds, for as long as
+    /// `limit`; the last one it gave.
+    pub fn until_state(
+        &self,
+        root: &Path,
+        unit: &str,
+        limit: Duration,
+        mut wanted: impl FnMut(&str) -> bool,
+    ) -> String {
+        let mut last = String::new();
+        let found = eventually(limit, || {
+            last = Machine::state(&self.at(root, "status", &["--json"]).json(), unit);
+            wanted(&last)
+        });
+        assert!(
+            found,
+            "`{unit}` never came to the state wanted; it is `{last}`"
+        );
+        last
+    }
+
     /// The state and detail of `unit` in a status, as `state detail`.
     pub fn state(status: &Value, unit: &str) -> String {
         let unit = status["units"]
@@ -206,19 +228,51 @@ impl Machine {
         serde_json::from_str(&text).unwrap()
     }
 
-    /// Every process whose command line names this machine's folder.
-    fn processes(&self) -> Vec<i32> {
-        let ps = Command::new("ps")
-            .args(["-ax", "-o", "pid=,command="])
-            .output()
-            .expect("ps runs");
+    /// Every process of this machine: each whose command line names this
+    /// machine's folder, as every daemon, keeper and fixture script does,
+    /// and each in a process group one of those leads, as what a unit
+    /// starts in turn is. A group the test itself is in is led by no such
+    /// process.
+    pub fn processes(&self) -> Vec<i32> {
         let folder = self.folder.path().to_str().unwrap().to_string();
-        String::from_utf8_lossy(&ps.stdout)
-            .lines()
-            .filter(|line| line.contains(&folder))
-            .filter_map(|line| line.split_whitespace().next()?.parse().ok())
+        let all = processes();
+        let groups: Vec<i32> = all
+            .iter()
+            .filter(|(pid, group, command)| pid == group && command.contains(&folder))
+            .map(|(_, group, _)| *group)
+            .collect();
+        all.iter()
+            .filter(|(_, group, command)| command.contains(&folder) || groups.contains(group))
+            .map(|(pid, _, _)| *pid)
             .collect()
     }
+}
+
+/// The command line of the process `pid`, empty when there is none.
+pub fn command_of(pid: i32) -> String {
+    processes()
+        .into_iter()
+        .find(|(other, _, _)| *other == pid)
+        .map(|(_, _, command)| command)
+        .unwrap_or_default()
+}
+
+/// Every process on this machine: its number, its group and its command
+/// line.
+pub fn processes() -> Vec<(i32, i32, String)> {
+    let ps = Command::new("ps")
+        .args(["-ax", "-o", "pid=,pgid=,command="])
+        .output()
+        .expect("ps runs");
+    String::from_utf8_lossy(&ps.stdout)
+        .lines()
+        .filter_map(|line| {
+            let mut words = line.split_whitespace();
+            let pid = words.next()?.parse().ok()?;
+            let group = words.next()?.parse().ok()?;
+            Some((pid, group, words.collect::<Vec<_>>().join(" ")))
+        })
+        .collect()
 }
 
 impl Drop for Machine {
@@ -234,14 +288,20 @@ impl Drop for Machine {
                 }
             }
         }
-        let until = Instant::now() + Duration::from_secs(5);
+        let until = Instant::now() + Duration::from_secs(10);
         while !self.processes().is_empty() && Instant::now() < until {
             std::thread::sleep(Duration::from_millis(50));
         }
-        for pid in self.processes() {
-            if let Some(pid) = rustix::process::Pid::from_raw(pid) {
-                let _ = rustix::process::kill_process(pid, rustix::process::Signal::KILL);
+        // A test may leave processes behind on purpose, or fail with some
+        // running: none outlives it.
+        let until = Instant::now() + Duration::from_secs(5);
+        while !self.processes().is_empty() && Instant::now() < until {
+            for pid in self.processes() {
+                if let Some(pid) = rustix::process::Pid::from_raw(pid) {
+                    let _ = rustix::process::kill_process(pid, rustix::process::Signal::KILL);
+                }
             }
+            std::thread::sleep(Duration::from_millis(50));
         }
     }
 }
@@ -330,6 +390,26 @@ pub fn kept_ports(root: &Path) -> serde_json::Map<String, Value> {
     let text = fs::read_to_string(root.join(".tay/state/ports.json")).unwrap();
     let record: Value = serde_json::from_str(&text).unwrap();
     record["units"].as_object().unwrap().clone()
+}
+
+/// What the record of `unit`, a unit that runs on the host, says now.
+pub fn record(root: &Path, unit: &str) -> Value {
+    let path = root.join(".tay/state/units").join(unit).join("record.json");
+    let text =
+        fs::read_to_string(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+    serde_json::from_str(&text).unwrap()
+}
+
+/// The process the keeper of `unit` started, as its record says.
+pub fn child(root: &Path, unit: &str) -> i32 {
+    record(root, unit)["child"]["pid"]
+        .as_i64()
+        .expect("the record names a child") as i32
+}
+
+/// All that `unit`'s log holds now, the file being written.
+pub fn log(root: &Path, unit: &str) -> String {
+    fs::read_to_string(root.join(".tay/logs").join(unit).join("output.log")).unwrap_or_default()
 }
 
 /// Whether a process with this number exists.

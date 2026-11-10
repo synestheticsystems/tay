@@ -28,15 +28,7 @@ fn version_and_help_succeed() {
 }
 
 #[test]
-fn a_command_not_built_yet_says_so_and_one_that_is_not_a_command_too() {
-    let run = tay(&fixture("shop"), &home(), &["logs", "web"]);
-    assert_eq!(run.code, 2);
-    assert!(run.stdout.is_empty());
-    assert!(
-        run.stderr.starts_with("tay logs: not built yet."),
-        "{}",
-        run.stderr
-    );
+fn a_word_that_is_not_a_command_is_an_error() {
     let run = tay(&fixture("shop"), &home(), &["frobnicate"]);
     assert_eq!(run.code, 2);
     assert_eq!(

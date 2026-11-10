@@ -168,6 +168,21 @@ pub enum Check<V> {
     Log(V),
 }
 
+impl<V> Check<V> {
+    /// The check with each value passed through `f`; the first error `f`
+    /// gives, when it gives one.
+    pub fn try_map<W, E>(&self, f: &mut dyn FnMut(&V) -> Result<W, E>) -> Result<Check<W>, E> {
+        Ok(match self {
+            Check::Http(url) => Check::Http(f(url)?),
+            Check::Tcp(address) => Check::Tcp(f(address)?),
+            Check::Log(text) => Check::Log(f(text)?),
+            Check::Command(words) => {
+                Check::Command(words.iter().map(&mut *f).collect::<Result<_, _>>()?)
+            }
+        })
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Restart {
     pub on: Option<Slot>,

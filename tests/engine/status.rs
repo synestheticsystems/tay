@@ -46,7 +46,7 @@ fn status_of_one_unit_and_of_one_the_plan_does_not_have() {
     assert_eq!(
         site.stdout,
         format!(
-            "{}: up\n  site  failed    tay cannot run a `process` unit yet\n",
+            "{}: up\n  site  failed    its program could not be started: `serve`: No such file or directory (os error 2)\n",
             root.display()
         )
     );

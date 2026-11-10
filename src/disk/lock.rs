@@ -4,6 +4,7 @@
 //! would not.
 
 use std::fs::{File, OpenOptions};
+use std::os::fd::{AsFd, BorrowedFd};
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -67,6 +68,14 @@ impl Lock {
             return false;
         };
         (held.dev(), held.ino()) == (there.dev(), there.ino())
+    }
+}
+
+/// The lock's open file, which a process started with it inherits, and with
+/// it the lock.
+impl AsFd for Lock {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.file.as_fd()
     }
 }
 

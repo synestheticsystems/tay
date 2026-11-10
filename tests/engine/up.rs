@@ -37,7 +37,7 @@ fn units_that_are_made_come_up_ready_and_up_says_everything_asked_for_is() {
 }
 
 #[test]
-fn a_unit_that_runs_fails_saying_tay_cannot_run_it_and_what_needs_it_waits_blocked() {
+fn a_unit_that_cannot_run_fails_saying_why_and_what_needs_it_waits_blocked() {
     let machine = Machine::new();
     let root = machine.stack("made-and-run");
     let up = machine.at(&root, "up", &[]);
@@ -68,7 +68,7 @@ fn a_unit_that_runs_fails_saying_tay_cannot_run_it_and_what_needs_it_waits_block
     assert_eq!(Machine::state(&status, "site-config"), "ready written");
     assert_eq!(
         Machine::state(&status, "site"),
-        "failed tay cannot run a `process` unit yet"
+        "failed its program could not be started: `serve`: No such file or directory (os error 2)"
     );
     assert_eq!(
         Machine::state(&status, "index"),
@@ -216,7 +216,7 @@ fn the_shop_stack_comes_up_as_far_as_tay_can_bring_it() {
     let up = machine.at(&root, "up", &[]);
     assert_eq!(up.code, 1, "{}{}", up.stdout, up.stderr);
     assert!(
-        up.stdout.contains("tay up: `build` failed"),
+        up.stdout.contains("tay up: `database` failed"),
         "{}",
         up.stdout
     );
@@ -233,7 +233,7 @@ fn the_shop_stack_comes_up_as_far_as_tay_can_bring_it() {
     );
     assert_eq!(
         Machine::state(&status, "build"),
-        "failed tay cannot run a `command` unit yet"
+        "failed its program could not be started: `build`: No such file or directory (os error 2)"
     );
     assert_eq!(
         Machine::state(&status, "api"),

@@ -9,7 +9,7 @@ use http_body_util::channel::Sender;
 use hyper::body::{Bytes, Frame};
 use tokio::sync::watch;
 
-use crate::control::clock;
+use crate::clock;
 use crate::control::protocol::{Event, UpRequest};
 
 /// What a change does. It has no `Debug`, since a `--set` it carries may

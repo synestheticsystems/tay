@@ -6,13 +6,16 @@
 //! private lets the compiler report what nothing uses.
 
 pub mod cli;
+mod clock;
 mod control;
 mod definition;
 mod diagnostic;
 mod disk;
 mod engine;
+mod keeper;
 mod module;
 mod plan;
 mod print;
 mod syntax;
+mod unit_log;
 mod value;

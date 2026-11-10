@@ -16,7 +16,7 @@ use serde::Serialize;
 use super::Daemon;
 use super::change::{Change, Kind};
 use super::down::Down;
-use crate::control::clock;
+use crate::clock;
 use crate::control::protocol::{self, Problem, Refused, Status, UnitStatus, UpRequest};
 use crate::engine;
 
@@ -133,11 +133,7 @@ fn down(daemon: &Arc<Daemon>) -> Response<Body> {
 /// Each unit the daemon knows, from a check made now. A unit the check
 /// finds in the state recorded keeps the time it took it.
 async fn status(daemon: &Arc<Daemon>) -> Response<Body> {
-    let units = daemon
-        .units
-        .lock()
-        .expect("the units are not poisoned")
-        .clone();
+    let units = daemon.supervisor.snapshot();
     let environment = Arc::clone(&daemon.environment);
     let checked = tokio::task::spawn_blocking(move || {
         let found = engine::check_now(&units, &environment);

@@ -68,6 +68,11 @@ impl Layout {
         self.folder().join("logs")
     }
 
+    /// `logs/<unit>/`: the folder of `unit`'s log files.
+    pub fn unit_log(&self, unit: &str) -> PathBuf {
+        self.logs().join(unit)
+    }
+
     /// The daemon's own log.
     pub fn daemon_log(&self) -> PathBuf {
         self.logs().join("tay").join("daemon.log")

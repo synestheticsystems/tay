@@ -1,59 +1,67 @@
-//! Each unit as it is now, from a check made now: a unit that is made is
-//! checked, one that runs is asked how it stands, and a group is as its
-//! needs are. A daemon that did not bring the units up finds them again
-//! this way, and `tay status` asks it of the units the daemon knows.
+//! Each unit as it is now, from a check made now. A daemon that did not
+//! bring the units up finds them again: a unit that is made is checked, and
+//! one that runs is found where it runs and looked after again, as the table
+//! in `docs/engine.md` says. `tay status` asks it of the units the daemon
+//! knows: a unit that is made and was ready is checked again, a group is as
+//! its needs are, and a unit that runs is as its task last saw it, which it
+//! sees without pause for as long as it runs.
 
 use std::sync::Arc;
 
 use super::fill::{self, UnitValues};
-use super::settled::Settled;
-use super::settled::Standing;
+use super::settled::{Settled, Standing};
 use super::state::{State, UnitState};
+use super::supervisor::{Begin, Supervisor};
 use super::units::Units;
 use crate::disk::Environment;
-use crate::module::{Made, Operations, UnitKind, UnitPlace, Values};
+use crate::module::{self, Found, Made, Operations, Outcome, UnitKind, UnitPlace, Values};
 use crate::plan::PlannedUnit;
 
-/// A unit's state as a check found it, and what it gives if it is made
-/// and ready.
-pub struct Found {
+/// A unit's state as a check found it.
+pub struct Checked {
     pub unit: String,
     pub state: UnitState,
-    pub values: Option<Values>,
 }
 
-/// Each of `units`, of an environment meant to be up, as it is found now
-/// by a daemon that did not bring it up.
-pub fn find_again(units: &[Arc<PlannedUnit>], environment: &Environment) -> Vec<Found> {
+/// Finds each of `units` again, for a daemon that did not bring them up,
+/// and records each with `supervisor`. A unit that runs and is under way is
+/// looked after again, whether or not the environment is meant to be up;
+/// `up` is whether it is, and so whether what is made is checked and
+/// restart policies apply.
+pub fn find_again(supervisor: &Arc<Supervisor>, units: &[Arc<PlannedUnit>], up: bool) {
     let mut pass = Pass::default();
-    units
-        .iter()
-        .map(|planned| {
-            let (state, values) = match pass.blocked(planned) {
-                Some(waiting) => (waiting, None),
-                None => match &planned.mechanism {
-                    None => (
-                        UnitState::new(State::Ready, "everything it needs is ready"),
-                        None,
-                    ),
-                    Some(_) => pass.found(planned, environment),
-                },
-            };
-            pass.record(planned, &state, &values);
-            Found {
-                unit: planned.name.clone(),
-                state,
-                values,
+    for planned in units {
+        let found = match &planned.mechanism {
+            Some(mechanism) if matches!(mechanism.kind, UnitKind::Runs(_)) => {
+                pass.running(supervisor, planned, up)
             }
-        })
-        .collect()
+            // What is made is left as it is on disk while the environment
+            // is down, and is not asked for.
+            _ if !up => continue,
+            _ => match pass.blocked(planned) {
+                Some(waiting) => Some((waiting, None)),
+                None if planned.mechanism.is_none() => Some((
+                    UnitState::new(State::Ready, "everything it needs is ready"),
+                    None,
+                )),
+                None => Some(pass.made(planned, &supervisor.environment)),
+            },
+        };
+        // A unit looked after again is recorded by its task.
+        let Some((state, values)) = found else {
+            pass.settled.record(&planned.name, State::Starting);
+            continue;
+        };
+        pass.record(planned, &state, &values);
+        supervisor.record(&planned.name, state, values);
+    }
 }
 
 /// Each unit the daemon knows, checked now where its state can be: one
-/// that is made and was ready is checked again, one that runs and was
-/// under way is asked whether it has ended, and a group that was up is as
-/// its needs are. Any other unit is as its state was recorded.
-pub fn check_now(units: &Units, environment: &Environment) -> Vec<Found> {
+/// that is made and was ready is checked again, and a group that was up is
+/// as its needs are. Any other unit is as its state was recorded, which for
+/// a unit that runs is as its task last saw it.
+pub fn check_now(units: &Units, environment: &Arc<Environment>) -> Vec<Checked> {
     let mut pass = Pass::default();
     units
         .iter()
@@ -63,9 +71,7 @@ pub fn check_now(units: &Units, environment: &Environment) -> Vec<Found> {
             let kind = planned.mechanism.as_ref().map(|mechanism| &mechanism.kind);
             let checked = matches!(
                 (kind, known.state.state),
-                (None, State::Ready | State::Waiting)
-                    | (Some(UnitKind::Made), State::Ready)
-                    | (Some(UnitKind::Runs(_)), State::Ready | State::Starting)
+                (None, State::Ready | State::Waiting) | (Some(UnitKind::Made), State::Ready)
             );
             let (state, values) = match pass.blocked(planned) {
                 _ if !checked => recorded,
@@ -74,13 +80,12 @@ pub fn check_now(units: &Units, environment: &Environment) -> Vec<Found> {
                     UnitState::new(State::Ready, "everything it needs is ready"),
                     None,
                 ),
-                None => pass.checked(planned, environment).unwrap_or(recorded),
+                None => pass.made(planned, environment),
             };
             pass.record(planned, &state, &values);
-            Found {
+            Checked {
                 unit: planned.name.clone(),
                 state,
-                values,
             }
         })
         .collect()
@@ -112,48 +117,6 @@ impl Pass {
         standing.waiting()
     }
 
-    /// A unit that is made, checked; one that runs, found again.
-    fn found(
-        &self,
-        planned: &PlannedUnit,
-        environment: &Environment,
-    ) -> (UnitState, Option<Values>) {
-        let place = UnitPlace {
-            unit: &planned.name,
-            environment,
-        };
-        match self.operations(planned, environment) {
-            Err(reason) => (UnitState::new(State::Failed, reason), None),
-            Ok(Operations::Made(made)) => made_now(made.as_ref(), &place),
-            Ok(Operations::Running(running)) => match running.find(&place) {
-                Ok(attempt) => match attempt {},
-                Err(failure) => (UnitState::new(State::Failed, failure.to_string()), None),
-            },
-        }
-    }
-
-    /// A unit that was ready or under way, as it is now; `None` when it is
-    /// as it was recorded.
-    fn checked(
-        &self,
-        planned: &PlannedUnit,
-        environment: &Environment,
-    ) -> Option<(UnitState, Option<Values>)> {
-        let place = UnitPlace {
-            unit: &planned.name,
-            environment,
-        };
-        match self.operations(planned, environment) {
-            Err(reason) => Some((UnitState::new(State::Failed, reason), None)),
-            Ok(Operations::Made(made)) => Some(made_now(made.as_ref(), &place)),
-            Ok(Operations::Running(running)) => match running.ended(&place) {
-                Ok(None) => None,
-                Ok(Some(ending)) => match ending {},
-                Err(failure) => Some((UnitState::new(State::Failed, failure.to_string()), None)),
-            },
-        }
-    }
-
     /// The unit's operations, its settings filled from what the units
     /// before it in this pass gave.
     fn operations(
@@ -170,10 +133,126 @@ impl Pass {
             .fill(&mut |placeholder| fill::fill(placeholder, environment, &self.given))
             .map_err(|why| why.to_string())
     }
+
+    /// A unit that is made, as a check of it finds it now.
+    fn made(
+        &self,
+        planned: &PlannedUnit,
+        environment: &Arc<Environment>,
+    ) -> (UnitState, Option<Values>) {
+        let place = UnitPlace {
+            unit: planned.name.clone(),
+            environment: Arc::clone(environment),
+        };
+        match self.operations(planned, environment) {
+            Err(reason) => (UnitState::new(State::Failed, reason), None),
+            Ok(Operations::Made(made)) => made_now(made.as_ref(), &place),
+            Ok(Operations::Running(_)) => unreachable!("a unit whose kind is made is made"),
+        }
+    }
+
+    /// A unit that runs, found where it runs. One found under way, ended
+    /// while no daemon ran, or lost is looked after again, its task saying
+    /// how it stands: `None` then. One under way is looked after whatever
+    /// its needs are doing; one that is not, and whose need has failed, is
+    /// blocked, as it would be were it about to start.
+    fn running(
+        &mut self,
+        supervisor: &Arc<Supervisor>,
+        planned: &Arc<PlannedUnit>,
+        up: bool,
+    ) -> Option<(UnitState, Option<Values>)> {
+        let place = supervisor.place(&planned.name);
+        let blocked = match self.settled.standing(planned) {
+            Standing::Blocked(failed) => {
+                self.settled.blocked(&planned.name, failed.clone());
+                Standing::Blocked(failed).waiting()
+            }
+            Standing::Clear | Standing::Waiting(_) => None,
+        };
+        let stopped = |detail: String| Some((UnitState::new(State::Stopped, detail), None));
+        let not_running = |state: UnitState| match &blocked {
+            Some(waiting) => Some((waiting.clone(), None)),
+            None => Some((state, None)),
+        };
+        let running = match self.operations(planned, &supervisor.environment) {
+            Ok(Operations::Running(running)) => running,
+            Ok(Operations::Made(_)) => unreachable!("a unit whose kind runs runs"),
+            Err(why) => return unfilled(planned, &place, &why, up, blocked),
+        };
+        let begin = match running.found(&place) {
+            Err(failure) => return not_running(UnitState::new(State::Failed, failure.to_string())),
+            Ok(Found::Never) => {
+                return not_running(UnitState::new(
+                    State::Stopped,
+                    "it has not been started here",
+                ));
+            }
+            Ok(Found::UnderWay(under_way)) => Begin::UnderWay(under_way),
+            Ok(Found::Ended {
+                outcome: Outcome::Done { values, detail },
+                ..
+            }) => {
+                return Some((UnitState::new(State::Ready, detail), Some(values)));
+            }
+            Ok(Found::Ended {
+                outcome: Outcome::Failed(reason),
+                ..
+            }) => {
+                return match up {
+                    true => not_running(UnitState::new(State::Failed, reason)),
+                    false => stopped(reason),
+                };
+            }
+            Ok(Found::Ended {
+                attempt,
+                outcome: outcome @ Outcome::Ended { .. },
+            }) if up && blocked.is_none() => Begin::Ended { attempt, outcome },
+            Ok(Found::Ended {
+                attempt,
+                outcome: Outcome::Ended { detail, .. },
+            }) => {
+                let ended = UnitState::new(State::Stopped, format!("attempt {attempt} {detail}"));
+                return match up {
+                    true => not_running(ended),
+                    false => Some((ended, None)),
+                };
+            }
+            Ok(Found::Lost { attempt }) => Begin::Lost { attempt },
+        };
+        supervisor.tend(planned, running, begin, up);
+        None
+    }
+}
+
+/// A unit that runs whose settings cannot be filled, so that it cannot be
+/// looked after: if anything of it runs, it is reported so, and `tay down`
+/// still stops it from its place alone.
+fn unfilled(
+    planned: &PlannedUnit,
+    place: &UnitPlace,
+    why: &str,
+    up: bool,
+    blocked: Option<UnitState>,
+) -> Option<(UnitState, Option<Values>)> {
+    let Some(UnitKind::Runs(runs)) = planned.mechanism.as_ref().map(|mechanism| &mechanism.kind)
+    else {
+        return None;
+    };
+    let state = match module::running_now(runs, place) {
+        Ok(true) => UnitState::new(
+            State::Failed,
+            format!("it runs, but tay cannot fill its settings to look after it: {why}"),
+        ),
+        Ok(false) if !up => UnitState::new(State::Stopped, "the environment is down"),
+        Ok(false) => blocked.unwrap_or_else(|| UnitState::new(State::Failed, why)),
+        Err(failure) => UnitState::new(State::Failed, failure.to_string()),
+    };
+    Some((state, None))
 }
 
 /// A unit that is made, as a check of it finds it now.
-fn made_now(made: &dyn Made, place: &UnitPlace<'_>) -> (UnitState, Option<Values>) {
+fn made_now(made: &dyn Made, place: &UnitPlace) -> (UnitState, Option<Values>) {
     match made.check(place) {
         Ok(exists) => (
             UnitState::new(State::Ready, exists.detail),

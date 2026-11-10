@@ -2,6 +2,8 @@
 
 mod read;
 
+use std::sync::Arc;
+
 use crate::syntax::names::NameAt;
 use crate::syntax::yaml::Node;
 use crate::value::Filled;
@@ -167,8 +169,8 @@ impl<V> MapValues for ContainerSettings<V> {
 /// what its settings say is not used.
 impl From<ContainerSettings<Filled>> for Operations {
     fn from(_: ContainerSettings<Filled>) -> Operations {
-        Operations::Running(Box::new(NotRunnable {
-            module: Container.name(),
+        Operations::Running(Arc::new(NotRunnable {
+            what: "a `container` unit",
         }))
     }
 }

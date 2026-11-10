@@ -98,7 +98,7 @@ enum Generated {
 }
 
 impl Made for SecretSettings<Filled> {
-    fn make(&self, place: &UnitPlace<'_>) -> Result<Exists, Failure> {
+    fn make(&self, place: &UnitPlace) -> Result<Exists, Failure> {
         let asked = self.asked()?;
         let path = path(place);
         let detail = match read(&path)? {
@@ -114,7 +114,7 @@ impl Made for SecretSettings<Filled> {
         Ok(exists(&stored, detail))
     }
 
-    fn check(&self, place: &UnitPlace<'_>) -> Result<Exists, Failure> {
+    fn check(&self, place: &UnitPlace) -> Result<Exists, Failure> {
         let asked = self.asked()?;
         match read(&path(place))? {
             Some(stored) if stored.asked == asked => Ok(exists(&stored, "kept")),
@@ -180,13 +180,13 @@ fn not_one_of(setting: &'static str, found: &str, wanted: &[&str]) -> SecretErro
 }
 
 /// The file the unit's secret is kept in.
-fn path(place: &UnitPlace<'_>) -> PathBuf {
+fn path(place: &UnitPlace) -> PathBuf {
     place
         .environment
         .layout
         .state()
         .join(SECRETS)
-        .join(place.unit)
+        .join(&place.unit)
 }
 
 /// The secret stored at `path`; `None` when none is. One stored in a form

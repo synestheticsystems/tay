@@ -1,6 +1,7 @@
 //! `tay status [UNIT]`: each unit's state, from a check. The daemon makes
-//! the checks; with none running, an environment meant to be up has one
-//! started to find its units, and any other has every unit stopped.
+//! the checks; with none running, an environment meant to be up, or with
+//! anything of it running, has one started to find its units, and any other
+//! has every unit stopped.
 
 use std::path::Path;
 
@@ -15,6 +16,7 @@ use crate::diagnostic::Diagnostics;
 use crate::diagnostic::source::Sources;
 use crate::disk::{Asked, Environment, Identity, Intent, Layout};
 use crate::engine::State;
+use crate::keeper::UnitFiles;
 use crate::print::out;
 
 use super::plan::{no_stack, options, planned, print_json};
@@ -24,6 +26,7 @@ pub const TAKES: Takes = Takes {
     command: "tay status",
     choices: false,
     json: true,
+    follows: false,
     units: UnitsNamed::AtMostOne,
 };
 
@@ -108,10 +111,12 @@ fn from_daemon(environment: &Environment, args: &Args) -> Result<Report, Exit> {
         Intent::read(&environment.layout).map_err(|error| disk_problem(COMMAND, &error))?;
     let root = environment.layout.root();
     let id = Some(environment.id.to_string());
+    let runs = UnitFiles::anything_runs(&environment.layout)
+        .map_err(|error| disk_problem(COMMAND, &error))?;
     let status = block_on(COMMAND, async {
         let client = match Client::find(environment).await? {
             Some(client) => client,
-            None if intent == Intent::Down => return Ok(None),
+            None if intent == Intent::Down && !runs => return Ok(None),
             None => Client::ensure(environment).await?,
         };
         client.status().await.map(Some)

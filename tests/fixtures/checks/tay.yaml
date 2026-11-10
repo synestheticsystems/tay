@@ -1,0 +1,46 @@
+format: 1
+stack: checks
+up: [site]
+units:
+  site-port: { uses: port }
+  site:
+    doc: Answers 200 at /health while its folder has a file `healthy`, and 503 when not.
+    uses: process
+    with:
+      command: ["python3", "${environment.root}/services/serve.py", "${site-port.number}"]
+      workdir: "${environment.state}"
+      prepare: [["${environment.root}/services/mark.sh", "${environment.state}/healthy"]]
+    ready: { http: "${self.web.url}/health", within: 20s }
+    gives:
+      web: { port: "${site-port.number}", scheme: http }
+  listener:
+    doc: The same server, ready once a connection opens.
+    uses: process
+    with:
+      command: ["python3", "${environment.root}/services/serve.py", "${listener-port.number}"]
+    ready: { tcp: "127.0.0.1:${listener-port.number}", within: 20s }
+  listener-port: { uses: port }
+  probed:
+    doc: Ready when a command it is checked by exits 0.
+    uses: process
+    with:
+      command: ["${environment.root}/services/slow.sh", "1"]
+      env: { READY_FILE: "${environment.state}/probed-ready" }
+    ready: { command: ["${environment.root}/services/is-ready.sh", "${environment.state}/probed-ready"], within: 20s }
+  secure-port: { uses: port }
+  secure:
+    doc: Checked over https, which tay cannot do yet.
+    uses: process
+    with:
+      command: ["python3", "${environment.root}/services/serve.py", "${secure-port.number}"]
+    ready: { http: "https://127.0.0.1:${secure-port.number}/health", within: 3s }
+    restart: { on: never }
+  brief-port: { uses: port }
+  brief:
+    doc: Ready by an http check that is allowed eight seconds.
+    uses: process
+    with:
+      command: ["python3", "${environment.root}/services/serve.py", "${brief-port.number}"]
+      workdir: "${environment.state}"
+      prepare: [["${environment.root}/services/mark.sh", "${environment.state}/healthy"]]
+    ready: { http: "http://127.0.0.1:${brief-port.number}/health", within: 8s }

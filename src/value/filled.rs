@@ -60,6 +60,14 @@ impl Filled {
         Filled::Secret(Secret(Exact::Text(text.into())))
     }
 
+    /// `exact`, kept from every output when it is `secret`.
+    pub fn of(exact: Exact, secret: bool) -> Filled {
+        match secret {
+            true => Filled::Secret(Secret(exact)),
+            false => Filled::Plain(exact),
+        }
+    }
+
     /// A secret setting's value, kept for whoever runs a unit, filled in.
     pub fn kept(kept: &Kept) -> Filled {
         Filled::Secret(Secret(match &kept.0 {

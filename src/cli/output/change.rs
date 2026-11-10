@@ -94,6 +94,12 @@ impl Printer {
                         "{command}: `{}` failed: {}\n",
                         failed.unit, failed.reason
                     ));
+                    if !failed.lines.is_empty() {
+                        out("  the last lines it wrote:\n");
+                        for line in &failed.lines {
+                            out(&format!("    {line}\n"));
+                        }
+                    }
                     if !failed.waiting.is_empty() {
                         out(&format!(
                             "  waiting on it: {}\n",
@@ -163,6 +169,7 @@ fn decision_json(decision: &Decision) -> Value {
             "failed": failed.iter().map(|failed| json!({
                 "unit": failed.unit,
                 "reason": failed.reason,
+                "lines": failed.lines,
                 "waiting": failed.waiting,
             })).collect::<Vec<_>>(),
         }),

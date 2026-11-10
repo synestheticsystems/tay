@@ -68,13 +68,14 @@ impl fmt::Display for Taken {
 }
 
 impl Made for PortSettings<Filled> {
-    fn make(&self, place: &UnitPlace<'_>) -> Result<Exists, Failure> {
-        let mut ports = Ports::lock(place.environment).map_err(PortError::from)?;
-        let unit = place.unit;
+    fn make(&self, place: &UnitPlace) -> Result<Exists, Failure> {
+        let mut ports = Ports::lock(&place.environment).map_err(PortError::from)?;
+        let unit = place.unit.as_str();
+        let taken = |number| taken(&ports, number, unit);
         let (number, detail) = match (self, ports.kept(unit)) {
             (PortSettings::Fixed(fixed), _) => {
                 let fixed = port_number(fixed, "fixed")?;
-                if let Some(holder) = taken(&ports, fixed, unit)? {
+                if let Some(holder) = taken(fixed)? {
                     return Err(PortError::FixedTaken {
                         number: fixed,
                         holder,
@@ -83,7 +84,7 @@ impl Made for PortSettings<Filled> {
                 }
                 (fixed, fixed.to_string())
             }
-            (_, Some(kept)) => match taken(&ports, kept, unit)? {
+            (_, Some(kept)) => match taken(kept)? {
                 None => (kept, format!("{kept}, kept")),
                 Some(holder) => {
                     let number = choose(&ports, unit)?;
@@ -94,7 +95,7 @@ impl Made for PortSettings<Filled> {
             },
             (PortSettings::Prefer(preferred), None) => {
                 let preferred = port_number(preferred, "prefer")?;
-                match taken(&ports, preferred, unit)? {
+                match taken(preferred)? {
                     None => (preferred, format!("{preferred}, as preferred")),
                     Some(holder) => {
                         let number = choose(&ports, unit)?;
@@ -118,9 +119,9 @@ impl Made for PortSettings<Filled> {
         })
     }
 
-    fn check(&self, place: &UnitPlace<'_>) -> Result<Exists, Failure> {
-        let kept = Ports::kept_by(place.environment).map_err(PortError::from)?;
-        let kept = *kept.get(place.unit).ok_or(PortError::NotKept)?;
+    fn check(&self, place: &UnitPlace) -> Result<Exists, Failure> {
+        let kept = Ports::kept_by(&place.environment).map_err(PortError::from)?;
+        let kept = *kept.get(&place.unit).ok_or(PortError::NotKept)?;
         if let PortSettings::Fixed(fixed) = self {
             let fixed = port_number(fixed, "fixed")?;
             if fixed != kept {

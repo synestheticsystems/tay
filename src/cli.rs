@@ -1,6 +1,7 @@
 //! The command line: `tay plan`, `tay up`, `tay down`, `tay status`,
-//! `tay ls`, `tay --version` and `tay --help`, and `tay daemon`, which a
-//! command runs to start an environment's daemon.
+//! `tay logs`, `tay ls`, `tay --version` and `tay --help`; `tay daemon`,
+//! which a command runs to start an environment's daemon; and `tay keep`,
+//! which the daemon runs to keep one program of a unit.
 
 mod args;
 mod commands;
@@ -12,10 +13,11 @@ use std::process::ExitCode;
 
 use crate::control::daemon;
 use crate::definition::read::THIS_TAY;
+use crate::keeper;
 use crate::print::{err, out};
 
 use args::{Takes, UnitsNamed};
-use commands::{down, ls, plan, status, up};
+use commands::{down, logs, ls, plan, status, up};
 
 /// How a command ends, as its exit code says it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -43,15 +45,17 @@ impl From<Exit> for ExitCode {
 
 const HELP: &str = "\
 tay (Topology Automation via YAML) brings a stack of host processes and
-containers up in dependency order and reports their state. This version makes
-a stack's ports, secrets and files; it cannot run a process, a container or a
-command yet, and says so of each unit that would.
+containers up in dependency order and reports their state. This version runs
+processes and commands on the host, each under a keeper that outlives the
+daemon, and makes a stack's ports, secrets and files; it cannot run a
+container, or a command in one, yet, and says so of each unit that would.
 
 Usage:
   tay plan [--root FOLDER] [--profile NAME] [--set PLACE=VALUE]... [--json]
   tay up [UNIT...] [--root FOLDER] [--profile NAME] [--set PLACE=VALUE]... [--json]
   tay down [--root FOLDER] [--json]
   tay status [UNIT] [--root FOLDER] [--json]
+  tay logs UNIT [--root FOLDER] [--since TIME] [--follow]
   tay ls [--root FOLDER] [--json]
   tay --version
   tay --help
@@ -73,10 +77,12 @@ later plain tay up, tay status, tay plan and a daemon started afresh all see
 the same stack: --profile replaces the remembered profile, a --set replaces a
 remembered one for the same place, and units named replace those remembered.
 
-tay down stops everything the environment runs and says so; its daemon exits.
-tay status prints each unit's state, from a check made now, and what the
-environment remembers being asked for. tay ls prints the
-environments tay knows on this machine, and marks with * the one it is run in.
+tay down stops everything the environment runs, checks that nothing is left,
+and says so; its daemon exits. tay status prints each unit's state, from a
+check made now, and what the environment remembers being asked for. tay logs
+prints what a unit wrote, each line with its time, and tay's notes of where
+each attempt starts and how it ended. tay ls prints the environments tay
+knows on this machine, and marks with * the one it is run in.
 
 Options:
   --root FOLDER       look for tay.yaml from FOLDER instead of the current one
@@ -89,6 +95,9 @@ Options:
   --json              print for programs, in schema 1: the plan, each event of
                       up and down as a JSON object on a line, the units of
                       status, and the environments of ls
+  --since TIME        of logs: only what was written in the last TIME, a
+                      whole number followed by s, m or h, such as 10m
+  --follow            of logs: go on printing what the unit writes
 
 Exit codes: 0 done: the plan is sound, everything asked for is ready, or
 nothing is left running; 1 a unit failed, or something was left that could
@@ -102,6 +111,7 @@ const DAEMON: Takes = Takes {
     command: "tay daemon",
     choices: false,
     json: false,
+    follows: false,
     units: UnitsNamed::None,
 };
 
@@ -126,12 +136,8 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> ExitCode {
         Some("status") => (&status::TAKES, status::run),
         Some("ls") => (&ls::TAKES, ls::run),
         Some("daemon") => (&DAEMON, run_daemon),
-        Some("logs") => {
-            err(
-                "tay logs: not built yet. This version of tay runs no unit, so no unit writes anything.\n",
-            );
-            return Exit::Errors.into();
-        }
+        Some("logs") => (&logs::TAKES, logs::run),
+        Some("keep") => return keeper::keep(args),
         Some(other) if other.starts_with('-') => {
             err(&format!(
                 "tay: unknown option `{other}`\nRun `tay --help` for how to use it.\n"

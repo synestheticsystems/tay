@@ -1,0 +1,45 @@
+format: 1
+stack: commands
+up: [counted]
+units:
+  counted:
+    doc: Counts each run in a file, and waits for a file before it ends.
+    uses: command
+    with:
+      run: ["${environment.root}/services/count.sh", "${environment.state}/runs", "${environment.state}/go"]
+  checked:
+    doc: Done once its file exists; its run writes the file.
+    uses: command
+    with:
+      check: ["${environment.root}/services/exists.sh", "${environment.state}/checked-done"]
+      run: ["${environment.root}/services/count.sh", "${environment.state}/checked-done"]
+  unsure:
+    doc: Its check cannot tell whether it is done.
+    uses: command
+    with:
+      check: { shell: "exit 2" }
+      run: ["${environment.root}/services/count.sh", "${environment.state}/unsure-ran"]
+  issuer:
+    doc: Gives a token and an id, the token a secret, from what its input says.
+    uses: command
+    with:
+      run: ["${environment.root}/services/issue.sh"]
+      stdin: ./services/request.txt
+      env: { GREETING: hello }
+      produces: { token: { secret: true }, id: {} }
+  issued:
+    doc: Writes what the issuer gave it.
+    uses: file
+    with: { content: "id ${issuer.id}\n" }
+  builder:
+    doc: Builds a file it names under outputs.
+    uses: command
+    with:
+      run: ["${environment.root}/services/count.sh", "${environment.state}/built"]
+      outputs: { built: "${environment.state}/built" }
+  no-output:
+    doc: Says it builds a file it never writes.
+    uses: command
+    with:
+      run: { shell: "true" }
+      outputs: { missing: "${environment.state}/never-written" }

@@ -1,5 +1,5 @@
-//! Times as tay records them, in whole seconds since 1970, and writes them,
-//! in UTC.
+//! Times as tay records them, in seconds or milliseconds since 1970, and
+//! writes them, in UTC.
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -10,9 +10,16 @@ pub fn now() -> u64 {
 
 /// `time` in seconds since 1970; a time before then is 1970.
 pub fn seconds(time: SystemTime) -> u64 {
-    time.duration_since(UNIX_EPOCH)
-        .unwrap_or(Duration::ZERO)
-        .as_secs()
+    since_1970(time).as_secs()
+}
+
+/// The time now, in milliseconds since 1970.
+pub fn now_millis() -> u64 {
+    u64::try_from(since_1970(SystemTime::now()).as_millis()).unwrap_or(u64::MAX)
+}
+
+fn since_1970(time: SystemTime) -> Duration {
+    time.duration_since(UNIX_EPOCH).unwrap_or(Duration::ZERO)
 }
 
 /// `seconds` since 1970 as a person reads it: `2026-11-09 22:41:03 UTC`.
@@ -24,6 +31,22 @@ pub fn utc(seconds: u64) -> String {
         rest / 3600,
         rest % 3600 / 60,
         rest % 60
+    )
+}
+
+/// `millis` since 1970 as a line of a unit's log begins with it:
+/// `2026-11-09T22:41:03.250Z`. Every such time is as long as any other, so
+/// that the times of lines sort as their text does.
+pub fn stamp(millis: u64) -> String {
+    let seconds = millis / 1000;
+    let (days, rest) = (seconds / 86400, seconds % 86400);
+    let (year, month, day) = civil(days);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{:03}Z",
+        rest / 3600,
+        rest % 3600 / 60,
+        rest % 60,
+        millis % 1000
     )
 }
 
@@ -56,5 +79,6 @@ mod tests {
         assert_eq!(utc(0), "1970-01-01 00:00:00 UTC");
         assert_eq!(utc(951_782_400), "2000-02-29 00:00:00 UTC");
         assert_eq!(utc(1_794_292_971), "2026-11-10 06:42:51 UTC");
+        assert_eq!(stamp(1_794_292_971_005), "2026-11-10T06:42:51.005Z");
     }
 }

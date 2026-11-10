@@ -19,19 +19,18 @@ use std::io::Write;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
 use tokio::net::UnixListener;
 use tokio::sync::watch;
 
-use crate::control::clock;
+use crate::clock;
 use crate::control::protocol::{self, Event, UpRequest};
 use crate::definition::read::THIS_TAY;
 use crate::diagnostic::Diagnostics;
 use crate::diagnostic::source::Sources;
 use crate::disk::{Asked, DiskError, Environment, Identity, Intent, Layout, Lock, Machine};
-use crate::engine::{self, UnitState, Units};
-use crate::module::Values;
+use crate::engine::{self, Supervisor, Told, UnitState};
 use crate::plan::{self, Plan, PlannedUnit};
 use crate::print;
 
@@ -41,7 +40,8 @@ use change::Change;
 pub struct Daemon {
     environment: Arc<Environment>,
     about: protocol::About,
-    units: Mutex<Units>,
+    /// The units, and the tasks that look after those that run.
+    supervisor: Arc<Supervisor>,
     /// The change under way, if any.
     change: Mutex<Option<Arc<Change>>>,
     /// Why the daemon is to exit, once it is.
@@ -154,58 +154,64 @@ async fn start(layout: Layout) -> Result<(Arc<Daemon>, UnixListener, Socket), Ca
         about.root.display()
     ));
     let environment = Arc::new(environment);
-    let units = found_again(&environment);
-    let daemon = Arc::new(Daemon {
-        environment,
-        about,
-        units: Mutex::new(units),
-        change: Mutex::new(None),
-        exit: watch::Sender::new(None),
-        going: AtomicBool::new(false),
+    let daemon = Arc::new_cyclic(|daemon: &Weak<Daemon>| {
+        let daemon = Weak::clone(daemon);
+        let told: Told = Box::new(move |unit, state| {
+            log_state(unit, state);
+            if let Some(daemon) = daemon.upgrade() {
+                daemon.tell(unit, state);
+            }
+        });
+        Daemon {
+            supervisor: Arc::new(Supervisor::new(Arc::clone(&environment), told)),
+            environment,
+            about,
+            change: Mutex::new(None),
+            exit: watch::Sender::new(None),
+            going: AtomicBool::new(false),
+        }
     });
+    found_again(&daemon.supervisor);
     Ok((daemon, listener, socket))
 }
 
-/// What the daemon knows of the units when it starts: those `tay plan`
-/// would list, with what the environment remembers being asked for, each
-/// found as it is when the environment is meant to be up, and stopped when
-/// it is not.
-fn found_again(environment: &Environment) -> Units {
-    let mut units = Units::default();
-    let asked = match Asked::read(&environment.layout) {
+/// Finds the units again as the daemon starts: those `tay plan` would
+/// list, with what the environment remembers being asked for, each as it is
+/// found. What runs is looked after again whether or not the environment is
+/// meant to be up, and what is made is checked when it is.
+fn found_again(supervisor: &Arc<Supervisor>) {
+    let layout = &supervisor.environment.layout;
+    let asked = match Asked::read(layout) {
         Ok(asked) => asked,
         Err(error) => {
             log(&format!("{error}, so no unit is known yet"));
-            return units;
+            return;
         }
     };
     let request = UpRequest {
         asked,
         home: std::env::var_os("HOME").map(PathBuf::from),
     };
-    let planned = match planned(environment.layout.root(), &request) {
+    let planned = match planned(layout.root(), &request) {
         Ok(plan) => plan,
         Err(unplanned) => {
             log(&format!(
                 "the definitions do not plan, so no unit is known yet:\n{}",
                 unplanned.lines.join("\n")
             ));
-            return units;
+            return;
         }
     };
     let plan: Vec<Arc<PlannedUnit>> = planned.units.into_iter().map(Arc::new).collect();
-    units.take_in(&plan);
-    match Intent::read(&environment.layout) {
-        Ok(Intent::Up) => {
-            for found in engine::find_again(&plan, environment) {
-                log_state(&found.unit, &found.state);
-                units.record(&found.unit, found.state, found.values);
-            }
+    supervisor.take_in(&plan);
+    let up = match Intent::read(layout) {
+        Ok(intent) => intent == Intent::Up,
+        Err(error) => {
+            log(&format!("{error}; the environment is taken to be down"));
+            false
         }
-        Ok(Intent::Down) => {}
-        Err(error) => log(&format!("{error}; every unit is taken to be stopped")),
-    }
-    units
+    };
+    engine::find_again(supervisor, &plan, up);
 }
 
 /// The definitions did not plan: each error as `tay plan` prints it.
@@ -271,19 +277,22 @@ impl Daemon {
         });
     }
 
-    /// Records that `unit` took `state`, and tells `change`'s followers.
-    fn changed(&self, change: &Change, unit: &str, state: UnitState, values: Option<Values>) {
-        log_state(unit, &state);
-        self.units
+    /// Tells the followers of the change under way, if any, that `unit`
+    /// took `state`.
+    fn tell(&self, unit: &str, state: &UnitState) {
+        if let Some(change) = self
+            .change
             .lock()
-            .expect("the units are not poisoned")
-            .record(unit, state.clone(), values);
-        change.say(Event::State {
-            unit: unit.to_string(),
-            state: state.state,
-            detail: state.detail,
-            at: clock::now(),
-        });
+            .expect("the change under way is not poisoned")
+            .as_ref()
+        {
+            change.say(Event::State {
+                unit: unit.to_string(),
+                state: state.state,
+                detail: state.detail.clone(),
+                at: clock::now(),
+            });
+        }
     }
 
     /// The change is over: what followers are told ends, and another

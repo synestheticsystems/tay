@@ -13,6 +13,8 @@ pub struct Takes {
     pub choices: bool,
     /// Whether it takes `--json`.
     pub json: bool,
+    /// Whether it takes `--since` and `--follow`, as it reads a log.
+    pub follows: bool,
     /// How many units it may name.
     pub units: UnitsNamed,
 }
@@ -31,6 +33,9 @@ pub struct Args {
     pub sets: Vec<String>,
     pub json: bool,
     pub units: Vec<String>,
+    /// How far back to read a log, as `10m`.
+    pub since: Option<String>,
+    pub follow: bool,
 }
 
 impl Takes {
@@ -67,6 +72,10 @@ impl Takes {
                     parsed.profile = Some(text(value("--profile")?, "--profile")?);
                 }
                 "--set" if self.choices => parsed.sets.push(text(value("--set")?, "--set")?),
+                "--since" if self.follows => {
+                    parsed.since = Some(text(value("--since")?, "--since")?);
+                }
+                "--follow" if self.follows && inline.is_none() => parsed.follow = true,
                 unit if !unit.starts_with('-') && self.takes_another_unit(&parsed) => {
                     parsed.units.push(unit.to_string());
                 }

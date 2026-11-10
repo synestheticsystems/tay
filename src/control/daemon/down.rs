@@ -61,10 +61,8 @@ impl Daemon {
                 "the environment's intent cannot be written: {error}"
             ));
         }
-        match Arc::clone(&self).stop_everything(&change, because).await {
-            Ok(left) => change.say(Event::Down { left }),
-            Err(problem) => change.say(Event::Problem { problem }),
-        }
+        let left = self.stop_everything(&change, because).await;
+        change.say(Event::Down { left });
         self.finish(&change);
         self.exit(because.exit());
     }
@@ -86,33 +84,15 @@ impl Daemon {
     }
 
     /// Stops every unit, telling `change`'s followers each change; what
-    /// could not be stopped.
-    async fn stop_everything(
-        self: Arc<Self>,
-        change: &Arc<Change>,
-        because: Down,
-    ) -> Result<Vec<engine::Left>, String> {
-        let units = self
-            .units
-            .lock()
-            .expect("the units are not poisoned")
-            .clone();
+    /// could not be stopped, or was left.
+    async fn stop_everything(&self, change: &Arc<Change>, because: Down) -> Vec<engine::Left> {
+        let units = self.supervisor.snapshot();
         change.say(Event::Units {
             units: units
                 .iter()
                 .map(|known| known.planned.name.clone())
                 .collect(),
         });
-        let change = Arc::clone(change);
-        tokio::task::spawn_blocking(move || {
-            engine::take_down(
-                &units,
-                &self.environment,
-                because.detail(),
-                &mut |unit, state| self.changed(&change, unit, state, None),
-            )
-        })
-        .await
-        .map_err(|error| format!("tay failed while stopping the units: {error}"))
+        engine::take_down(&self.supervisor, because.detail()).await
     }
 }

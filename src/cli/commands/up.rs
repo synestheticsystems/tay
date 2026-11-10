@@ -18,6 +18,7 @@ pub const TAKES: Takes = Takes {
     command: "tay up",
     choices: true,
     json: true,
+    follows: false,
     units: UnitsNamed::Any,
 };
 

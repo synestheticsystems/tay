@@ -23,6 +23,7 @@ pub const TAKES: Takes = Takes {
     command: "tay ls",
     choices: false,
     json: true,
+    follows: false,
     units: UnitsNamed::None,
 };
 

@@ -233,6 +233,18 @@ impl Duration {
     }
 }
 
+impl Duration {
+    /// The length of time it is.
+    pub fn length(self) -> std::time::Duration {
+        let seconds = match self.unit {
+            TimeUnit::Seconds => 1,
+            TimeUnit::Minutes => 60,
+            TimeUnit::Hours => 3600,
+        };
+        std::time::Duration::from_secs(self.count.saturating_mul(seconds))
+    }
+}
+
 /// As it is written: `2m`.
 impl fmt::Display for Duration {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

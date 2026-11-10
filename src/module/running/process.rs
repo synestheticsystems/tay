@@ -1,11 +1,14 @@
 //! `process`: a command run on the host.
 
+mod attempt;
+
+use std::sync::Arc;
+
 use crate::syntax::fields::{self, Fields};
 use crate::syntax::names;
 use crate::syntax::yaml::Node;
 use crate::value::Filled;
 
-use super::NotRunnable;
 use super::command_line::{COMMAND_LINE, argv, argv_list};
 use super::variables::{Variables, variables};
 use crate::module::description::{Description, ReadyWithoutCheck, RestartOn, Runs, UnitKind};
@@ -63,13 +66,9 @@ impl<V> MapValues for ProcessSettings<V> {
     }
 }
 
-/// tay cannot run such a unit yet, so its operations fail, saying so, and
-/// what its settings say is not used.
 impl From<ProcessSettings<Filled>> for Operations {
-    fn from(_: ProcessSettings<Filled>) -> Operations {
-        Operations::Running(Box::new(NotRunnable {
-            module: Process.name(),
-        }))
+    fn from(settings: ProcessSettings<Filled>) -> Operations {
+        Operations::Running(Arc::new(settings))
     }
 }
 

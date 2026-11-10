@@ -40,7 +40,7 @@ impl Settled {
         let settles = match state {
             State::Ready => Settles::Ready,
             State::Failed => Settles::Failed,
-            State::Waiting | State::Starting | State::Stopped => {
+            State::Waiting | State::Starting | State::Unready | State::Stopped => {
                 self.units.remove(unit);
                 return;
             }

@@ -47,7 +47,7 @@ struct Wanted {
 }
 
 impl Made for FileSettings<Filled> {
-    fn make(&self, place: &UnitPlace<'_>) -> Result<Exists, Failure> {
+    fn make(&self, place: &UnitPlace) -> Result<Exists, Failure> {
         let wanted = self.wanted(place)?;
         let detail = match on_disk(&wanted.path)? {
             None => {
@@ -74,7 +74,7 @@ impl Made for FileSettings<Filled> {
         Ok(exists(&wanted, detail))
     }
 
-    fn check(&self, place: &UnitPlace<'_>) -> Result<Exists, Failure> {
+    fn check(&self, place: &UnitPlace) -> Result<Exists, Failure> {
         let wanted = self.wanted(place)?;
         match on_disk(&wanted.path)? {
             None => Err(FileError::Missing(wanted.path).into()),
@@ -94,7 +94,7 @@ impl Made for FileSettings<Filled> {
 }
 
 impl FileSettings<Filled> {
-    fn wanted(&self, place: &UnitPlace<'_>) -> Result<Wanted, FileError> {
+    fn wanted(&self, place: &UnitPlace) -> Result<Wanted, FileError> {
         let mode = match &self.mode {
             Some(mode) => {
                 let mode = operations::text(mode, "mode")?;

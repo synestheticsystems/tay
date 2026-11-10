@@ -1,0 +1,20 @@
+format: 1
+stack: secret-run
+up: [server]
+units:
+  db-password: { uses: secret, with: { kind: password } }
+  issuer:
+    doc: Issues a token, which is a secret.
+    uses: command
+    with:
+      run: ["${environment.root}/services/issue.sh"]
+      produces: { token: { secret: true } }
+  server:
+    doc: Is given the password and the token, and says only how long each is.
+    uses: process
+    with:
+      command: ["${environment.root}/services/server.sh"]
+      secret_env:
+        PASSWORD: "${db-password.value}"
+        TOKEN: "${issuer.token}"
+    ready: { log: "has its password", within: 10s }

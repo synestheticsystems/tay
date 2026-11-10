@@ -1,6 +1,7 @@
 //! `tay down`: stops everything the environment runs, checks that nothing
-//! is left, and says so; then the daemon exits. With no daemon and an
-//! environment meant to be up, a daemon is started to find what runs.
+//! is left, and says so; then the daemon exits. With no daemon, and an
+//! environment meant to be up or with anything of it running, a daemon is
+//! started to find what runs.
 
 use crate::cli::Exit;
 use crate::cli::args::{Args, Takes, UnitsNamed};
@@ -9,6 +10,7 @@ use crate::cli::stack;
 use crate::control::client::Client;
 use crate::control::protocol::Event;
 use crate::disk::{Environment, Identity, Intent, Layout};
+use crate::keeper::UnitFiles;
 
 use super::plan::no_stack;
 use super::{block_on, client_problem, disk_problem, machine, problem};
@@ -17,6 +19,7 @@ pub const TAKES: Takes = Takes {
     command: "tay down",
     choices: false,
     json: true,
+    follows: false,
     units: UnitsNamed::None,
 };
 
@@ -44,12 +47,22 @@ pub fn run(args: Args) -> Exit {
         };
         let client = match (found, Intent::read(&environment.layout)) {
             (Some(client), _) => client,
-            (None, Ok(Intent::Down)) => return nothing_runs(args.json),
-            (None, Ok(Intent::Up)) => match Client::ensure(&environment).await {
-                Ok(client) => client,
-                Err(error) => return client_problem(COMMAND, &error),
-            },
             (None, Err(error)) => return disk_problem(COMMAND, &error),
+            (None, Ok(intent)) => {
+                // What runs with no daemon, as it may when one was killed
+                // while it took the environment down, is found by one.
+                let runs = match UnitFiles::anything_runs(&environment.layout) {
+                    Ok(runs) => runs,
+                    Err(error) => return disk_problem(COMMAND, &error),
+                };
+                if intent == Intent::Down && !runs {
+                    return nothing_runs(args.json);
+                }
+                match Client::ensure(&environment).await {
+                    Ok(client) => client,
+                    Err(error) => return client_problem(COMMAND, &error),
+                }
+            }
         };
         let mut printer = Printer::new(COMMAND, args.json);
         if let Err(error) = client.down(&mut |event| printer.event(event)).await {

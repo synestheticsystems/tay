@@ -6,7 +6,7 @@ use super::change::Change;
 use super::{Daemon, log, planned};
 use crate::control::protocol::{Event, UpRequest};
 use crate::disk::Intent;
-use crate::engine::{self, Decision, Progress};
+use crate::engine::{self, Decision};
 use crate::plan::PlannedUnit;
 
 impl Daemon {
@@ -54,39 +54,36 @@ impl Daemon {
             return;
         }
         let units: Vec<Arc<PlannedUnit>> = plan.units.into_iter().map(Arc::new).collect();
-        self.units
-            .lock()
-            .expect("the units are not poisoned")
-            .take_in(&units);
+        self.supervisor.take_in(&units);
         change.say(Event::Units {
             units: units.iter().map(|unit| unit.name.clone()).collect(),
         });
-        let mut progress = |progress: Progress| match progress {
-            Progress::Changed {
-                unit,
-                state,
-                values,
-            } => self.changed(&change, &unit, state, values),
-            Progress::Decided(decision) => {
-                log(&format!("{}: {}", change.describe(), words(&decision)));
-                change.say(Event::Up(decision));
-                change.close();
-            }
+        let mut decided = |decision: Decision| {
+            log(&format!("{}: {}", change.describe(), words(&decision)));
+            change.say(Event::Up(decision));
+            change.close();
         };
         let decided = engine::bring_up(
+            &self.supervisor,
             &units,
             &plan.up,
-            &self.environment,
-            &mut progress,
+            &mut decided,
             change.cancelled(),
         )
         .await;
         if decided.is_none() {
-            let by = change
-                .cancelled_by()
-                .expect("a change ends undecided only when it is cancelled");
-            log(&format!("{}: cancelled by {by}", change.describe()));
-            change.say(Event::Cancelled { by: by.to_string() });
+            match change.cancelled_by() {
+                Some(by) => {
+                    log(&format!("{}: cancelled by {by}", change.describe()));
+                    change.say(Event::Cancelled { by: by.to_string() });
+                }
+                // Every unit settles or is cancelled, so this is a fault in
+                // tay, which is said rather than left to hang the change.
+                None => {
+                    self.fail(&change, "tay ended the change before it was decided");
+                    return;
+                }
+            }
         }
         self.finish(&change);
     }

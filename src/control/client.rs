@@ -36,7 +36,7 @@ pub struct Client {
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
     /// Another change is under way.
-    #[error("another change is running: `{}`, since {}", .0.change, crate::control::clock::utc(.0.since))]
+    #[error("another change is running: `{}`, since {}", .0.change, crate::clock::utc(.0.since))]
     Refused(Refused),
     #[error("the daemon cannot be started: {0}")]
     NotStarted(#[from] NotStarted),

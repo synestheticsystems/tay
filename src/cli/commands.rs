@@ -1,6 +1,7 @@
 //! Each command, and what those that reach the daemon share.
 
 pub mod down;
+pub mod logs;
 pub mod ls;
 pub mod plan;
 pub mod status;

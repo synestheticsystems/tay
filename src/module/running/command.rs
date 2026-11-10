@@ -1,6 +1,11 @@
 //! `command`: something run once, on the host, inside another unit's
 //! container, or in a container of its own made for the run.
 
+mod attempt;
+mod produced;
+
+use std::sync::Arc;
+
 use crate::diagnostic::{Diagnostic, Diagnostics};
 use crate::syntax::fields::{self, Fields};
 use crate::syntax::names::{self, NameAt};
@@ -45,6 +50,8 @@ const FILE_PATH: Destination = Destination::Readable("a file path");
 /// not, is in the unit's description.
 #[derive(Debug)]
 struct CommandSettings<V> {
+    /// Whether it runs on the host, with neither `in` nor `image`.
+    on_host: bool,
     run: RunForm<V>,
     /// Exit 0: already done. Exit 1: not done. `None`: run every time.
     check: Option<RunForm<V>>,
@@ -92,6 +99,7 @@ impl<V> MapValues for CommandSettings<V> {
         let stdin = maybe(&self.stdin, f);
         let outputs = each_named(&self.outputs, f);
         Some(CommandSettings {
+            on_host: self.on_host,
             run: run?,
             check: check?,
             undo: undo?,
@@ -108,13 +116,16 @@ impl<V> MapValues for CommandSettings<V> {
     }
 }
 
-/// tay cannot run such a unit yet, so its operations fail, saying so, and
-/// what its settings say is not used.
+/// A command on the host runs under a keeper; tay cannot run one in a
+/// container yet, so its operations fail, saying so.
 impl From<CommandSettings<Filled>> for Operations {
-    fn from(_: CommandSettings<Filled>) -> Operations {
-        Operations::Running(Box::new(NotRunnable {
-            module: Command.name(),
-        }))
+    fn from(settings: CommandSettings<Filled>) -> Operations {
+        match settings.on_host {
+            true => Operations::Running(Arc::new(settings)),
+            false => Operations::Running(Arc::new(NotRunnable {
+                what: "a `command` unit in a container",
+            })),
+        }
     }
 }
 
@@ -266,6 +277,7 @@ fn read(with: Option<&Node>, cx: &mut Cx<'_>) -> Option<(CommandSettings<Slot>, 
         return None;
     }
     let settings = CommandSettings {
+        on_host: !in_container,
         run: run?,
         check,
         undo,
