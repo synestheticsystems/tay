@@ -18,7 +18,7 @@ use super::{ContainerUnit, volumes};
 use crate::clock;
 use crate::disk::unit_log::{Adding, Writer};
 use crate::module::operations::{self, Failure, Found, Outcome, Step, Steps, UnderWay, UnitPlace};
-use crate::module::running::container::docker::ours::{ATTEMPT, SETTINGS};
+use crate::module::running::container::docker::ours::ATTEMPT;
 use crate::module::running::container::docker::{
     Build, Docker, DockerError, OurContainer, Owner, copy_output, runs,
 };
@@ -76,7 +76,6 @@ impl ContainerUnit {
         )?;
         let labels = creation.body.labels.get_or_insert_default();
         labels.insert(ATTEMPT.to_string(), attempt.to_string());
-        labels.insert(SETTINGS.to_string(), creation.settings.clone());
         let owner = Owner {
             environment: id,
             unit: Some(&place.unit),
@@ -97,6 +96,10 @@ impl ContainerUnit {
                 image.name
             ),
         )?;
+        // The engine keeps what it was started from, unless it has stopped
+        // listening, which it does only once it has dropped the attempt.
+        let started = create::fingerprint(&self.settings, &self.opened, place, &image.id);
+        let _ = steps.send(Step::Started(started));
         match docker.start(&container).await {
             Ok(()) => {}
             // What Docker cannot start, starting it again does not mend.

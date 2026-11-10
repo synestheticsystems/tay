@@ -6,8 +6,10 @@ use crate::syntax::expr;
 use crate::syntax::fields::{self, Fields};
 use crate::syntax::names;
 
+use crate::module::operations::Taking;
 use crate::module::settings::{Destination, Slot, each_named};
 use crate::module::want::Want;
+use crate::value::Filled;
 
 const ENV: Destination =
     Destination::Readable("an environment variable in `env` (a secret goes in `secret_env`)");
@@ -28,6 +30,19 @@ impl<V> Variables<V> {
             env: env?,
             secret_env: secret_env?,
         })
+    }
+}
+
+impl Variables<Filled> {
+    /// Takes each variable into `taking`, as `env.NAME` or
+    /// `secret_env.NAME`.
+    pub fn take(&self, taking: &mut Taking) {
+        for (name, value) in &self.env {
+            taking.value(format!("env.{name}"), value);
+        }
+        for (name, value) in &self.secret_env {
+            taking.value(format!("secret_env.{name}"), value);
+        }
     }
 }
 

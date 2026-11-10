@@ -21,6 +21,9 @@ pub struct Description {
     pub gives: Vec<ModuleGive>,
     /// The files the unit builds, used as `${unit.outputs.name}`.
     pub outputs: Vec<Output>,
+    /// The path of the file a unit that is made writes: a unit that uses
+    /// any of its values uses the file.
+    pub writes: Option<Expr>,
     /// The named volumes the unit owns.
     pub volumes: Vec<NameAt>,
     /// The volumes of other units it mounts.
@@ -51,6 +54,7 @@ impl Description {
             publish: Vec::new(),
             gives: Vec::new(),
             outputs: Vec::new(),
+            writes: None,
             volumes: Vec::new(),
             volume_mounts: Vec::new(),
             claims: Vec::new(),

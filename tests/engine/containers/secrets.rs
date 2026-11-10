@@ -1,7 +1,7 @@
 //! Secrets and containers: a secret reaches a container, and a command run
 //! in one, through its environment, which Docker shows to whoever may ask
-//! it, and nowhere else: not in any output, any log, any label, nor in the
-//! argument list of anything tay starts or creates.
+//! it, and nowhere else: not in any output, any log, any label, any record,
+//! nor in the argument list of anything tay starts or creates.
 
 use std::process::Command;
 use std::time::Duration;
@@ -39,7 +39,11 @@ fn no_secret_appears_in_any_output_log_label_or_argument_list() {
         shown.push_str(&guarded["Config"][field].to_string());
     }
     shown.push_str(&guarded["Args"].to_string());
-    assert!(shown.contains("tay.settings"), "{shown}");
+    // What it was started from is kept by its secret's name.
+    let started =
+        std::fs::read_to_string(root.join(".tay/state/units/guarded/started-from.json")).unwrap();
+    assert!(started.contains("secret_env.PASSWORD"), "{started}");
+    printed.push_str(&started);
     for unit in ["guarded", "stamped"] {
         printed.push_str(&log(&root, unit));
         printed.push_str(&machine.at(&root, "logs", &[unit]).stdout);
@@ -62,7 +66,7 @@ fn no_secret_appears_in_any_output_log_label_or_argument_list() {
 }
 
 #[test]
-fn a_container_whose_secret_changed_is_replaced_though_no_label_holds_it() {
+fn a_container_whose_secret_changed_is_replaced_and_said_to_be_by_the_secrets_name() {
     let machine = Machine::with_docker();
     let root = machine.stack("containers");
     assert_eq!(machine.at(&root, "up", &["guarded"]).code, 0);
@@ -73,8 +77,7 @@ fn a_container_whose_secret_changed_is_replaced_though_no_label_holds_it() {
     assert_eq!(up.code, 0, "{}{}", up.stdout, up.stderr);
     assert!(
         up.changes().contains(
-            &"guarded starting its settings have changed, so what runs of it is replaced"
-                .to_string()
+            &"guarded starting `secret_env.PASSWORD` changed, so it is started again".to_string()
         ),
         "{}",
         up.stdout

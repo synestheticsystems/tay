@@ -248,7 +248,7 @@ In order: every running unit that needs the unit or mounts one of its volumes, d
 
 ## When something changes
 
-*Not built, except that a container whose settings changed is replaced.*
+*Not built: watching, and `when_removed: undo`.*
 
 **What a unit was started from.** For each unit that is up, tay keeps a fingerprint of what it was started from: its filled settings, with each secret taken as a digest and never as its value; the content of every file it uses that tay knows of (a file a `file` unit wrote, a file another unit built and lists under `outputs`); and, for a container, the image it was created from, not the tag.
 

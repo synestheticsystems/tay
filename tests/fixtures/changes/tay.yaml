@@ -1,0 +1,62 @@
+format: 1
+stack: changes
+up: [web]
+settings:
+  mode: { default: one, doc: "What the web is told, and gives on." }
+  greeting: { default: hello, doc: "What the conf file says." }
+  says: { default: first, doc: "What the program the build builds says." }
+  length: { default: 20, doc: "How long the token is." }
+units:
+  web-port: { uses: port }
+  web:
+    doc: Says its mode, and gives it, and its address.
+    uses: process
+    with:
+      command: [sh, -c, "echo mode $MODE; trap 'exit 0' TERM; sleep 3600 & wait"]
+      env: { MODE: "${settings.mode}" }
+    gives:
+      mode: "${settings.mode}"
+      site: { port: "${web-port.number}", scheme: http }
+  follower:
+    doc: Is told the web's mode.
+    uses: process
+    with:
+      command: [sh, -c, "echo follows $MODE; trap 'exit 0' TERM; sleep 3600 & wait"]
+      env: { MODE: "${web.mode}" }
+  caller:
+    doc: Is told the web's address, which its mode leaves as it is.
+    uses: process
+    with:
+      command: [sh, -c, "echo calls $SITE; trap 'exit 0' TERM; sleep 3600 & wait"]
+      env: { SITE: "${web.site.url}" }
+
+  conf:
+    uses: file
+    with: { content: "${settings.greeting}\n" }
+  reader:
+    doc: Reads the file the conf unit writes.
+    uses: process
+    with:
+      command: [sh, -c, "echo reads $(cat $CONF); trap 'exit 0' TERM; sleep 3600 & wait"]
+      env: { CONF: "${conf.path}" }
+
+  build:
+    doc: Builds a program that says what it is told, each time it is brought up.
+    uses: command
+    with:
+      run: [sh, -c, "printf '#!/bin/sh\\necho says %s\\nexec sleep 3600\\n' \"$SAYS\" > \"$OUT\" && chmod +x \"$OUT\""]
+      env: { SAYS: "${settings.says}", OUT: "${environment.state}/program" }
+      outputs: { program: "${environment.state}/program" }
+  program:
+    doc: Runs what the build built.
+    uses: process
+    with:
+      command: ["${build.outputs.program}"]
+
+  token: { uses: secret, with: { kind: password, length: "${settings.length}" } }
+  guarded:
+    doc: Is given the token, through its environment alone.
+    uses: process
+    with:
+      command: [sh, -c, "test -n \"$TOKEN\" && echo has a token; trap 'exit 0' TERM; sleep 3600 & wait"]
+      secret_env: { TOKEN: "${token.value}" }

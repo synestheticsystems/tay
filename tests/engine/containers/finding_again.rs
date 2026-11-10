@@ -3,7 +3,7 @@
 //! it again, copying what it wrote while no daemon ran into its log with
 //! Docker's times. And at `tay up`, a container whose settings have changed
 //! is replaced, its volumes kept, while one whose settings have not is left
-//! running.
+//! running, its image judged by what it is, not by the name it is given.
 
 use std::time::Duration;
 
@@ -100,6 +100,10 @@ fn a_container_whose_settings_changed_is_replaced_keeping_its_volume_and_one_unc
     assert!(again.changes().is_empty(), "{}", again.stdout);
     let changed = machine.at(&root, "up", &["keeper-data", "--set", "settings.mode=two"]);
     assert_eq!(changed.code, 0, "{}{}", changed.stdout, changed.stderr);
+    assert_eq!(
+        changed.changes()[0],
+        "keeper-data starting `env.MODE` changed, so it is started again"
+    );
     let replaced = container(&machine, &root, "keeper-data").unwrap();
     assert_ne!(replaced["Id"], first);
     assert_eq!(replaced["Config"]["Labels"]["tay.attempt"], "1");
@@ -107,6 +111,23 @@ fn a_container_whose_settings_changed_is_replaced_keeping_its_volume_and_one_unc
     assert!(eventually(Duration::from_secs(20), || {
         log(&root, "keeper-data").contains("| mode two, start 2")
     }));
+}
+
+#[test]
+fn a_container_is_compared_by_the_image_it_was_created_from_not_the_name_that_names_it() {
+    let machine = Machine::with_docker();
+    let root = machine.stack("containers");
+    assert_eq!(machine.at(&root, "up", &["tagged"]).code, 0);
+    let first = container(&machine, &root, "tagged").unwrap()["Id"].clone();
+    // The same image, named in full.
+    let renamed = machine.at(
+        &root,
+        "up",
+        &["--set", "settings.box=docker.io/library/busybox:1.36"],
+    );
+    assert_eq!(renamed.code, 0, "{}{}", renamed.stdout, renamed.stderr);
+    assert!(renamed.changes().is_empty(), "{}", renamed.stdout);
+    assert_eq!(container(&machine, &root, "tagged").unwrap()["Id"], first);
 }
 
 #[test]

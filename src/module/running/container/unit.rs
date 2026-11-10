@@ -16,12 +16,11 @@ use super::docker::Docker;
 use super::{ContainerSettings, container_name, unit_log};
 use crate::module::description::OpenedPort;
 use crate::module::operations::{
-    Comparing, Driving, Failure, Finding, Outcome, ReadinessCommand, Running, Steps, UnderWay,
+    Driving, Failure, Finding, Fingerprinting, Outcome, ReadinessCommand, Running, Steps, UnderWay,
     UnitPlace,
 };
 use crate::value::Filled;
 use attempt::{found, gone, watched};
-use create::ImageHere;
 
 pub use readiness::check_inside;
 
@@ -81,33 +80,19 @@ impl Running for ContainerUnit {
         Box::pin(async move { super::check_inside(&place, &command, limit).await })
     }
 
-    fn outdated(self: Arc<Self>, place: UnitPlace) -> Comparing {
+    fn started_from(self: Arc<Self>, place: UnitPlace) -> Fingerprinting {
         Box::pin(async move {
             let docker = Docker::connect()?;
-            let id = place.environment.id.as_str();
-            // A unit that is looked after and has no container is between
-            // two attempts, the next of which would be made from the
-            // settings it was started with: so it is replaced.
-            let Some((_, inspected)) = docker.container(id, &container_name(&place)).await? else {
-                return Ok(true);
-            };
             let name = self.image_name(&place)?;
-            // An image that is not here any more is not the one the
-            // container runs.
-            let Some(image) = docker.image_id(&name).await? else {
-                return Ok(true);
-            };
-            let network = docker.network(id, &place.environment.network()).await?;
-            let gateway = network.and_then(|network| network.gateway);
-            let here = ImageHere { name, id: image };
-            let creation = create::creation(
+            // An image that is not here any more is no image a container
+            // was created from.
+            let image = docker.image_id(&name).await?.unwrap_or_default();
+            Ok(create::fingerprint(
                 &self.settings,
                 &self.opened,
                 &place,
-                &here,
-                gateway.as_deref(),
-            )?;
-            Ok(!creation.created_from(&inspected))
+                &image,
+            ))
         })
     }
 }

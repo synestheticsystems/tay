@@ -27,10 +27,6 @@ pub const ATTEMPT: &str = "tay.attempt";
 /// `run`, that says which.
 pub const STEP: &str = "tay.step";
 
-/// The label of a unit's container that says what it was created from,
-/// with every secret left out.
-pub const SETTINGS: &str = "tay.settings";
-
 /// Whom something tay creates belongs to: an environment, and one of its
 /// units unless it is the environment's own, as its network is.
 #[derive(Clone, Copy)]

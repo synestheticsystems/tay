@@ -136,17 +136,19 @@ impl Module for File {
         ];
         let mut path = dir.clone();
         path.push(Piece::Lit(format!("/{}", settings.name.name)));
+        let expr = |pieces: Vec<Piece>| Expr {
+            loc: cx.uses,
+            kind: ExprKind::Text(pieces),
+        };
         let given = |name: &str, pieces: Vec<Piece>| ModuleGive {
             name: NameAt {
                 name: name.to_string(),
                 loc: cx.uses,
             },
-            value: ModuleValue::Expr(Expr {
-                loc: cx.uses,
-                kind: ExprKind::Text(pieces),
-            }),
+            value: ModuleValue::Expr(expr(pieces)),
         };
         Some(Description {
+            writes: Some(expr(path.clone())),
             gives: vec![given(PATH, path), given(DIR, dir)],
             claims: vec![claim],
             ..Description::new(

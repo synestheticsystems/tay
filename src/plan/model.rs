@@ -102,6 +102,18 @@ pub struct PlannedMechanism {
     pub publishes: Vec<PublishedPort>,
     /// The units whose volumes it mounts.
     pub mounts_volumes_of: Vec<String>,
+    /// The files tay knows of that its settings use: what it is started
+    /// from beside them.
+    pub files: Vec<UsedFile>,
+}
+
+/// A file a unit uses that tay knows of: one a unit that is made writes,
+/// named by that unit, or one a command builds, named
+/// `unit.outputs.name`; and its path.
+#[derive(Debug)]
+pub struct UsedFile {
+    pub name: String,
+    pub path: Value,
 }
 
 impl PlannedMechanism {

@@ -19,12 +19,13 @@ use std::time::Duration;
 
 use crate::keeper::{Look, Program};
 use crate::module::operations::{
-    self, Comparing, Driving, Failure, Finding, Found, Outcome, ReadinessCommand, Running, Step,
-    Steps, UnderWay, UnitPlace,
+    self, Driving, Failure, Finding, Fingerprint, Fingerprinting, Found, Outcome, ReadinessCommand,
+    Running, Step, Steps, Taking, UnderWay, UnitPlace,
 };
 use crate::module::running::command_line::{RunForm, filled_run_form};
 use crate::module::running::container::{self, CommandStep, ContainerStepEnd, FoundStep};
 use crate::module::running::host;
+use crate::module::running::mounts::Mount;
 use crate::value::Filled;
 
 use super::CommandSettings;
@@ -177,14 +178,53 @@ impl Running for CommandSettings<Filled> {
         })
     }
 
-    /// A command runs again at each `tay up` whose check finds it not done,
-    /// whatever its settings were, so none is replaced.
-    fn outdated(self: Arc<Self>, _: UnitPlace) -> Comparing {
-        Box::pin(async { Ok(false) })
+    fn started_from(self: Arc<Self>, place: UnitPlace) -> Fingerprinting {
+        Box::pin(async move { Ok(self.fingerprint(&place)) })
     }
 }
 
 impl CommandSettings<Filled> {
+    /// What the command is started from, by the settings its steps run
+    /// with. What wiping it or its leaving the plan runs is not among
+    /// them.
+    fn fingerprint(&self, place: &UnitPlace) -> Fingerprint {
+        let mut taking = Taking::of(place);
+        taking.setting("run", &self.run.revealed());
+        if let Some(check) = &self.check {
+            taking.setting("check", &check.revealed());
+        }
+        if let Some(inside) = &self.inside {
+            taking.setting("in", inside);
+        }
+        if let Some(image) = &self.image {
+            taking.value("image", image);
+        }
+        if !self.mounts.is_empty() {
+            let mounts: Vec<_> = self.mounts.iter().map(Mount::revealed).collect();
+            taking.setting("mounts", &mounts);
+        }
+        for (name, value) in [
+            ("user", &self.user),
+            ("workdir", &self.workdir),
+            ("stdin", &self.stdin),
+        ] {
+            if let Some(value) = value {
+                taking.value(name, value);
+            }
+        }
+        self.variables.take(&mut taking);
+        let produces: Vec<(&str, bool)> = (self.produces.iter())
+            .map(|(name, secret)| (name.name.as_str(), *secret))
+            .collect();
+        if !produces.is_empty() {
+            taking.setting("produces", &produces);
+        }
+        for (name, path) in &self.outputs {
+            taking.value(format!("outputs.{}", name.name), path);
+        }
+        taking.taken()
+    }
+
     fn where_it_runs(&self) -> Where<'_> {
         match (&self.inside, &self.image) {
             (Some(unit), _) => Where::Inside(unit),
@@ -265,9 +305,13 @@ impl CommandSettings<Filled> {
         under_way: bool,
         steps: &Steps,
     ) -> Result<Outcome, Failure> {
+        // The engine keeps what it was started from, unless it has stopped
+        // listening, which it does only once it has dropped the attempt,
+        // which then goes no further.
+        if !under_way {
+            let _ = steps.send(Step::Started(self.fingerprint(place)));
+        }
         if from == CHECK {
-            // The engine has stopped listening only once it has dropped the
-            // attempt, which then goes no further.
             let _ = steps.send(Step::Before("checking".to_string()));
             let end = match under_way {
                 true => self.wait(place, attempt, CHECK, None).await?,

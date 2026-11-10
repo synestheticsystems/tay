@@ -73,6 +73,18 @@ impl<V> RunForm<V> {
     }
 }
 
+impl RunForm<Filled> {
+    /// The form with every value in it, as a fingerprint takes it.
+    pub fn revealed(&self) -> serde_json::Value {
+        match self {
+            RunForm::Argv(words) => {
+                serde_json::json!({ "argv": words.iter().map(Filled::reveal).collect::<Vec<_>>() })
+            }
+            RunForm::Shell(text) => serde_json::json!({ "shell": text.reveal() }),
+        }
+    }
+}
+
 /// A command for `run`, `check` or `undo`: a list, or `{ shell: "..." }` when a
 /// shell is wanted.
 pub fn run_form(node: &Node, what: &str, d: &mut Diagnostics) -> Option<RunForm<Slot>> {

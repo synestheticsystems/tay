@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use crate::keeper::{Look, Program};
 use crate::module::operations::{
-    Comparing, Driving, Failure, Finding, Found, Outcome, ReadinessCommand, Running, Step, Steps,
-    UnderWay, UnitPlace,
+    Driving, Failure, Finding, Fingerprint, Fingerprinting, Found, Outcome, ReadinessCommand,
+    Running, Step, Steps, Taking, UnderWay, UnitPlace,
 };
 use crate::module::running::command_line::{filled_argv, shown};
 use crate::module::running::host::{self, StepEnd};
@@ -71,10 +71,8 @@ impl Running for ProcessSettings<Filled> {
         })
     }
 
-    /// What restarts a process when its definition changes is not in the
-    /// engine's document yet, so a process that runs is left running.
-    fn outdated(self: Arc<Self>, _: UnitPlace) -> Comparing {
-        Box::pin(async { Ok(false) })
+    fn started_from(self: Arc<Self>, place: UnitPlace) -> Fingerprinting {
+        Box::pin(async move { Ok(self.fingerprint(&place)) })
     }
 }
 
@@ -146,8 +144,31 @@ impl ProcessSettings<Filled> {
         }
         let argv = filled_argv(&self.command, "`command`")?;
         let program = self.program(place, argv)?;
+        // The engine keeps what it was started from, unless it has stopped
+        // listening, which it does only once it has dropped the attempt.
+        let _ = steps.send(Step::Started(self.fingerprint(place)));
         let end = host::run(&files, attempt, COMMAND, program, Some(steps)).await?;
         Ok(host::ending(&end, ""))
+    }
+
+    /// What the process is started from, by its settings.
+    fn fingerprint(&self, place: &UnitPlace) -> Fingerprint {
+        let mut taking = Taking::of(place);
+        taking.values("command", &self.command);
+        if let Some(workdir) = &self.workdir {
+            taking.value("workdir", workdir);
+        }
+        self.variables.take(&mut taking);
+        if let Some(inherit) = &self.inherit {
+            taking.setting("inherit", inherit);
+        }
+        if !self.prepare.is_empty() {
+            let prepare: Vec<Vec<String>> = (self.prepare.iter())
+                .map(|words| words.iter().map(Filled::reveal).collect())
+                .collect();
+            taking.setting("prepare", &prepare);
+        }
+        taking.taken()
     }
 
     /// The program `argv`, run with the process's environment in its

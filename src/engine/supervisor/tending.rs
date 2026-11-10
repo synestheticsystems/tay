@@ -17,9 +17,11 @@ use crate::clock;
 use crate::disk::Count;
 use crate::disk::unit_log::UnitLog;
 use crate::engine::readiness::Probe;
+use crate::engine::started_from;
 use crate::engine::state::{State, UnitState};
 use crate::module::{
-    Driving, Outcome, ReadyWithoutCheck, Running, Step, UnderWay, UnitKind, Values,
+    Driving, Fingerprint, Outcome, ReadyWithoutCheck, Running, Step, UnderWay, UnitKind, UnitPlace,
+    Values,
 };
 use crate::plan::{PlannedUnit, Readiness};
 
@@ -72,6 +74,9 @@ pub(super) struct Tending {
     /// Why the count of attempts could not be kept, said with each state
     /// from then on.
     pub(super) unkept: Option<String>,
+    /// Why what the attempt was started from could not be kept, said with
+    /// each of its states.
+    pub(super) start_unkept: Option<String>,
 }
 
 /// Looks after `planned` with `running` from `begin`, telling `supervisor`
@@ -94,6 +99,7 @@ pub async fn tend(
         in_a_row: 0,
         earlier: None,
         unkept: None,
+        start_unkept: None,
     };
     tending.run(begin).await;
 }
@@ -169,7 +175,8 @@ impl Tending {
     /// the one before it ended.
     pub(super) fn detail(&self, attempt: u32, doing: &str) -> String {
         let mut detail = format!("attempt {attempt}, {doing}");
-        for more in [&self.earlier, &self.unkept].into_iter().flatten() {
+        let more = [&self.earlier, &self.unkept, &self.start_unkept];
+        for more in more.into_iter().flatten() {
             detail.push_str("; ");
             detail.push_str(more);
         }
@@ -189,6 +196,17 @@ impl Tending {
             .keep(&self.planned.name, count)
             .err()
             .map(|error| format!("its count of attempts cannot be kept: {error}"));
+    }
+
+    /// Keeps what the attempt's own program is started from: `settings`,
+    /// as its module says, with the files the unit uses as they are now.
+    fn keep_started(&mut self, place: &UnitPlace, settings: Fingerprint) {
+        let kept = started_from::with_files(&self.supervisor, &self.planned, settings).and_then(
+            |started| started_from::keep(place, &started).map_err(|error| error.to_string()),
+        );
+        self.start_unkept = kept
+            .err()
+            .map(|why| format!("what it was started from cannot be kept: {why}"));
     }
 
     /// Runs attempt `attempt`, begun now or found `under_way`, and watches
@@ -272,6 +290,7 @@ impl Tending {
                     Step::Before(doing) => {
                         self.record(State::Starting, self.detail(attempt, &doing), None);
                     }
+                    Step::Started(settings) => self.keep_started(&place, settings),
                     Step::Running { since } => match (&check, &mechanism.ready) {
                         (Some((filled, within, _)), _) => {
                             let log = UnitLog::at(self.supervisor.environment.layout.unit_log(self.unit()));

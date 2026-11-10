@@ -118,6 +118,12 @@ impl Resolver<'_> {
                 .entry(unit.name.name.clone())
                 .or_insert_with(|| format!("{}.{name}", unit.name.name));
         }
+        if let Chosen::Mechanism { mechanism, .. } = self.chosen(owner).ok_or(Fail::Reported)?
+            && let Some(writes) = &mechanism.description.writes
+        {
+            let path = self.resolve(writes, scope)?;
+            value.files.insert(unit.name.name.clone(), path.value);
+        }
         Ok(value)
     }
 
@@ -149,9 +155,9 @@ impl Resolver<'_> {
             this.resolve(&output.path, scope)
         })?;
         let mut value = self.host_path(path);
-        value
-            .producers
-            .insert(unit_name.clone(), format!("{unit_name}.outputs.{name}"));
+        let output = format!("{unit_name}.outputs.{name}");
+        value.files.insert(output.clone(), value.value.clone());
+        value.producers.insert(unit_name.clone(), output);
         Ok(value)
     }
 }

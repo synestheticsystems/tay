@@ -6,10 +6,11 @@
 //! A unit that is made is made on the blocking pool. A unit that runs is
 //! handed to the supervisor, whose task looks after it from then on, and the
 //! loop waits for it to become ready or fail: an attempt that fails and is
-//! followed by one that becomes ready counts as ready. A unit that runs
-//! already is asked whether what runs of it was started from other settings
-//! than the plan now gives; if it was, it is replaced, and otherwise joined
-//! as it is. A bring-up that leaves what is up as it is joins it unasked.
+//! followed by one that becomes ready counts as ready. What a unit that runs
+//! already would be started from now is compared with what it was started
+//! from; if they differ it is started again, saying what changed, and
+//! otherwise joined as it is. A bring-up that leaves what is up as it is
+//! joins it unasked.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
@@ -19,6 +20,7 @@ use tokio::sync::watch;
 use tokio::task::JoinSet;
 
 use super::settled::{Settled, Standing};
+use super::started_from;
 use super::state::{State, UnitState};
 use super::supervisor::{Begin, Supervisor};
 use crate::module::{Exists, Made, Operations, Running, UnitKind};
@@ -45,11 +47,11 @@ pub struct FailedUnit {
     pub waiting: Vec<String>,
 }
 
-/// What bringing a plan up does with a unit that runs already from other
-/// settings than the plan now gives.
+/// What bringing a plan up does with a unit that runs already and would
+/// be started from something else now.
 #[derive(Clone, Copy)]
 pub enum Outdated {
-    /// It is replaced, as `tay up` does.
+    /// It is started again, as `tay up` does.
     Replace,
     /// It is joined as it runs, as `tay run` does, which never replaces a
     /// unit that is up.
@@ -83,8 +85,8 @@ pub async fn bring_up(
     let mut making = JoinSet::new();
     // The unit each one being made is, by its task.
     let mut making_of = HashMap::new();
-    // What runs already, its settings being compared with the plan's, and
-    // replaced if they changed.
+    // What runs already, compared with what it was started from, and
+    // started again if that changed.
     let mut comparing = JoinSet::new();
     let mut comparing_of = HashMap::new();
     let mut changes = supervisor.changes();
@@ -154,12 +156,12 @@ pub async fn bring_up(
             Some(joined) = comparing.join_next_with_id() => {
                 let (task, compared) = match joined {
                     Ok((task, compared)) => (task, compared),
-                    Err(error) => (error.id(), Compared::Unknown(format!("tay failed while comparing its settings: {error}"))),
+                    Err(error) => (error.id(), Compared::Unknown(format!("tay failed while comparing what it was started from: {error}"))),
                 };
                 if let Some(index) = comparing_of.remove(&task) {
                     if let Compared::Unknown(why) = &compared {
                         noticed(format!(
-                            "whether `{}` runs from the settings the plan now gives cannot be told, so it is left as it runs: {why}",
+                            "whether `{}` would be started from what it was started from cannot be told, so it is left as it runs: {why}",
                             units[index].name
                         ));
                     }
@@ -176,20 +178,22 @@ pub async fn bring_up(
 
 /// What became of a unit that ran already when it was brought up.
 enum Compared {
-    /// It runs from the settings the plan gives, and is joined as it is.
+    /// It would be started from what it was started from, and is joined
+    /// as it is.
     Current,
-    /// It ran from other settings, and was started afresh from these.
+    /// It would be started from something else, and was started afresh.
     Replaced,
-    /// It ran from other settings, and could not be stopped, as this says.
+    /// It would be started from something else, and could not be stopped,
+    /// as this says.
     NotStopped(String),
-    /// Whether it runs from these settings cannot be told, as this says, so
-    /// it is joined as it is.
+    /// What it would be started from, or what it was started from, cannot
+    /// be told, as this says, so it is joined as it is.
     Unknown(String),
 }
 
-/// Asks whether `planned`, which runs already, runs from the settings
-/// `running` has, and replaces it if not, unless the change is cancelled
-/// first.
+/// Compares what `planned`, which runs already, would be started from now,
+/// with `running`, and what it was started from, and starts it again if
+/// they differ, unless the change is cancelled first.
 async fn compared(
     supervisor: Arc<Supervisor>,
     planned: Arc<PlannedUnit>,
@@ -197,22 +201,32 @@ async fn compared(
     cancel: watch::Receiver<bool>,
 ) -> Compared {
     let place = supervisor.place(&planned.name);
-    match Arc::clone(&running).outdated(place).await {
-        Ok(false) => Compared::Current,
-        Err(failure) => Compared::Unknown(failure.to_string()),
-        Ok(true) => {
-            let replacing = UnitState::new(
-                State::Starting,
-                "its settings have changed, so what runs of it is replaced",
-            );
-            supervisor.record(&planned.name, replacing, None);
-            replace(&supervisor, &planned, running, &cancel).await
+    let now = match Arc::clone(&running).started_from(place.clone()).await {
+        Ok(settings) => started_from::with_files(&supervisor, &planned, settings),
+        Err(failure) => Err(failure.to_string()),
+    };
+    let kept = started_from::kept(&place).map_err(|error| error.to_string());
+    let why = match (now, kept) {
+        (Err(why), _) | (_, Err(why)) => return Compared::Unknown(why),
+        (Ok(now), Ok(Some(kept))) => {
+            let changed = kept.changed(&now);
+            if changed.is_empty() {
+                return Compared::Current;
+            }
+            format!("{changed} changed")
         }
-    }
+        // What it was started from is kept as it starts, so a unit that
+        // has none kept started before that could be: what it runs from
+        // is not known.
+        (Ok(_), Ok(None)) => "what it was started from is not known".to_string(),
+    };
+    let again = UnitState::new(State::Starting, format!("{why}, so it is started again"));
+    supervisor.record(&planned.name, again, None);
+    replace(&supervisor, &planned, running, &cancel).await
 }
 
-/// Stops `planned`, which runs from other settings than `running` has, and
-/// starts it afresh from these, unless the change is cancelled first.
+/// Stops `planned`, which would be started from something else now, and
+/// starts it afresh with `running`, unless the change is cancelled first.
 async fn replace(
     supervisor: &Arc<Supervisor>,
     planned: &Arc<PlannedUnit>,
@@ -257,7 +271,8 @@ struct Bringing<'a> {
 
 /// What a pass over the units started: the units that are made, to be made,
 /// each with whether what uses it runs, and the units that run already,
-/// with the operations the plan now gives them, to have their settings compared.
+/// with the operations the plan now gives them, to be compared with what
+/// they were started from.
 #[derive(Default)]
 struct Started {
     made: Vec<(usize, Box<dyn Made>, bool)>,
@@ -266,7 +281,7 @@ struct Started {
 
 impl Bringing<'_> {
     /// Starts the units that may start now, and gives those that are made,
-    /// to be made, and those that run already, to have their settings compared. A group
+    /// to be made, and those that run already, to be compared. A group
     /// becomes ready at once, a unit that runs is handed to the supervisor,
     /// and a unit that cannot start yet is recorded waiting, or blocked.
     fn start(&mut self) -> Started {
@@ -284,9 +299,10 @@ impl Bringing<'_> {
                 if let Standing::Blocked(failed) = &standing {
                     self.settled.blocked(&planned.name, failed.clone());
                 }
-                // A unit that runs already has its settings compared once what it needs has
-                // settled, so that how those came out is said: it is joined
-                // as it is, its state its own, unless its settings changed.
+                // A unit that runs already is compared once what it needs
+                // has settled, so that how those came out is said: it is
+                // joined as it is, its state its own, unless what it would
+                // be started from changed.
                 let tended = self.supervisor.is_tended(&planned.name);
                 if let Some(waiting) = standing.waiting() {
                     if !tended {
@@ -353,7 +369,7 @@ impl Bringing<'_> {
             }
             Compared::NotStopped(why) => {
                 let reason = format!(
-                    "its settings have changed, and what runs of it could not be stopped to replace it: {why}"
+                    "what it would be started from has changed, and what runs of it could not be stopped to start it again: {why}"
                 );
                 self.record(index, UnitState::new(State::Failed, reason));
             }

@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use tokio::sync::mpsc;
 
-use super::{Failure, UnitPlace, Values};
+use super::{Failure, Fingerprint, UnitPlace, Values};
 
 /// The operations of a unit that runs.
 pub trait Running: Send + Sync {
@@ -35,18 +35,16 @@ pub trait Running: Send + Sync {
         limit: Duration,
     ) -> ReadinessCommand;
 
-    /// Whether what runs of the unit now, which a task looks after, was
-    /// started from other settings than these, so that bringing the unit
-    /// up replaces it.
-    fn outdated(self: Arc<Self>, place: UnitPlace) -> Comparing;
+    /// What the unit would be started from now, by its settings: what a
+    /// unit that runs is compared by when it is brought up again.
+    fn started_from(self: Arc<Self>, place: UnitPlace) -> Fingerprinting;
 }
 
 /// A unit being found where it runs.
 pub type Finding = Pin<Box<dyn Future<Output = Result<Found, Failure>> + Send>>;
 
-/// Whether what runs of a unit was started from other settings than it
-/// has, being found out by comparing them.
-pub type Comparing = Pin<Box<dyn Future<Output = Result<bool, Failure>> + Send>>;
+/// What a unit would be started from, by its settings, being found out.
+pub type Fingerprinting = Pin<Box<dyn Future<Output = Result<Fingerprint, Failure>> + Send>>;
 
 /// An attempt being driven: it ends with how the attempt came out.
 pub type Driving = Pin<Box<dyn Future<Output = Outcome> + Send>>;
@@ -64,6 +62,10 @@ pub enum Step {
     /// A step before the unit's own program, as a person reads it:
     /// `checking`, ``preparing: `bun install` ``.
     Before(String),
+    /// The attempt starts the unit from these settings: its own program,
+    /// or for a command, its steps. What the engine keeps of what the unit
+    /// was started from.
+    Started(Fingerprint),
     /// The unit's own program runs, since this time in milliseconds since
     /// 1970: its readiness is checked from now.
     Running { since: u64 },

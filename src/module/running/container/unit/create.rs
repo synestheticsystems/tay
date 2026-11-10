@@ -1,24 +1,21 @@
 //! What a unit's container is created from: its settings as Docker takes
 //! them, on the environment's network, with only the published ports the
-//! plan opens; and what tells whether a container that exists was created
-//! from the same, which leaves out every secret. The secrets in its
-//! environment are compared with the container's own, which Docker shows
-//! to whoever may ask it, and never written anywhere else.
+//! plan opens; and the same by the names of its settings, as the
+//! fingerprint of what it was started from takes them.
 
 use std::collections::HashMap;
 
 use serde_json::json;
 
 use bollard::models::{
-    ContainerCreateBody, ContainerInspectResponse, EndpointSettings, HostConfig, Mount, MountType,
-    NetworkingConfig, PortBinding,
+    ContainerCreateBody, EndpointSettings, HostConfig, Mount, MountType, NetworkingConfig,
+    PortBinding,
 };
 
 use crate::module::description::OpenedPort;
-use crate::module::operations::{self, Failure, UnitPlace};
+use crate::module::operations::{self, Failure, Fingerprint, Taking, UnitPlace};
 use crate::module::running::command_line::filled_argv;
-use crate::module::running::container::docker::ours::SETTINGS;
-use crate::module::running::container::{ContainerSettings, host, mounted, volume_name};
+use crate::module::running::container::{ContainerSettings, Image, host, mounted, volume_name};
 use crate::value::Filled;
 
 /// A container's settings, as Docker takes them.
@@ -27,11 +24,6 @@ pub struct Creation {
     pub platform: Option<String>,
     /// The values in its environment that are secret.
     pub secrets: Vec<String>,
-    /// Its secret variables as its environment holds them, `NAME=value`.
-    secret_env: Vec<String>,
-    /// Everything it is created from but its secrets, with the image it
-    /// runs as Docker names it: what its label keeps.
-    pub settings: String,
 }
 
 /// The image a container is created from, as it is here: by the name its
@@ -57,19 +49,11 @@ pub fn creation(
     for (name, value) in &settings.variables.env {
         env.push(format!("{name}={}", value.reveal()));
     }
-    let secret_env: Vec<String> = settings
-        .variables
-        .secret_env
-        .iter()
-        .map(|(name, value)| format!("{name}={}", value.reveal()))
-        .collect();
-    let secrets = settings
-        .variables
-        .secret_env
-        .iter()
-        .map(|(_, value)| value.reveal())
-        .collect();
-    env.extend(secret_env.iter().cloned());
+    let mut secrets = Vec::new();
+    for (name, value) in &settings.variables.secret_env {
+        env.push(format!("{name}={}", value.reveal()));
+        secrets.push(value.reveal());
+    }
     let mut mounts = Vec::new();
     for volume in &settings.volumes {
         mounts.push(Mount {
@@ -177,133 +161,98 @@ pub fn creation(
         .as_ref()
         .map(|platform| Ok::<_, Failure>(operations::text(platform, "platform")?.to_string()))
         .transpose()?;
-    let settings = fingerprint(&body, &secret_env, platform.as_deref(), &image.id);
     Ok(Creation {
         body,
         platform,
         secrets,
-        secret_env,
-        settings,
     })
 }
 
-impl Creation {
-    /// Whether the container Docker says `inspected` of was created from
-    /// these settings and the image that is now: its label keeps the rest,
-    /// and its environment holds each secret.
-    pub fn created_from(&self, inspected: &ContainerInspectResponse) -> bool {
-        let Some(config) = &inspected.config else {
-            return false;
-        };
-        let labelled = config
-            .labels
-            .as_ref()
-            .and_then(|labels| labels.get(SETTINGS))
-            .is_some_and(|kept| *kept == self.settings);
-        let env = config.env.as_deref().unwrap_or_default();
-        labelled && self.secret_env.iter().all(|secret| env.contains(secret))
-    }
-}
-
-/// What a container's label keeps of its settings: all of them but the
-/// values of its secrets, whose names alone are kept, in an order that
-/// does not depend on how they were gathered.
-fn fingerprint(
-    body: &ContainerCreateBody,
-    secret_env: &[String],
-    platform: Option<&str>,
+/// What the container of `settings`, for the unit at `place`, opening the
+/// ports in `opened`, is started from, by its settings, when it is created
+/// from the image `image`, Docker's id for it: the image, not the tag that
+/// names it, so that a tag moved to another image makes another container.
+pub fn fingerprint(
+    settings: &ContainerSettings<Filled>,
+    opened: &[OpenedPort<Filled>],
+    place: &UnitPlace,
     image: &str,
-) -> String {
-    let mut body = body.clone();
-    body.env = body.env.map(|env| {
-        env.into_iter()
-            .filter(|entry| !secret_env.contains(entry))
-            .collect()
-    });
-    let secret_names: Vec<&str> = secret_env
-        .iter()
-        .filter_map(|entry| entry.split_once('=').map(|(name, _)| name))
-        .collect();
-    // A JSON object keeps its keys in order, so a mapping gathered in any
-    // order is written alike.
-    json!({
-        "image": image,
-        "platform": platform,
-        "secret_env": secret_names,
-        "create": body,
-    })
-    .to_string()
-}
-
-#[cfg(test)]
-mod tests {
-    use bollard::models::ContainerConfig;
-
-    use super::*;
-
-    /// A container's body, with `labels`, and `secret` among its
-    /// environment as `secret_env` puts it there.
-    fn body(labels: &[(&str, &str)], secret: &str) -> ContainerCreateBody {
-        ContainerCreateBody {
-            image: Some("busybox:1.36".to_string()),
-            env: Some(vec!["MODE=fast".to_string(), secret.to_string()]),
-            labels: Some(
-                labels
-                    .iter()
-                    .map(|(key, value)| (key.to_string(), value.to_string()))
-                    .collect(),
-            ),
-            ..ContainerCreateBody::default()
+) -> Fingerprint {
+    let mut taking = Taking::of(place);
+    taking.setting("image", &image);
+    if let Image::Built {
+        context,
+        dockerfile,
+        args,
+    } = &settings.image
+    {
+        let args: Vec<(&String, String)> = args
+            .iter()
+            .map(|(arg, value)| (arg, value.reveal()))
+            .collect();
+        let build = json!({
+            "context": context.reveal(),
+            "dockerfile": dockerfile.as_ref().map(Filled::reveal),
+            "args": args,
+        });
+        taking.setting("build", &build);
+    }
+    if let Some(command) = &settings.command {
+        taking.values("command", command);
+    }
+    if let Some(entrypoint) = &settings.entrypoint {
+        taking.values("entrypoint", entrypoint);
+    }
+    settings.variables.take(&mut taking);
+    if !settings.volumes.is_empty() {
+        let volumes: Vec<_> = (settings.volumes.iter())
+            .map(|volume| {
+                let owner = volume.owner.as_ref().map(Filled::reveal);
+                (&volume.name.name, volume.to.reveal(), owner)
+            })
+            .collect();
+        taking.setting("volumes", &volumes);
+    }
+    if !settings.mounts.is_empty() {
+        let mounts: Vec<_> = settings
+            .mounts
+            .iter()
+            .map(|mount| mount.revealed())
+            .collect();
+        taking.setting("mounts", &mounts);
+    }
+    if !settings.tmpfs.is_empty() {
+        taking.values("tmpfs", &settings.tmpfs);
+    }
+    if !opened.is_empty() {
+        let publish: Vec<_> = (opened.iter())
+            .map(|port| {
+                let (address, host_port) = (port.address.reveal(), port.host_port.reveal());
+                (port.container_port, address, host_port)
+            })
+            .collect();
+        taking.setting("publish", &publish);
+    }
+    if !settings.aliases.is_empty() {
+        taking.setting("aliases", &settings.aliases);
+    }
+    for (label, value) in &settings.labels {
+        taking.value(format!("labels.{label}"), value);
+    }
+    let each = [
+        ("user", &settings.user),
+        ("workdir", &settings.workdir),
+        ("platform", &settings.platform),
+        ("read_only", &settings.read_only),
+        ("pids_limit", &settings.pids_limit),
+    ];
+    for (name, value) in each {
+        if let Some(value) = value {
+            taking.value(name, value);
         }
     }
-
-    fn kept(labels: &[(&str, &str)], secret: &str, image: &str) -> String {
-        fingerprint(&body(labels, secret), &[secret.to_string()], None, image)
+    if !settings.security_opt.is_empty() {
+        taking.values("security_opt", &settings.security_opt);
     }
-
-    #[test]
-    fn what_a_container_is_created_from_is_kept_without_its_secrets_and_in_one_order() {
-        let one = kept(
-            &[("a", "1"), ("b", "2"), ("c", "3")],
-            "TOKEN=hunter2",
-            "sha256:1",
-        );
-        let other = kept(
-            &[("c", "3"), ("a", "1"), ("b", "2")],
-            "TOKEN=hunter2",
-            "sha256:1",
-        );
-        assert_eq!(one, other);
-        assert!(!one.contains("hunter2"), "{one}");
-        assert!(one.contains("TOKEN") && one.contains("MODE=fast"), "{one}");
-        // Another image, or another secret's name, is another container;
-        // another secret's value is told by the container's environment.
-        let labels = &[("a", "1"), ("b", "2"), ("c", "3")];
-        assert_ne!(one, kept(labels, "TOKEN=hunter2", "sha256:2"));
-        assert_ne!(one, kept(labels, "KEY=hunter2", "sha256:1"));
-        assert_eq!(one, kept(labels, "TOKEN=other", "sha256:1"));
-    }
-
-    #[test]
-    fn a_container_was_created_from_these_settings_when_its_label_and_its_secrets_are_theirs() {
-        let creation = Creation {
-            body: body(&[], "TOKEN=hunter2"),
-            platform: None,
-            secrets: vec!["hunter2".to_string()],
-            secret_env: vec!["TOKEN=hunter2".to_string()],
-            settings: kept(&[], "TOKEN=hunter2", "sha256:1"),
-        };
-        let inspected = |settings: &str, env: &[&str]| ContainerInspectResponse {
-            config: Some(ContainerConfig {
-                labels: Some([(SETTINGS.to_string(), settings.to_string())].into()),
-                env: Some(env.iter().map(|entry| entry.to_string()).collect()),
-                ..ContainerConfig::default()
-            }),
-            ..ContainerInspectResponse::default()
-        };
-        let settings = creation.settings.clone();
-        assert!(creation.created_from(&inspected(&settings, &["PATH=/bin", "TOKEN=hunter2"])));
-        assert!(!creation.created_from(&inspected(&settings, &["TOKEN=other"])));
-        assert!(!creation.created_from(&inspected("{}", &["TOKEN=hunter2"])));
-    }
+    taking.taken()
 }

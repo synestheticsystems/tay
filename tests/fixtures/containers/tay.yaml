@@ -3,6 +3,7 @@ stack: boxes
 up: [ticker]
 settings:
   mode: { default: one, doc: "What the keeper is told, which a test changes to have it replaced." }
+  box: { default: "busybox:1.36", doc: "The image the tagged box runs, which a test names another way." }
 units:
   ticker:
     doc: Prints a numbered line a second, for ever.
@@ -53,6 +54,12 @@ units:
       image: busybox:1.36
       command: [sh, -c, "trap 'exit 0' TERM; sleep 3600 & wait"]
       mounts: [{ volume: keeper-data/data, to: /kept }]
+  tagged:
+    doc: Runs the image a setting names.
+    uses: container
+    with:
+      image: "${settings.box}"
+      command: [sh, -c, "trap 'exit 0' TERM; sleep 3600 & wait"]
   reader-user:
     doc: Needs the reader, and so holds through it what the reader mounts.
     uses: process

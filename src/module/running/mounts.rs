@@ -9,6 +9,7 @@ use crate::syntax::yaml::Node;
 use crate::module::description::{Concern, VolumeMount};
 use crate::module::settings::{Destination, Slot, maybe};
 use crate::module::want::{PathUse, Want};
+use crate::value::Filled;
 
 const MOUNT: Destination = Destination::Readable("a mount");
 
@@ -43,6 +44,23 @@ impl<V> Mount<V> {
             source: source?,
             to: to?,
             readonly: readonly?,
+        })
+    }
+}
+
+impl Mount<Filled> {
+    /// The mount with every value in it, as a fingerprint takes it.
+    pub fn revealed(&self) -> serde_json::Value {
+        let source = match &self.source {
+            Source::Host(from) => serde_json::json!({ "from": from.reveal() }),
+            Source::Volume(volume) => {
+                serde_json::json!({ "volume": [&volume.unit.name, &volume.volume.name] })
+            }
+        };
+        serde_json::json!({
+            "source": source,
+            "to": self.to.reveal(),
+            "readonly": self.readonly.as_ref().map(Filled::reveal),
         })
     }
 }

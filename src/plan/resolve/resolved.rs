@@ -28,6 +28,10 @@ pub struct Resolved {
     /// The units that are made whose values it is built from, each with the
     /// value used.
     pub made: BTreeMap<String, String>,
+    /// The files tay knows of that it is built from, each by name with its
+    /// path: one a unit that is made writes, named by the unit, or one a
+    /// command builds, named `unit.outputs.name`.
+    pub files: BTreeMap<String, Value>,
     /// The `publish` entries it reaches from the host: using it opens them.
     pub reached_entries: BTreeSet<ReachedEntry>,
     /// Whether it begins with a setting's value, written there directly or
@@ -44,6 +48,7 @@ impl Resolved {
             value,
             producers: BTreeMap::new(),
             made: BTreeMap::new(),
+            files: BTreeMap::new(),
             reached_entries: BTreeSet::new(),
             begins_with_setting: false,
             written_in: None,
@@ -55,8 +60,10 @@ impl Resolved {
     }
 
     /// Takes in what `other` is built from: its producers, the units that
-    /// are made it uses and the published ports it reaches.
+    /// are made it uses, the files it uses and the published ports it
+    /// reaches.
     pub fn absorb(&mut self, other: &Resolved) {
+        self.files.extend(other.files.clone());
         self.reached_entries
             .extend(other.reached_entries.iter().cloned());
         for (unit, value) in &other.producers {

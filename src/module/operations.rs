@@ -4,6 +4,7 @@
 //! module.
 
 mod attempts;
+mod fingerprint;
 
 use std::collections::BTreeMap;
 use std::error::Error;
@@ -16,8 +17,10 @@ use crate::disk::Environment;
 use crate::value::{Exact, Filled};
 
 pub use attempts::{
-    Comparing, Driving, Finding, Found, Outcome, ReadinessCommand, Running, Step, Steps, UnderWay,
+    Driving, Finding, Fingerprinting, Found, Outcome, ReadinessCommand, Running, Step, Steps,
+    UnderWay,
 };
+pub use fingerprint::{Fingerprint, Taking};
 
 /// The operations of one unit, from its filled settings.
 pub enum Operations {

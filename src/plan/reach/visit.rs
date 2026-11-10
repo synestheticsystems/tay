@@ -2,6 +2,8 @@
 //! uses resolved where it runs, what it needs and why, and how it is known
 //! to be ready and restarted.
 
+use std::collections::BTreeMap;
+
 use crate::definition::{Check, Mechanism};
 use crate::diagnostic::source::Loc;
 use crate::module::{Duration, RestartOn, Runs, Slot, UnitKind};
@@ -10,7 +12,7 @@ use crate::value::Value;
 
 use super::usage::{OpeningUse, User, Uses};
 use crate::plan::Planner;
-use crate::plan::model::{Because, PlannedMechanism, PlannedUnit, Readiness, Restart};
+use crate::plan::model::{Because, PlannedMechanism, PlannedUnit, Readiness, Restart, UsedFile};
 use crate::plan::resolve::{Asker, Chosen};
 
 /// The attempts a unit that restarts gets when its `restart` does not say.
@@ -105,9 +107,11 @@ impl<'s> Planner<'s> {
         uses: &mut Uses,
     ) -> Option<PlannedMechanism> {
         let description = &mechanism.description;
+        let mut files = BTreeMap::new();
         let settings = description.settings.resolve(&mut |slot| {
-            self.use_value(user, slot, uses)
-                .map(|resolved| resolved.value)
+            let resolved = self.use_value(user, slot, uses)?;
+            files.extend(resolved.files);
+            Some(resolved.value)
         });
         self.check_inside(&description.kind);
         let ready = self.readiness(user, mechanism, uses);
@@ -128,6 +132,9 @@ impl<'s> Planner<'s> {
             publishes: Vec::new(),
             mounts_volumes_of: (description.volume_mounts.iter())
                 .map(|mounted| mounted.unit.name.clone())
+                .collect(),
+            files: (files.into_iter())
+                .map(|(name, path)| UsedFile { name, path })
                 .collect(),
         })
     }
