@@ -108,7 +108,7 @@ pub fn plan(root: &Path, options: &Options, sources: &mut Sources, d: &mut Diagn
     if let (Some(profile), Some(marked_at)) = (profile, production) {
         planner.refuse_for_production(&profile.name, marked_at, &reached.chosen);
     }
-    planner.report_unset_settings();
+    planner.resolver.report_unset_settings();
     let plan = planner.finish(reached, &stack, profile);
     d.extend(planner.resolver.d);
     match plan {
@@ -145,27 +145,5 @@ fn choose_profile<'s>(
             [only] => Some(only),
             _ => None,
         },
-    }
-}
-
-impl Planner<'_> {
-    fn report_unset_settings(&mut self) {
-        let stack = self.resolver.stack;
-        for (name, uses) in std::mem::take(&mut self.resolver.unset) {
-            let Some(decl) = stack.setting(&name) else {
-                continue;
-            };
-            let mut uses = uses;
-            uses.sort();
-            uses.dedup();
-            let mut error = Diagnostic::new(
-                decl.name.loc,
-                format!("setting `{name}` has no value and no default, and the plan uses it"),
-            );
-            for loc in uses {
-                error = error.with(loc, "it is used here");
-            }
-            self.resolver.d.push(error);
-        }
     }
 }

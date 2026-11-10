@@ -95,7 +95,7 @@ pub struct Resolver<'s> {
     resolving: Vec<(Key, Loc)>,
     circles: HashSet<BTreeSet<Key>>,
     /// Each setting with no value and no default that the plan uses, and where.
-    pub unset: BTreeMap<String, Vec<Loc>>,
+    unset: BTreeMap<String, Vec<Loc>>,
 }
 
 impl<'s> Resolver<'s> {

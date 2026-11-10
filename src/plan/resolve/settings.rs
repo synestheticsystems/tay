@@ -2,7 +2,7 @@
 //! declared so.
 
 use crate::definition::SettingValue;
-use crate::diagnostic::Diagnostics;
+use crate::diagnostic::{Diagnostic, Diagnostics};
 use crate::expr::Type;
 use crate::plan::value::{Hole, Resolved, Shape};
 use crate::source::Loc;
@@ -10,6 +10,27 @@ use crate::source::Loc;
 use super::{Asker, Fail, Key, Res, Resolver, Scope};
 
 impl Resolver<'_> {
+    /// One error for each setting with no value and no default that the plan
+    /// uses, at its declaration and naming every use.
+    pub fn report_unset_settings(&mut self) {
+        let stack = self.stack;
+        for (name, mut uses) in std::mem::take(&mut self.unset) {
+            let Some(decl) = stack.setting(&name) else {
+                continue;
+            };
+            uses.sort();
+            uses.dedup();
+            let mut error = Diagnostic::new(
+                decl.name.loc,
+                format!("setting `{name}` has no value and no default, and the plan uses it"),
+            );
+            for loc in uses {
+                error = error.with(loc, "it is used here");
+            }
+            self.d.push(error);
+        }
+    }
+
     pub(super) fn setting(&mut self, name: &str, at: Loc, asker: Asker) -> Res {
         let Some(decl) = self.stack.setting(name) else {
             return self.fail(at, format!("no setting `{name}` is declared in tay.yaml"));
