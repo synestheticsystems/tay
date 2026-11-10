@@ -6,9 +6,10 @@
 use std::sync::Arc;
 
 use super::change::{Change, NotBegun};
+use super::up::conclude;
 use super::{Daemon, log};
 use crate::control::protocol::{Event, Restart};
-use crate::engine::{State, UnitState, runs};
+use crate::engine::{Outdated, State, UnitState, runs};
 use crate::plan::PlannedUnit;
 
 /// What a restart acts on: the units named, and with them what they need,
@@ -72,7 +73,13 @@ impl Daemon {
             .map(|planned| planned.name.clone())
             .collect();
         let settled = self
-            .settle(&change, &restarting.with_needs, &named, &mut Event::Decided)
+            .settle(
+                &change,
+                &restarting.with_needs,
+                &named,
+                Outdated::Replace,
+                &mut |decision| conclude(&change, Event::Decided(decision)),
+            )
             .await;
         self.end(&change, settled);
     }

@@ -9,7 +9,7 @@
 //! followed by one that becomes ready counts as ready. A unit that runs
 //! already is asked whether what runs of it was started from other settings
 //! than the plan now gives; if it was, it is replaced, and otherwise joined
-//! as it is.
+//! as it is. A bring-up that leaves what is up as it is joins it unasked.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
@@ -45,14 +45,27 @@ pub struct FailedUnit {
     pub waiting: Vec<String>,
 }
 
+/// What bringing a plan up does with a unit that runs already from other
+/// settings than the plan now gives.
+#[derive(Clone, Copy)]
+pub enum Outdated {
+    /// It is replaced, as `tay up` does.
+    Replace,
+    /// It is joined as it runs, as `tay run` does, which never replaces a
+    /// unit that is up.
+    Join,
+}
+
 /// Brings up `units`, in their order, until each has settled or `cancel`
-/// says to stop. `asked` are the units the decision is judged by, which goes
-/// to `decided` once it is made. Gives the decision; `None` when it was
-/// stopped before it was made.
+/// says to stop, doing with a unit that runs from other settings what
+/// `outdated` says. `asked` are the units the decision is judged by, which
+/// goes to `decided` once it is made. Gives the decision; `None` when it
+/// was stopped before it was made.
 pub async fn bring_up(
     supervisor: &Arc<Supervisor>,
     units: &[Arc<PlannedUnit>],
     asked: &[String],
+    outdated: Outdated,
     decided: &mut (dyn FnMut(Decision) + Send),
     noticed: &mut (dyn FnMut(String) + Send),
     mut cancel: watch::Receiver<bool>,
@@ -60,6 +73,7 @@ pub async fn bring_up(
     let mut bringing = Bringing {
         supervisor,
         units,
+        outdated,
         started: vec![false; units.len()],
         settled: Settled::default(),
         running: HashSet::new(),
@@ -228,6 +242,7 @@ async fn until_cancelled(cancel: &mut watch::Receiver<bool>) {
 struct Bringing<'a> {
     supervisor: &'a Arc<Supervisor>,
     units: &'a [Arc<PlannedUnit>],
+    outdated: Outdated,
     started: Vec<bool>,
     settled: Settled,
     /// The units that run, handed to the supervisor, not yet ready or
@@ -293,9 +308,12 @@ impl Bringing<'_> {
                     .operations(&mut |placeholder| self.supervisor.fill(placeholder, &given));
                 match operations {
                     // What runs already is compared with the settings the plan
-                    // gives it; one whose settings cannot be filled now is
-                    // joined as it runs.
-                    Ok(Operations::Running(running)) if tended => {
+                    // gives it, unless it is to be joined whatever they are;
+                    // one whose settings cannot be filled now is joined as
+                    // it runs.
+                    Ok(Operations::Running(running))
+                        if tended && matches!(self.outdated, Outdated::Replace) =>
+                    {
                         started.tended.push((index, running));
                     }
                     _ if tended => self.join(index),

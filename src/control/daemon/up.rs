@@ -6,7 +6,7 @@ use super::change::Change;
 use super::{Daemon, log, options, planned};
 use crate::control::protocol::{Event, UpRequest};
 use crate::disk::{Asked, Intent};
-use crate::engine::{self, Decision};
+use crate::engine::{self, Decision, Outdated};
 use crate::module::Occasion;
 use crate::plan::{Options, Plan, PlannedUnit};
 
@@ -86,7 +86,9 @@ impl Daemon {
             }
         }
         let settled = self
-            .settle(change, &units, &asked, &mut Event::Decided)
+            .settle(change, &units, &asked, Outdated::Replace, &mut |decision| {
+                conclude(change, Event::Decided(decision));
+            })
             .await;
         self.end(change, settled);
     }
@@ -149,29 +151,31 @@ impl Daemon {
         Some(units)
     }
 
-    /// Brings up `units`, in their order, until each has settled, telling
-    /// `change`'s followers each change of state and, once it is decided
-    /// whether everything in `asked` is ready, the event `said` makes of
-    /// the decision, which is the last they are told. Why the change came
-    /// to no decision though nothing cancelled it, when it did not.
+    /// Brings up `units`, in their order, until each has settled, doing
+    /// with a unit that runs from other settings what `outdated` says, and
+    /// telling `change`'s followers each change of state; once it is
+    /// decided whether everything in `asked` is ready, the decision goes to
+    /// `decided`. Why the change came to no decision though nothing
+    /// cancelled it, when it did not.
     pub(super) async fn settle(
         &self,
         change: &Arc<Change>,
         units: &[Arc<PlannedUnit>],
         asked: &[String],
-        said: &mut (dyn FnMut(Decision) -> Event + Send),
+        outdated: Outdated,
+        decided: &mut (dyn FnMut(Decision) + Send),
     ) -> Result<(), String> {
-        let mut decided = |decision: Decision| {
+        let mut logged = |decision: Decision| {
             log(&format!("{}: {}", change.describe(), words(&decision)));
-            change.say(said(decision));
-            change.close();
+            decided(decision);
         };
         let mut noticed = |notice: String| change.say(Event::Notice { notice });
         let decided = engine::bring_up(
             &self.supervisor,
             units,
             asked,
-            &mut decided,
+            outdated,
+            &mut logged,
             &mut noticed,
             change.cancelled(),
         )
@@ -207,6 +211,13 @@ impl Daemon {
         });
         self.finish(change);
     }
+}
+
+/// Tells `change`'s followers `event`, the last thing they are told,
+/// though the change may go on.
+pub(super) fn conclude(change: &Change, event: Event) {
+    change.say(event);
+    change.close();
 }
 
 /// The decision as the daemon's log says it.

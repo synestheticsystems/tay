@@ -37,8 +37,7 @@ impl Asked {
     }
 
     pub fn write(&self, layout: &Layout) -> Result<(), DiskError> {
-        let state = layout.state();
-        std::fs::create_dir_all(&state).map_err(DiskError::io(&state, "made"))?;
+        layout.make_state()?;
         let json = serde_json::to_string_pretty(self).expect("what was asked serializes");
         write_whole(&layout.asked(), format!("{json}\n").as_bytes(), 0o600)
     }

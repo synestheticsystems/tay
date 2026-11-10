@@ -59,6 +59,13 @@ impl Layout {
         self.folder().join("state")
     }
 
+    /// Makes `state/` if it is not there yet, as it is not until something
+    /// of the environment is first kept.
+    pub fn make_state(&self) -> Result<(), DiskError> {
+        let state = self.state();
+        std::fs::create_dir_all(&state).map_err(DiskError::io(&state, "made"))
+    }
+
     /// `state/intent`: whether the environment is meant to be up.
     pub fn intent(&self) -> PathBuf {
         self.state().join("intent")

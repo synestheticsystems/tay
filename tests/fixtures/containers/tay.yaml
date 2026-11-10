@@ -59,12 +59,20 @@ units:
 
   quiet-port: { uses: port }
   quiet:
-    doc: Publishes a port that nothing uses from the host, so it is not opened.
+    doc: Publishes a port that nothing uses from the host, so it is not opened, but for an action.
     uses: container
     with:
       image: busybox:1.36
       command: [sh, -c, "trap 'exit 0' TERM; nc -lk -p 9090 -e cat & wait"]
       publish: { 9090: "${quiet-port.number}" }
+    gives:
+      echo: { port: 9090 }
+  ask-quiet:
+    doc: Talks to the quiet box from the host, which opens its port.
+    action: true
+    needs: [quiet]
+    uses: command
+    with: { run: [sh, -c, "echo asked ${quiet.echo}"] }
 
   host-port: { uses: port }
   host-page:

@@ -1,13 +1,14 @@
 //! `tay run ACTION [NAME=VALUE...]`: an action is run with its arguments,
-//! checked before anything runs, after what it needs is brought up; what
-//! it writes is printed as it writes it, and then each value it produced,
-//! by name, a secret one never; `tay run` exits as the action did, and
-//! nothing the action gave is kept.
+//! checked before anything runs, after what it needs is brought up, on an
+//! environment up or down; what it writes is printed as it writes it, and
+//! then each value it produced, by name, a secret one never; `tay run`
+//! exits as the action did, nothing the action gave is kept, and what was
+//! brought up for it is stopped again.
 
 use std::fs;
 use std::path::Path;
 
-use crate::harness::Machine;
+use crate::harness::{Machine, alive, child};
 
 /// Every file under `folder`, with what it holds, as text.
 fn every_file(folder: &Path) -> Vec<(String, String)> {
@@ -128,15 +129,25 @@ fn run_prints_each_line_the_action_writes_while_it_runs() {
 }
 
 #[test]
-fn run_brings_up_what_the_action_needs_first() {
+fn run_brings_up_what_the_action_needs_first_and_stops_it_again_after() {
     let machine = Machine::new();
     let root = machine.stack("run");
     assert_eq!(machine.at(&root, "up", &[]).code, 0);
+    let web = child(&root, "web");
     // Nothing in `up` needs the worker, which is brought up for the seed.
     let run = machine.at(&root, "run", &["seed"]);
     assert_eq!(run.code, 0, "{}{}", run.stdout, run.stderr);
     assert_eq!(run.stdout, "the worker is up\n");
     assert!(run.stderr.contains("  worker  ready"), "{}", run.stderr);
+    // The worker was stopped again before `tay run` returned; what was up
+    // is left as it runs.
+    assert!(!alive(child(&root, "worker")));
+    let status = machine.at(&root, "status", &["--json"]).json();
+    assert_eq!(
+        Machine::state(&status, "web").split(' ').next(),
+        Some("ready")
+    );
+    assert_eq!(child(&root, "web"), web);
 }
 
 #[test]
@@ -179,21 +190,29 @@ fn an_action_or_argument_that_does_not_fit_is_an_error_before_anything_runs() {
 }
 
 #[test]
-fn run_on_an_environment_that_is_down_is_refused() {
+fn run_on_an_environment_that_is_down_brings_up_what_it_needs_and_leaves_it_down() {
     let machine = Machine::new();
     let root = machine.stack("run");
-    let never = machine.at(&root, "run", &["fail"]);
-    assert_eq!(
-        (never.code, never.stderr.as_str()),
-        (
-            4,
-            "tay run: the environment is down: `tay up` brings it up\n"
-        )
+    // Never brought up, the environment is down, and the action runs.
+    let never = machine.at(&root, "run", &["mint", "user=alice"]);
+    assert_eq!(never.code, 0, "{}{}", never.stdout, never.stderr);
+    assert!(
+        never.stdout.starts_with("minting for alice\n"),
+        "{}",
+        never.stdout
+    );
+    assert!(never.stderr.contains("  web   ready"), "{}", never.stderr);
+    // What it needed was stopped again, and nothing is meant to be up.
+    assert!(!alive(child(&root, "web")));
+    assert_ne!(
+        fs::read_to_string(root.join(".tay/state/intent"))
+            .unwrap_or_default()
+            .trim(),
+        "up"
     );
     assert_eq!(machine.at(&root, "up", &[]).code, 0);
     assert_eq!(machine.at(&root, "down", &[]).code, 0);
-    let down = machine.at(&root, "run", &["fail"]);
-    assert_eq!(down.code, 4, "{}{}", down.stdout, down.stderr);
-    assert!(!root.join(".tay/logs/fail").exists(), "nothing ran");
-    assert!(machine.daemon(&root).is_none());
+    let down = machine.at(&root, "run", &["fail", "code=7"]);
+    assert_eq!(down.code, 7, "{}{}", down.stdout, down.stderr);
+    assert_eq!(down.stdout, "failing with 7\n");
 }

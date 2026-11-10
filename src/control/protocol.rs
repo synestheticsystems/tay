@@ -192,6 +192,9 @@ pub enum Event {
     /// `tay wipe --all`: what was asked is removed, and nothing is brought
     /// up.
     Wiped,
+    /// The change was refused as things stand, once the daemon could tell,
+    /// and nothing of it was done.
+    Refused(Refused),
     /// The end of `tay run`: what bringing the action up came to, how its
     /// own program exited when it came to an end, as a shell gives the exit
     /// status, and the values it produced.
@@ -224,6 +227,7 @@ impl Event {
             | Event::Cancelled { .. }
             | Event::Down { .. }
             | Event::Problem { .. }
+            | Event::Refused(_)
             | Event::Ran { .. }
             | Event::Wiped => true,
         }
@@ -240,6 +244,9 @@ pub enum Refused {
     AnotherChange { change: String, since: u64 },
     /// What was asked needs something that is not up, as said.
     NotUp { problem: String },
+    /// What was asked could be done only by replacing a unit that is up,
+    /// as said.
+    WouldReplace { problem: String },
 }
 
 impl Refused {
@@ -259,7 +266,7 @@ impl fmt::Display for Refused {
                 "another change is running: `{change}`, since {}",
                 crate::clock::utc(*since)
             ),
-            Refused::NotUp { problem } => f.write_str(problem),
+            Refused::NotUp { problem } | Refused::WouldReplace { problem } => f.write_str(problem),
         }
     }
 }

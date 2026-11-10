@@ -31,6 +31,35 @@ pub struct Plan {
     pub uses_host_listen: bool,
 }
 
+impl Plan {
+    /// Each unit of this plan, with a published port of it, that this plan
+    /// opens and `other` does not: what runs of the unit as `other` gives
+    /// it would have to be replaced to run as this plan does.
+    pub fn opening_more_than(&self, other: &Plan) -> Vec<(&str, i64)> {
+        let opened = |plan: &Plan, unit: &str, port: i64| {
+            plan.units
+                .iter()
+                .filter(|planned| planned.name == unit)
+                .filter_map(|planned| planned.mechanism.as_ref())
+                .flat_map(|mechanism| &mechanism.publishes)
+                .any(|published| published.container_port == port && published.opening.is_some())
+        };
+        let mut more = Vec::new();
+        for planned in &self.units {
+            let Some(mechanism) = &planned.mechanism else {
+                continue;
+            };
+            for published in &mechanism.publishes {
+                let port = published.container_port;
+                if published.opening.is_some() && !opened(other, &planned.name, port) {
+                    more.push((planned.name.as_str(), port));
+                }
+            }
+        }
+        more
+    }
+}
+
 #[derive(Debug)]
 pub struct PlannedUnit {
     pub name: String,

@@ -37,8 +37,7 @@ impl Intent {
     }
 
     pub fn write(self, layout: &Layout) -> Result<(), DiskError> {
-        let state = layout.state();
-        std::fs::create_dir_all(&state).map_err(DiskError::io(&state, "made"))?;
+        layout.make_state()?;
         write_whole(
             &layout.intent(),
             format!("{}\n", self.word()).as_bytes(),

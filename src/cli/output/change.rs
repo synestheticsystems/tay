@@ -89,6 +89,7 @@ impl Printer {
             }
             Event::Down { left } if left.is_empty() => Some(Exit::Done),
             Event::Down { .. } => Some(Exit::Failed),
+            Event::Refused(_) => Some(Exit::Refused),
         };
         if self.json {
             self.json_line(&event);
@@ -139,6 +140,7 @@ impl Printer {
                 }
             }
             Event::Problem { problem } => err(&format!("{command}: {problem}\n")),
+            Event::Refused(refused) => err(&format!("{command}: {refused}\n")),
             Event::Output { line } => {
                 out(&format!("{line}\n"));
             }
@@ -236,6 +238,9 @@ impl Printer {
                 "left": left.iter().map(|left| json!({ "unit": left.unit, "reason": left.reason })).collect::<Vec<_>>(),
             }),
             Event::Problem { problem } => json!({ "event": "problem", "problem": problem }),
+            Event::Refused(refused) => {
+                json!({ "event": "refused", "problem": refused.to_string() })
+            }
             Event::Output { line } => json!({ "event": "output", "line": line }),
             Event::Removed { unit, removed } => {
                 json!({ "event": "removed", "unit": unit, "removed": removed })

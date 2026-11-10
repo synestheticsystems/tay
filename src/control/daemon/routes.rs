@@ -67,7 +67,6 @@ pub async fn route(
         },
         (Method::POST, protocol::RUN) => match asked::<RunRequest>(request, "tay run").await {
             Ok(run) => begin(&daemon, Kind::Run(run.clone()), |change| {
-                daemon.meant_to_be_up()?;
                 Ok(Arc::clone(&daemon).run_action(change, run))
             }),
             Err(problem) => json(StatusCode::BAD_REQUEST, &problem),

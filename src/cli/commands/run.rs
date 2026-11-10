@@ -1,21 +1,23 @@
 //! `tay run ACTION [NAME=VALUE...]`: runs a unit that has `action: true`,
-//! with its arguments, after bringing up what it needs. The arguments are
-//! checked as the plan is made, before anything runs. It prints what the
-//! action writes as it writes it, then each value the action produced, by
-//! name, a secret one never; and it exits as the action did. Nothing of
-//! what the action gave is kept.
+//! with its arguments, after bringing up what it needs, on an environment
+//! that is up or down, which it leaves as it found it. The daemon makes
+//! it, and is started if none runs. The arguments are checked as the plan
+//! is made, before anything runs. It prints what the action writes as it
+//! writes it, then each value the action produced, by name, a secret one
+//! never; and it exits as the action did. Nothing of what the action gave
+//! is kept.
 
 use crate::cli::Exit;
 use crate::cli::args::{Args, Takes, Words};
 use crate::cli::output::change::Printer;
 use crate::cli::stack;
-use crate::control::client::ClientError;
-use crate::control::protocol::{Refused, RunRequest};
-use crate::disk::{Environment, Identity, Layout};
+use crate::control::client::Client;
+use crate::control::protocol::RunRequest;
+use crate::disk::{Environment, Layout};
 use crate::plan::ActionRun;
 
 use super::plan::{no_stack, options, planned};
-use super::{block_on, client_problem, daemon_for_up, disk_problem, machine, problem};
+use super::{block_on, client_problem, disk_problem, forget_what_is_gone, machine, problem};
 
 pub const TAKES: Takes = Takes {
     command: "tay run",
@@ -55,22 +57,24 @@ pub fn run(args: Args) -> Exit {
         Ok(machine) => machine,
         Err(exit) => return exit,
     };
-    let environment = match Environment::identify(&Layout::of(&root), &machine) {
-        Ok(Identity::Own(environment)) => environment,
-        Ok(Identity::New | Identity::CopyOf { .. }) => {
-            let refused = ClientError::Refused(Refused::environment_down());
-            return client_problem(COMMAND, &refused);
-        }
-        Err(error) => return disk_problem(COMMAND, &error),
-    };
     let request = RunRequest {
         run,
         home: options.home,
     };
     let ended = block_on(COMMAND, async {
-        let client = match daemon_for_up(COMMAND, &environment).await {
+        // An environment never brought up is down, and is given its id as
+        // `tay up` gives it, since what the action needs is kept by it.
+        let established = match forget_what_is_gone(&machine).await {
+            Ok(_) => Environment::establish(&Layout::of(&root), &machine),
+            Err(error) => Err(error),
+        };
+        let environment = match established {
+            Ok(environment) => environment,
+            Err(error) => return disk_problem(COMMAND, &error),
+        };
+        let client = match Client::ensure(&environment).await {
             Ok(client) => client,
-            Err(exit) => return exit,
+            Err(error) => return client_problem(COMMAND, &error),
         };
         let mut printer = Printer::beside_output(COMMAND, args.json);
         if let Err(error) = client
