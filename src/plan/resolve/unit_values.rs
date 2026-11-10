@@ -51,8 +51,19 @@ impl Resolver<'_> {
                 &names,
             ));
         };
-        if part.is_some() && !matches!(give.value, GiveValue::Endpoint(_)) {
-            return self.fail(reference_errors::not_an_endpoint(reference, name));
+        // What is wrong with the reference itself is reported at it, before
+        // the value is resolved once and remembered for every reference.
+        match &give.value {
+            GiveValue::Endpoint(endpoint)
+                if part == Some(Part::Url) && endpoint.scheme.is_none() =>
+            {
+                return self.fail(reference_errors::no_scheme(reference));
+            }
+            GiveValue::Endpoint(_) => {}
+            _ if part.is_some() => {
+                return self.fail(reference_errors::not_an_endpoint(reference, name));
+            }
+            _ => {}
         }
         let key = Key {
             unit: owner,

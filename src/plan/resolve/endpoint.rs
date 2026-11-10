@@ -8,7 +8,7 @@
 //! An endpoint that writes its `host` has no views: everyone gets that host
 //! and that port.
 
-use crate::definition::{Endpoint, reference_errors};
+use crate::definition::Endpoint;
 use crate::diagnostic::Diagnostic;
 use crate::module::{Form, HOST_IN_CONTAINERS, Published, Runs, UnitKind, Want};
 use crate::syntax::expr::{Expr, Part, Reference};
@@ -89,9 +89,9 @@ impl<'s> Resolver<'s> {
                 });
             }
             Some(Part::Url) => {
-                let Some(scheme) = &scheme else {
-                    return self.fail(reference_errors::no_scheme(reference));
-                };
+                let scheme = scheme
+                    .as_ref()
+                    .expect("a URL is asked for only of an endpoint with a scheme");
                 bits.extend(scheme.value.bits());
                 bits.push(Bit::Text("://".to_string()));
                 bits.extend(host.value.bits());

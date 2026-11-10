@@ -1,0 +1,17 @@
+format: 1
+stack: url-without-scheme
+up: [first, second]
+run: { default: bare }
+units:
+  server:
+    run:
+      full:
+        uses: process
+        with: { command: [serve] }
+        gives: { api: { port: 8080, scheme: http } }
+      bare:
+        uses: process
+        with: { command: [serve] }
+        gives: { api: { port: 8080 } }
+  first: { uses: process, with: { command: [a], env: { U: "${server.api.url}" } } }
+  second: { uses: process, with: { command: [b], env: { U: "${server.api.url}" } } }

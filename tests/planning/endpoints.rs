@@ -221,3 +221,21 @@ fn each_part_of_an_endpoint_is_checked_once_resolved() {
         ]
     );
 }
+
+#[test]
+fn a_url_asked_of_an_endpoint_with_no_scheme_is_an_error_at_every_reference() {
+    // Only the way chosen, `bare`, has no scheme, so this is found while
+    // planning; the value is remembered, and each reference still says so.
+    let run = plan("url-without-scheme", &[]);
+    assert_eq!(
+        run.errors(),
+        [
+            "tay.yaml:16:60: `${server.api.url}`: the endpoint has no `scheme`, so it has no URL",
+            "tay.yaml:17:61: `${server.api.url}`: the endpoint has no `scheme`, so it has no URL",
+        ]
+    );
+    assert_eq!(
+        plan("url-without-scheme", &["--set", "run.default=full"]).code,
+        0
+    );
+}
