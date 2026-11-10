@@ -178,8 +178,6 @@ Every line a unit writes while its keeper runs reaches `.tay/logs/<unit>/` with 
 
 ## Containers
 
-*Not built.*
-
 Docker is a container's parent: it keeps the exit code, says whether the container was killed for memory, holds its output with the time of each line, and lists it by label. So a container needs no keeper, and everything below is asked of Docker, never remembered.
 
 **What belongs to an environment.** One network, named `tay-<id>`, made when the first container needs it. Every container, volume and network tay creates carries the labels `tay.environment` (the id) and `tay.unit`. A container is named `tay-<id>-<unit>`, and on the network it answers to its unit's name and its `aliases`. Nothing without the environment's label is ever stopped, removed or changed.
