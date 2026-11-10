@@ -219,6 +219,19 @@ impl<'s> Resolver<'s> {
                 ty: Some(Type::Text),
                 hole: Hole::HostListen,
             })),
+            Target::Arg(name) => {
+                // An action's arguments were checked against its declaration
+                // while reading, in the unit the reference is written in.
+                let ty = scope
+                    .unit
+                    .and_then(|unit| self.stack.units[unit].action.as_ref())
+                    .and_then(|action| action.args.iter().find(|arg| arg.name.name == *name))
+                    .and_then(|arg| arg.ty);
+                Ok(Resolved::known(Shape::Opaque {
+                    ty,
+                    hole: Hole::Arg(name.clone()),
+                }))
+            }
             Target::Param(_) => self.fail(
                 reference.loc,
                 format!(

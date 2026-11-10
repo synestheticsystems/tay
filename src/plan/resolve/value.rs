@@ -24,6 +24,8 @@ pub enum Hole {
         unit: String,
         name: String,
     },
+    /// An action's argument, given when the action is asked for.
+    Arg(String),
     HostListen,
     EnvironmentId,
     EnvironmentNetwork,
@@ -36,6 +38,7 @@ impl Hole {
             Hole::Secret => "<secret>".to_string(),
             Hole::Generated { unit, name } => format!("<generated: {unit}.{name}>"),
             Hole::Produced { unit, name } => format!("<produced: {unit}.{name}>"),
+            Hole::Arg(name) => format!("<arg: {name}>"),
             Hole::HostListen => "<host.listen>".to_string(),
             Hole::EnvironmentId => "<environment.id>".to_string(),
             Hole::EnvironmentNetwork => "<environment.network>".to_string(),

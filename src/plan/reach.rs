@@ -95,7 +95,7 @@ impl Planner<'_> {
             .filter(|need| needed.contains(&need.unit))
         {
             let needed = &stack.units[need.unit];
-            if needed.action && !named.contains(&need.unit) {
+            if needed.action.is_some() && !named.contains(&need.unit) {
                 self.resolver.d.push(Diagnostic::new(
                     need.loc,
                     format!(

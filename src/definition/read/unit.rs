@@ -3,7 +3,7 @@
 
 use std::borrow::Cow;
 
-use crate::definition::{Give, GiveValue, ModuleUse, Ready, Restart, Unit, Way};
+use crate::definition::{Action, Give, GiveValue, ModuleUse, Ready, Restart, Unit, Way};
 use crate::diagnostic::{Diagnostic, Diagnostics};
 use crate::module::{self, Cx, Module, UnitKind};
 use crate::syntax::expr::Expr;
@@ -18,7 +18,7 @@ use template::Template;
 
 pub const UNIT_FIELDS: &[&str] = &[
     "doc", "uses", "with", "run", "from", "params", "needs", "after", "ready", "restart", "watch",
-    "gives", "action",
+    "gives", "action", "args",
 ];
 
 const WAY_FIELDS: &[&str] = &[
@@ -40,7 +40,7 @@ pub fn unreadable(name: NameAt) -> Unit {
     Unit {
         name,
         doc: None,
-        action: false,
+        action: None,
         ways: Vec::new(),
     }
 }
@@ -90,10 +90,22 @@ pub fn read_fields(name: NameAt, fields: &Fields<'_>, d: &mut Diagnostics) -> Un
         .get("doc")
         .and_then(|node| fields::text(node, "`doc`", d))
         .map(str::to_string);
-    let action = fields
+    let is_action = fields
         .get("action")
         .and_then(|node| fields::boolean(node, "`action`", d))
         .unwrap_or(false);
+    let args = match fields.entry("args") {
+        Some((_, args)) if is_action => parts::args(args, d),
+        Some((key, _)) => {
+            d.error(
+                key.loc,
+                "`args` goes with `action: true`: only an action is asked for with arguments",
+            );
+            Vec::new()
+        }
+        None => Vec::new(),
+    };
+    let action = is_action.then_some(Action { args });
     if let Some((key, _)) = fields.entry("params") {
         d.error(key.loc, "`params` goes with `from`: they fill a template");
     }

@@ -1,0 +1,15 @@
+format: 1
+stack: action-errors
+up: []
+units:
+  plain:
+    uses: port
+    args: { x: {} }
+  other:
+    uses: port
+    gives: { x: "${args.x}" }
+  mint:
+    uses: command
+    action: true
+    args: { user: {} }
+    with: { run: [mint, "${args.nobody}"] }

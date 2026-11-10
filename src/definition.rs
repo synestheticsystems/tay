@@ -43,7 +43,8 @@ impl Stack {
 pub struct Unit {
     pub name: NameAt,
     pub doc: Option<String>,
-    pub action: bool,
+    /// `Some` for a unit that runs only when asked for by name.
+    pub action: Option<Action>,
     /// The ways the unit can run: one, unnamed, for a unit with `uses` (or a
     /// group, whose way has no module), and one per name under `run`. Empty
     /// when the unit's definition could not be read, so that other units may
@@ -70,6 +71,21 @@ impl Unit {
             .filter_map(|way| way.name.as_ref().map(|name| name.name.as_str()))
             .collect()
     }
+}
+
+/// What an action may be asked with.
+#[derive(Debug)]
+pub struct Action {
+    pub args: Vec<Arg>,
+}
+
+/// An argument an action declares, used as `${args.name}`.
+#[derive(Debug)]
+pub struct Arg {
+    pub name: NameAt,
+    /// The type of its default; `None` when it has none, and so takes the
+    /// type of whatever it is asked with.
+    pub ty: Option<Type>,
 }
 
 /// One way a unit runs, with what the unit writes for all its ways joined in.

@@ -213,6 +213,27 @@ fn reference_target(
             reference.loc,
             format!("`{written}` is a template's parameter, and this is not in a template"),
         ),
+        Target::Arg(name) => match this.map(|unit| (unit, &unit.action)) {
+            Some((_, Some(action))) if action.args.iter().any(|arg| arg.name.name == *name) => {}
+            Some((unit, Some(_))) => d.error(
+                reference.loc,
+                format!(
+                    "`{written}`: action `{}` declares no argument `{name}`",
+                    unit.name.name
+                ),
+            ),
+            Some((unit, None)) => d.error(
+                reference.loc,
+                format!(
+                    "`{written}` is an action's argument, and unit `{}` is not an action",
+                    unit.name.name
+                ),
+            ),
+            None => d.error(
+                reference.loc,
+                format!("`{written}` is an action's argument, and this is not in a unit"),
+            ),
+        },
         Target::Environment(_) | Target::HostListen => {}
     }
 }

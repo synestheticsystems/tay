@@ -11,3 +11,11 @@ units:
     uses: port
     after: [logger]
   needs-seed: { uses: port, needs: [seed] }
+  mint:
+    uses: command
+    action: true
+    args:
+      user: {}
+      hours: { default: 8 }
+    with: { run: [mint, --user, "${args.user}", --hours, "${args.hours}"] }
+    gives: { user: "${args.user}", hours: "${args.hours}" }

@@ -1,12 +1,28 @@
 //! The fields every unit has, whatever module it uses: the values it gives,
 //! its readiness check, its restart policy and the folders it watches.
 
-use crate::definition::{Check, Endpoint, Give, GiveValue, Ready, Restart};
+use crate::definition::{Arg, Check, Endpoint, Give, GiveValue, Ready, Restart};
 use crate::diagnostic::Diagnostics;
 use crate::syntax::expr::{self, Expr};
 use crate::syntax::fields::{self, Fields};
 use crate::syntax::names;
 use crate::syntax::yaml::Node;
+
+/// An action's `args`, declared as a template declares its parameters: by
+/// name, each with a `default` or none.
+pub fn args(node: &Node, d: &mut Diagnostics) -> Vec<Arg> {
+    fields::keyed(node, "an argument", names::value_name_problem, d)
+        .into_iter()
+        .filter_map(|(name, decl)| {
+            let decl = Fields::of(decl, "an argument's declaration", &["default"], d)?;
+            let ty = match decl.get("default") {
+                Some(default) => Some(fields::literal(default, "an argument's default", d)?.ty()),
+                None => None,
+            };
+            Some(Arg { name, ty })
+        })
+        .collect()
+}
 
 pub fn gives(node: &Node, d: &mut Diagnostics) -> Vec<Give> {
     fields::keyed(node, "a value's name", names::value_name_problem, d)

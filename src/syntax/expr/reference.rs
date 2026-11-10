@@ -38,6 +38,8 @@ pub enum Target {
     Environment(EnvField),
     HostListen,
     Param(String),
+    /// `${args.name}`: an action's argument.
+    Arg(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -163,6 +165,13 @@ pub fn parse_target(inner: &str) -> Result<Target, String> {
         ["params", ..] => Err(format!(
             "`{written}` must name one parameter: `${{params.name}}`"
         )),
+        ["args", name] => match names::value_name_problem(name) {
+            None => no_view(Target::Arg((*name).to_string())),
+            Some(problem) => Err(format!("`{written}`: {problem}")),
+        },
+        ["args", ..] => Err(format!(
+            "`{written}` must name one argument: `${{args.name}}`"
+        )),
         [unit, rest @ ..] => {
             let unit = if *unit == "self" {
                 UnitRef::This
@@ -277,6 +286,7 @@ mod tests {
             parse_target("params.name"),
             Ok(Target::Param("name".into()))
         );
+        assert_eq!(parse_target("args.user"), Ok(Target::Arg("user".into())));
     }
 
     #[test]
@@ -291,6 +301,7 @@ mod tests {
             "environment.home",
             "host.name",
             "params.a.b",
+            "args.a.b",
             "build.outputs",
         ] {
             assert!(parse_target(bad).is_err(), "{bad} should be refused");
