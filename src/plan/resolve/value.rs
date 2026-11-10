@@ -80,6 +80,9 @@ pub struct Resolved {
     /// The published ports it reaches from the host, by container unit and
     /// container port: using it opens them.
     pub published_uses: BTreeSet<(String, i64)>,
+    /// Whether it begins with a setting's value, written there directly or
+    /// reached through a value that begins with one.
+    pub begins_with_setting: bool,
 }
 
 /// A value exactly, when all of it is known before start and none of it is secret.
@@ -98,6 +101,7 @@ impl Resolved {
             producers: BTreeMap::new(),
             made: BTreeMap::new(),
             published_uses: BTreeSet::new(),
+            begins_with_setting: false,
         }
     }
 

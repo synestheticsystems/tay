@@ -43,10 +43,17 @@ impl Resolver<'_> {
     /// Whether `path` lies in the environment's state folder or in the
     /// shared folder, which tay makes when they are missing.
     pub fn in_own_folders(&self, path: &Path) -> bool {
+        normalized(path).starts_with(&self.environment.state) || self.in_shared_folder(path)
+    }
+
+    /// Whether `path` lies in the folder all of one person's environments of
+    /// this stack share.
+    pub fn in_shared_folder(&self, path: &Path) -> bool {
         let path = normalized(path);
-        std::iter::once(&self.environment.state)
-            .chain(&self.environment.shared)
-            .any(|folder| path.starts_with(folder))
+        self.environment
+            .shared
+            .as_ref()
+            .is_some_and(|shared| path.starts_with(shared))
     }
 }
 

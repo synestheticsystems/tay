@@ -49,6 +49,7 @@ impl Resolver<'_> {
             Literal::Number(n) => Resolved::known(Shape::Number(n)),
             Literal::Bool(b) => Resolved::known(Shape::Bool(b)),
         };
+        resolved.begins_with_setting = true;
         if decl.secret {
             resolved.shape = Shape::Opaque {
                 ty: Some(decl.ty),

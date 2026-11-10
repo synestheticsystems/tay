@@ -30,6 +30,11 @@ units:
         - { from: config, to: /config }
         - { from: "${settings.certs}", to: /certs }
         - { from: "${environment.state}/inside", to: /state }
+        - { from: "${environment.shared}/cache", to: /cache }
+        - { from: "${holder.certs}", to: /more-certs }
+  holder:
+    uses: port
+    gives: { certs: "${settings.certs}/." }
   setup:
     uses: command
     with: { in: inside, run: [setup] }

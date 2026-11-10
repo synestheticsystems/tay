@@ -6,7 +6,7 @@ use std::path::Path;
 use crate::diagnostic::Diagnostic;
 use crate::diagnostic::source::Loc;
 use crate::module::{Concern, Runs, UnitKind};
-use crate::syntax::expr::{Expr, ExprKind, Piece, Target};
+use crate::syntax::expr::Expr;
 use crate::syntax::names::NameAt;
 
 use super::Planner;
@@ -47,7 +47,7 @@ impl Planner<'_> {
                 }
             }
             if let Some(first) = way.watch.first() {
-                refusals.push((first.loc, "it watches folders".to_string()));
+                refusals.push((first.loc, "it watches files or folders".to_string()));
             }
             for (loc, why) in refusals {
                 let mut error = Diagnostic::new(
@@ -67,19 +67,10 @@ impl Planner<'_> {
     }
 
     /// Why a mount's source is refused, if it is: it is refused when it is
-    /// outside the stack's own folders and not named by a setting.
+    /// neither under the stack's root (which holds the state folder) nor in
+    /// the shared folder, and does not begin with a setting's value, which
+    /// is where a production environment says what of its machine to mount.
     fn mount_outside(&mut self, unit: usize, from: &Expr, asker: Asker) -> Option<String> {
-        let named_by_setting = match &from.kind {
-            ExprKind::Ref(reference) => matches!(reference.target, Target::Setting(_)),
-            ExprKind::Text(pieces) => matches!(
-                pieces.first(),
-                Some(Piece::Ref(reference)) if matches!(reference.target, Target::Setting(_))
-            ),
-            ExprKind::Number(_) | ExprKind::Bool(_) => false,
-        };
-        if named_by_setting {
-            return None;
-        }
         let scope = Scope {
             unit: Some(unit),
             asker,
@@ -87,13 +78,20 @@ impl Planner<'_> {
         // The source is also one of the unit's slots, so a failure to resolve
         // it has been reported where the unit's values were used.
         let value = self.resolver.resolve(from, scope).ok()?;
+        if value.begins_with_setting {
+            return None;
+        }
         let value = self.resolver.host_path(value, from.loc);
         let Some(text) = value.exact_text() else {
             return Some("it mounts a source that is not known before start".to_string());
         };
-        let path = normalized(Path::new(&text));
-        (!path.starts_with(&self.root)).then(|| {
-            format!("it mounts `{text}`, which is outside the stack's own folders and not named by a setting")
+        let path = Path::new(&text);
+        let inside =
+            normalized(path).starts_with(&self.root) || self.resolver.in_shared_folder(path);
+        (!inside).then(|| {
+            format!(
+                "it mounts `{text}`, which is neither under the stack's root nor in the shared folder, and does not begin with a setting's value"
+            )
         })
     }
 }

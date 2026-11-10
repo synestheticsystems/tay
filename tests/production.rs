@@ -36,12 +36,14 @@ fn each_thing_the_format_lists_is_refused_naming_its_unit() {
             // A container that builds its image.
             "tay.yaml:15:13: the production profile `deploy` refuses unit `builder`: it builds an image",
             marked,
-            "tay.yaml:19:13: the production profile `deploy` refuses unit `watcher`: it watches folders",
+            "tay.yaml:19:13: the production profile `deploy` refuses unit `watcher`: it watches files or folders",
             marked,
-            // A mount from outside the stack's folders, not named by a setting.
-            // `inside` mounts from the stack, from a setting and from the state
-            // folder, and `setup` runs inside a container: neither is refused.
-            "tay.yaml:24:24: the production profile `deploy` refuses unit `outside`: it mounts `/tmp`, which is outside the stack's own folders and not named by a setting",
+            // A mount from outside the stack's root and the shared folder that
+            // does not begin with a setting's value. `inside` mounts from the
+            // stack, a setting, the state folder, the shared folder and a
+            // value that begins with a setting's, and `setup` runs inside a
+            // container: neither is refused.
+            "tay.yaml:24:24: the production profile `deploy` refuses unit `outside`: it mounts `/tmp`, which is neither under the stack's root nor in the shared folder, and does not begin with a setting's value",
             marked,
         ]
     );

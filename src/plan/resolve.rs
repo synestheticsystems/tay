@@ -191,12 +191,13 @@ impl<'s> Resolver<'s> {
         let mut text = Resolved::known(Shape::Text(Vec::new()));
         let mut bits = Vec::new();
         let mut failure = None;
-        for piece in pieces {
+        for (index, piece) in pieces.iter().enumerate() {
             match piece {
                 Piece::Lit(literal) => bits.push(Bit::Text(literal.clone())),
                 Piece::Ref(reference) => match self.reference(reference, scope) {
                     Ok(value) => {
                         text.absorb(&value);
+                        text.begins_with_setting |= index == 0 && value.begins_with_setting;
                         bits.extend(value.bits());
                     }
                     // Keep going, so every error in the text is reported.
