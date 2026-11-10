@@ -32,6 +32,7 @@ units:
         - { from: "${environment.state}/inside", to: /state }
         - { from: "${environment.shared}/cache", to: /cache }
         - { from: "${holder.certs}", to: /more-certs }
+        - { from: "${environment.state}/${environment.id}", to: /own }
   holder:
     uses: port
     gives: { certs: "${settings.certs}/." }

@@ -61,8 +61,17 @@ fn a_mount_source_must_exist_unless_in_the_state_or_shared_folder_or_produced() 
     assert_eq!(
         run.errors(),
         [format!(
-            "tay.yaml:23:24: the mount's source `{}/missing` does not exist; outside the state and shared folders it must exist when tay plans",
+            "tay.yaml:24:24: the mount's source `{}/missing` does not exist; outside the state and shared folders it must exist when tay plans",
             root()
         )]
+    );
+}
+
+#[test]
+fn a_file_name_and_template_path_built_from_values_known_before_start_are_checked_once_resolved() {
+    let plan = plan_json("paths", &[]);
+    assert_eq!(
+        given(unit(&plan, "named-conf"), "path")["from_host"]["value"],
+        format!("{}/.tay/state/files/named-conf/site.conf", root())
     );
 }

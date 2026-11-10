@@ -208,6 +208,7 @@ pub fn value_list(node: &Node, what: &str, d: &mut Diagnostics) -> Option<Vec<Ex
 }
 
 /// A mapping from names (checked by `rule`) to nodes, in the order written.
+/// `what` says what each key is.
 pub fn keyed<'n>(
     node: &'n Node,
     what: &str,
@@ -217,7 +218,10 @@ pub fn keyed<'n>(
     let Some(map) = node.as_map() else {
         d.error(
             node.loc,
-            format!("{what} must be a mapping; this is {}", node.describe()),
+            format!(
+                "this must be a mapping, each key {what}; this is {}",
+                node.describe()
+            ),
         );
         return Vec::new();
     };

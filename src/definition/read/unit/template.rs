@@ -12,7 +12,7 @@ use std::collections::HashMap;
 
 use crate::definition::Unit;
 use crate::diagnostic::{Diagnostic, Diagnostics};
-use crate::syntax::expr::{self, ExprKind, Piece, Target};
+use crate::syntax::expr::{self, Expr, Reference, Target};
 use crate::syntax::fields::{self, Fields};
 use crate::syntax::names::{self, NameAt};
 use crate::syntax::yaml::{Kind, Node, Scalar};
@@ -35,75 +35,132 @@ pub struct Param {
     pub default: Option<Node>,
 }
 
-pub fn read(name: NameAt, node: &Node, d: &mut Diagnostics) -> Option<Template> {
+/// The fields of a unit, or of one of its ways, that references may not
+/// fill, a parameter's among them.
+const WRITTEN_OUT: &[&str] = &["uses", "from", "needs", "after", "action"];
+
+/// Reads a template. A template whose own text has errors is still kept,
+/// marked so, that the units made from it do not report it missing.
+pub fn read(name: NameAt, node: &Node, d: &mut Diagnostics) -> Template {
     let errors_before = d.len();
-    let file = Fields::of(node, "a template", &["params", "unit"], d)?;
+    let Some(file) = Fields::of(node, "a template", &["params", "unit"], d) else {
+        return Template {
+            name,
+            params: Vec::new(),
+            readable: false,
+            unit: node.clone(),
+        };
+    };
     let params: Vec<Param> = file
         .get("params")
         .map(|node| fields::keyed(node, "a parameter", names::value_name_problem, d))
         .unwrap_or_default()
         .into_iter()
-        .filter_map(|(name, decl)| {
-            let decl = Fields::of(decl, "a parameter's declaration", &["default"], d)?;
-            let default = decl.get("default").cloned();
-            Some(Param { name, default })
+        .map(|(name, decl)| {
+            let default = Fields::of(decl, "a parameter's declaration", &["default"], d)
+                .and_then(|decl| decl.get("default").cloned());
+            Param { name, default }
         })
         .collect();
-    let body = file.require("unit", d)?.clone();
-    let fields = Fields::of(&body, "a template's unit", UNIT_FIELDS, d)?;
-    if let Some((key, _)) = fields.entry("from") {
-        d.error(key.loc, "a template may not itself use `from`");
+    let body = file.require("unit", d);
+    if let Some(body) = body
+        && let Some(fields) = Fields::of(body, "a template's unit", UNIT_FIELDS, d)
+    {
+        if let Some((key, _)) = fields.entry("from") {
+            d.error(key.loc, "a template may not itself use `from`");
+        }
+        check_params(&fields, &params, d);
     }
-    check_params(&body, &params, d);
-    Some(Template {
+    Template {
         name,
         params,
         readable: d.len() == errors_before,
-        unit: body,
-    })
+        unit: body.unwrap_or(node).clone(),
+    }
 }
 
-/// Every `${params.x}` in the template names a declared parameter.
-fn check_params(node: &Node, params: &[Param], d: &mut Diagnostics) {
+/// Every `${params.x}` in the template's unit names a declared parameter,
+/// and none fills a field written out, in the unit or in one of its ways.
+fn check_params(unit: &Fields<'_>, params: &[Param], d: &mut Diagnostics) {
+    for (field, _) in unit.present() {
+        let Some(value) = unit.get(field) else {
+            continue;
+        };
+        match field {
+            _ if WRITTEN_OUT.contains(&field) => refuse_params(field, value, d),
+            "run" => {
+                for way in value.as_map().into_iter().flatten() {
+                    for entry in way.value.as_map().into_iter().flatten() {
+                        match entry.key.as_str() {
+                            Some(key) if WRITTEN_OUT.contains(&key.text.as_str()) => {
+                                refuse_params(&key.text, &entry.value, d);
+                            }
+                            _ => declared_params(&entry.value, params, d),
+                        }
+                    }
+                }
+            }
+            _ => declared_params(value, params, d),
+        }
+    }
+}
+
+/// Each reference in the strings of `node`, in order. A reference that does
+/// not parse is reported.
+fn references(node: &Node, d: &mut Diagnostics) -> Vec<Reference> {
     match &node.kind {
         Kind::Map(entries) => entries
             .iter()
-            .for_each(|e| check_params(&e.value, params, d)),
-        Kind::Seq(items) => items.iter().for_each(|item| check_params(item, params, d)),
+            .flat_map(|entry| references(&entry.value, d))
+            .collect(),
+        Kind::Seq(items) => items.iter().flat_map(|item| references(item, d)).collect(),
         Kind::Scalar(Scalar::Str(s)) => {
-            let kind = match expr::parse_string(&s.text, node.loc, s.content_column) {
-                Ok(kind) => kind,
+            match expr::parse_string(&s.text, node.loc, s.content_column) {
+                Ok(kind) => Expr {
+                    loc: node.loc,
+                    kind,
+                }
+                .references()
+                .into_iter()
+                .cloned()
+                .collect(),
                 Err(error) => {
                     d.push(error);
-                    return;
-                }
-            };
-            let references = match &kind {
-                ExprKind::Ref(reference) => vec![reference],
-                ExprKind::Text(pieces) => pieces
-                    .iter()
-                    .filter_map(|p| match p {
-                        Piece::Ref(reference) => Some(reference),
-                        Piece::Lit(_) => None,
-                    })
-                    .collect(),
-                _ => Vec::new(),
-            };
-            for reference in references {
-                if let Target::Param(param) = &reference.target
-                    && !params.iter().any(|p| p.name.name == *param)
-                {
-                    d.error(
-                        reference.loc,
-                        format!(
-                            "`{}` names a parameter this template does not declare",
-                            reference.written()
-                        ),
-                    );
+                    Vec::new()
                 }
             }
         }
-        Kind::Scalar(_) => {}
+        Kind::Scalar(_) => Vec::new(),
+    }
+}
+
+fn declared_params(node: &Node, params: &[Param], d: &mut Diagnostics) {
+    for reference in references(node, d) {
+        if let Target::Param(param) = &reference.target
+            && !params.iter().any(|p| p.name.name == *param)
+        {
+            d.error(
+                reference.loc,
+                format!(
+                    "`{}` names a parameter this template does not declare",
+                    reference.written()
+                ),
+            );
+        }
+    }
+}
+
+fn refuse_params(field: &str, node: &Node, d: &mut Diagnostics) {
+    for reference in references(node, d) {
+        if matches!(reference.target, Target::Param(_)) {
+            d.error(
+                reference.loc,
+                format!(
+                    "`{}` cannot fill `{field}`: references are not allowed in `uses`, `from`, `needs`, `after` or `action`",
+                    reference.written()
+                ),
+            );
+        }
     }
 }
 

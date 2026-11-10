@@ -7,4 +7,7 @@ units:
   first: { from: bad-setting, params: { env: { A: 1 } } }
   second: { from: bad-setting, params: { env: { B: 2 } } }
   third: { from: inside-text, params: { env: { C: 3 } } }
+  fourth: { from: named, params: { module: port } }
+  fifth: { from: listed }
+  sixth: { from: joined, params: { env: { REPLACED: [a, list], KEPT: [a, list] } } }
 up: []

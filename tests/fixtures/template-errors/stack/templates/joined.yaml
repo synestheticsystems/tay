@@ -1,0 +1,8 @@
+params:
+  env: {}
+unit:
+  with: { env: "${params.env}" }
+  run:
+    source:
+      uses: process
+      with: { command: [serve], env: { REPLACED: fixed } }

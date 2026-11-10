@@ -26,6 +26,7 @@ pub struct User<'a> {
 }
 
 impl User<'_> {
+    /// The user, as an error about a view it cannot have begins.
     fn who(&self) -> String {
         let name = self.name;
         match (self.readiness, self.asker) {
@@ -75,8 +76,12 @@ impl Planner<'_> {
             Ok(value) if matches!(want, Want::Path(_)) => self.resolver.host_path(value, expr.loc),
             Ok(value) => value,
             Err(Fail::Reported) => return None,
-            Err(Fail::View(problem)) => {
-                self.resolver.d.push(view_error(user, expr.loc, problem));
+            Err(Fail::View(problems)) => {
+                for problem in problems {
+                    self.resolver
+                        .d
+                        .push(view_error(&user.who(), expr.loc, problem));
+                }
                 return None;
             }
         };
@@ -227,8 +232,8 @@ impl Planner<'_> {
     }
 }
 
-fn view_error(user: User<'_>, at: Loc, problem: ViewProblem) -> Diagnostic {
-    let who = user.who();
+/// An address `who` uses at `at` and cannot have.
+pub fn view_error(who: &str, at: Loc, problem: ViewProblem) -> Diagnostic {
     match problem {
         ViewProblem::NotPublished {
             owner,
@@ -244,6 +249,7 @@ fn view_error(user: User<'_>, at: Loc, problem: ViewProblem) -> Diagnostic {
         ViewProblem::NeedsView {
             reference,
             endpoint,
+            ..
         } => Diagnostic::new(
             at,
             format!(

@@ -1,8 +1,9 @@
 format: 1
 stack: paths
-up: [web, box, conf]
+up: [web, box, conf, named-conf]
 settings:
   port: { default: 8080 }
+  conf_name: { default: site }
 units:
   build:
     uses: command
@@ -21,3 +22,8 @@ units:
     with:
       image: example/lost
       mounts: [{ from: ./missing, to: /missing }]
+  named-conf:
+    uses: file
+    with:
+      template: "${environment.root}/stack/units/conf/site.conf.tmpl"
+      name: "${settings.conf_name}.conf"

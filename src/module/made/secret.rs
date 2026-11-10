@@ -71,7 +71,7 @@ impl Module for Secret {
         if let Some(length) = only_for("length", &["password", "bytes"], d) {
             shape
                 .slots
-                .extend(Slot::read(length, Want::Number, SETTING, d));
+                .extend(Slot::read(length, Want::Count, SETTING, d));
         }
         if let Some(encoding) = only_for("encoding", &["bytes"], d) {
             shape
@@ -147,6 +147,11 @@ mod tests {
                 "1:1: a `keypair` secret needs `algorithm`: `ed25519` or `rsa-2048`",
                 "2:1: `length` is for `password` and `bytes`, not `keypair`",
             ]
+        );
+        let (_, errors) = check("secret", "kind: bytes\nlength: -4\n");
+        assert_eq!(
+            errors,
+            ["2:9: this must be a whole number above 0; this is -4"]
         );
         let (_, errors) = check("secret", "kind: password\nencoding: hex\n");
         assert_eq!(errors, ["2:1: `encoding` is for `bytes`, not `password`"]);

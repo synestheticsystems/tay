@@ -31,6 +31,9 @@ fn a_missing_required_parameter_and_an_undeclared_one_are_errors() {
             "  stack/templates/database.yaml:1:1: the template is here",
             "tay.yaml:6:10: template `broken` needs the parameter `name`, which has no default",
             "  stack/templates/broken.yaml:2:3: the parameter is declared here",
+            // A mapping parameter joins with a way's `env` entry by entry: the
+            // way's `REPLACED` wins and the parameter's `KEPT` is read.
+            "tay.yaml:12:70: a value is text, a whole number or true or false; this is a list",
             // An error in the template's own text, found for each unit made
             // from it, is reported once, naming each.
             "stack/templates/bad-setting.yaml:5:11: `colour` is not a field of the settings of a `port` unit; its fields are prefer, fixed",
@@ -41,6 +44,11 @@ fn a_missing_required_parameter_and_an_undeclared_one_are_errors() {
             // A mapping cannot be put inside text.
             "stack/templates/inside-text.yaml:5:27: `${params.env}` is inside text, so its value must be text, a whole number or true or false; this is a mapping",
             "  tay.yaml:9:12: for unit `third`, made from the template here",
+            // A template whose unit cannot be read is still a template, so
+            // `fifth`, made from it, is not reported as made from nothing.
+            "stack/templates/listed.yaml:2:7: a template's unit must be a mapping; this is a list",
+            // A parameter cannot fill a field that is written out.
+            "stack/templates/named.yaml:4:10: `${params.module}` cannot fill `uses`: references are not allowed in `uses`, `from`, `needs`, `after` or `action`",
         ]
     );
 }

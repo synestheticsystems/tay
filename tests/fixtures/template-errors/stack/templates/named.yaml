@@ -1,0 +1,4 @@
+params:
+  module: {}
+unit:
+  uses: "${params.module}"

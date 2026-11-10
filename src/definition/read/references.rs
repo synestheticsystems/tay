@@ -65,7 +65,13 @@ fn exprs(way: &Way) -> Vec<&Expr> {
             GiveValue::Value(expr) | GiveValue::Module(GivenValue::Expr(expr)) => all.push(expr),
             GiveValue::Endpoint(endpoint) => {
                 all.push(&endpoint.port);
-                all.extend(endpoint.scheme.iter().chain(&endpoint.path));
+                all.extend(
+                    endpoint
+                        .scheme
+                        .iter()
+                        .chain(&endpoint.path)
+                        .chain(&endpoint.host),
+                );
             }
             GiveValue::Module(_) => {}
         }

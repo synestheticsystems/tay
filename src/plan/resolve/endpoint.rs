@@ -127,18 +127,19 @@ impl<'s> Resolver<'s> {
             return Err(Fail::Reported);
         };
         let not_published = |port: &Resolved| {
-            Err(Fail::View(ViewProblem::NotPublished {
+            Err(Fail::View(vec![ViewProblem::NotPublished {
                 owner: owner_name.clone(),
                 port: port.shown(),
                 endpoint: endpoint.loc,
-            }))
+            }]))
         };
         let (host, port) = match (asker, runs) {
             (Asker::Nowhere, _) => {
-                return Err(Fail::View(ViewProblem::NeedsView {
+                return Err(Fail::View(vec![ViewProblem::NeedsView {
                     reference: reference.written(),
+                    at: reference.loc,
                     endpoint: endpoint.loc,
-                }));
+                }]));
             }
             (Asker::Host, Runs::OnHost) => (LOOPBACK.to_string(), port),
             (Asker::Host, Runs::OneOffContainer) => return not_published(&port),
@@ -160,10 +161,10 @@ impl<'s> Resolver<'s> {
                     && !entry.always
                     && !opened.contains(&(container_name.clone(), number))
                 {
-                    return Err(Fail::View(ViewProblem::NotOpened {
+                    return Err(Fail::View(vec![ViewProblem::NotOpened {
                         owner: owner_name.clone(),
                         port: port.shown(),
-                    }));
+                    }]));
                 }
                 let scope = Scope {
                     unit: Some(container),

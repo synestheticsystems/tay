@@ -156,6 +156,20 @@ impl Resolved {
         }
     }
 
+    /// The text up to the first part not known before start.
+    pub fn leading_text(&self) -> String {
+        match &self.shape {
+            Shape::Text(bits) => bits
+                .iter()
+                .map_while(|bit| match bit {
+                    Bit::Text(text) => Some(text.as_str()),
+                    Bit::Hole(_) => None,
+                })
+                .collect(),
+            _ => String::new(),
+        }
+    }
+
     /// The text, when every bit of it is known.
     pub fn exact_text(&self) -> Option<String> {
         match &self.shape {

@@ -1,6 +1,6 @@
 //! What a value must be where it is used, checked against what is known of it.
 
-use crate::syntax::expr::{Expr, ExprKind, Piece};
+use crate::syntax::expr::{Expr, ExprKind};
 
 use super::shape::Place;
 
@@ -14,6 +14,8 @@ pub enum Want {
     /// line or one environment variable.
     Scalar,
     PortNumber,
+    /// A whole number above 0: how many of something.
+    Count,
     OneOf(&'static [&'static str]),
     /// A whole number followed by `s`, `m` or `h`.
     Duration,
@@ -53,22 +55,16 @@ pub enum Form {
 }
 
 impl Form {
-    /// The form of a value as written, or `None` when a reference decides it.
+    /// The form of a value as written, or `None` when a reference in it
+    /// decides it: what the reference brings is known only once it is
+    /// resolved.
     pub fn of_written(expr: &Expr) -> Option<Form> {
-        Some(match &expr.kind {
-            ExprKind::Number(n) => Form::Number(Some(*n)),
-            ExprKind::Bool(_) => Form::Bool,
-            ExprKind::Text(pieces) => Form::Text(
-                pieces
-                    .iter()
-                    .map(|piece| match piece {
-                        Piece::Lit(text) => Some(text.as_str()),
-                        Piece::Ref(_) => None,
-                    })
-                    .collect(),
-            ),
-            ExprKind::Ref(_) => return None,
-        })
+        match &expr.kind {
+            ExprKind::Number(n) => Some(Form::Number(Some(*n))),
+            ExprKind::Bool(_) => Some(Form::Bool),
+            ExprKind::Text(_) => expr.literal_text().map(|text| Form::Text(Some(text))),
+            ExprKind::Ref(_) => None,
+        }
     }
 
     fn describe(&self) -> &'static str {
@@ -106,6 +102,11 @@ impl Want {
                 _ => None,
             },
             (Want::PortNumber, _) => wrong("a port number"),
+            (Want::Count, Form::Number(Some(n))) if *n < 1 => {
+                Some(format!("must be a whole number above 0; this is {n}"))
+            }
+            (Want::Count, Form::Number(_)) => None,
+            (Want::Count, _) => wrong("a whole number"),
             (_, Form::Number(_) | Form::Bool) => wrong("text"),
             (want, Form::Text(None)) => Some(format!(
                 "must be written out in full ({}); this holds a value not known until start",
@@ -196,6 +197,8 @@ mod tests {
                 .is_some()
         );
         assert_eq!(Want::PortNumber.problem(&Form::Number(None)), None);
+        assert!(Want::Count.problem(&Form::Number(Some(0))).is_some());
+        assert_eq!(Want::Count.problem(&Form::Number(Some(16))), None);
         assert!(Want::OneOf(&["a", "b"]).problem(&text("c")).is_some());
         assert!(Want::Duration.problem(&Form::Text(None)).is_some());
         assert!(Want::FileMode.problem(&text("0600")).is_none());

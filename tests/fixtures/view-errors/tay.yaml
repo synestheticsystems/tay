@@ -9,6 +9,7 @@ units:
     gives:
       web: { port: 3000, scheme: http }
       raw: { port: 4000 }
+      named: { host: "${settings.nosuch}.example.test", port: 443 }
   user:
     uses: command
     with:

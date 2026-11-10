@@ -150,7 +150,7 @@ impl<'a> Reader<'a> {
                     let Some(name) = self.file_name(&path, &node, "the template") else {
                         continue;
                     };
-                    templates.extend(template::read(name, &node, self.d));
+                    templates.push(template::read(name, &node, self.d));
                 }
                 discover::Entry::Folder(path) | discover::Entry::Other(path) => {
                     self.not_a_definition(&path, "one `<name>.yaml` file per template");
@@ -186,9 +186,13 @@ impl<'a> Reader<'a> {
                     let Some(node) = self.parse(&path) else {
                         continue;
                     };
-                    for (name, unit) in
-                        fields::keyed(&node, "a unit's name", names::name_problem, self.d)
-                    {
+                    let defined =
+                        fields::keyed(&node, "a unit's name", names::name_problem, self.d);
+                    if defined.is_empty() && node.as_map().is_some() {
+                        self.d
+                            .error(node.loc, "this file defines no unit: its mapping is empty");
+                    }
+                    for (name, unit) in defined {
                         units.push(unit::read(name, unit, templates, self.d));
                     }
                 }

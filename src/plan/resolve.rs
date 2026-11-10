@@ -59,8 +59,13 @@ pub enum ViewProblem {
         port: String,
         endpoint: Loc,
     },
-    /// The asker runs nowhere and the reference names no view.
-    NeedsView { reference: String, endpoint: Loc },
+    /// The asker runs nowhere and the reference, written at `at`, names no
+    /// view.
+    NeedsView {
+        reference: String,
+        at: Loc,
+        endpoint: Loc,
+    },
     /// The host asks for a container's address through a published port
     /// that nothing in the plan opens.
     NotOpened { owner: String, port: String },
@@ -70,7 +75,9 @@ pub enum ViewProblem {
 pub enum Fail {
     /// An error in the definitions, already reported.
     Reported,
-    View(ViewProblem),
+    /// Each address in the value that this asker cannot have; whoever uses
+    /// the value reports them, since only it knows who asked.
+    View(Vec<ViewProblem>),
 }
 
 pub type Res = Result<Resolved, Fail>;
@@ -190,7 +197,9 @@ impl<'s> Resolver<'s> {
     pub fn text(&mut self, pieces: &[Piece], scope: Scope) -> Res {
         let mut text = Resolved::known(Shape::Text(Vec::new()));
         let mut bits = Vec::new();
-        let mut failure = None;
+        // Every piece is resolved, so that every error in the text is found.
+        let mut reported = false;
+        let mut views = Vec::new();
         for (index, piece) in pieces.iter().enumerate() {
             match piece {
                 Piece::Lit(literal) => bits.push(Bit::Text(literal.clone())),
@@ -200,13 +209,16 @@ impl<'s> Resolver<'s> {
                         text.begins_with_setting |= index == 0 && value.begins_with_setting;
                         bits.extend(value.bits());
                     }
-                    // Keep going, so every error in the text is reported.
-                    Err(fail) => failure = failure.or(Some(fail)),
+                    Err(Fail::Reported) => reported = true,
+                    Err(Fail::View(problems)) => views.extend(problems),
                 },
             }
         }
-        if let Some(fail) = failure {
-            return Err(fail);
+        if !views.is_empty() {
+            return Err(Fail::View(views));
+        }
+        if reported {
+            return Err(Fail::Reported);
         }
         text.shape = Shape::Text(bits);
         Ok(text)

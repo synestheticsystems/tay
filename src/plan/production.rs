@@ -81,16 +81,20 @@ impl Planner<'_> {
         if value.begins_with_setting {
             return None;
         }
+        // Where a source leads is known from its start: what follows a part
+        // known before start stays under the folder that part names.
         let value = self.resolver.host_path(value, from.loc);
-        let Some(text) = value.exact_text() else {
+        let leading = value.leading_text();
+        if leading.is_empty() {
             return Some("it mounts a source that is not known before start".to_string());
-        };
-        let path = Path::new(&text);
+        }
+        let path = Path::new(&leading);
         let inside =
             normalized(path).starts_with(&self.root) || self.resolver.in_shared_folder(path);
         (!inside).then(|| {
             format!(
-                "it mounts `{text}`, which is neither under the stack's root nor in the shared folder, and does not begin with a setting's value"
+                "it mounts `{}`, which is neither under the stack's root nor in the shared folder, and does not begin with a setting's value",
+                value.shown()
             )
         })
     }

@@ -19,4 +19,16 @@ units:
   config:
     uses: file
     with: { content: "db = ${hidden.db}" }
-  all: { needs: [host-user, box-user, config] }
+  also-hidden:
+    uses: container
+    with: { image: example/other }
+    gives:
+      db: { port: 6543 }
+  both-user:
+    uses: process
+    with: { command: [use, "${hidden.db} and ${also-hidden.db}"] }
+  badge:
+    uses: port
+    gives:
+      site: { host: "${hidden.db.host}", port: 443, scheme: https }
+  all: { needs: [host-user, box-user, config, both-user, badge] }

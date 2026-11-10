@@ -10,6 +10,8 @@ use crate::plan::model::{GivenLine, Seen, Shown};
 use crate::plan::resolve::value::Resolved;
 use crate::plan::resolve::{Asker, Fail, Scope, ViewProblem};
 
+use super::usage::view_error;
+
 impl Planner<'_> {
     /// Each value the unit gives, as the host and as a container would see it.
     pub(super) fn gives(&mut self, unit: usize, way: &Way) -> Vec<Option<GivenLine>> {
@@ -24,7 +26,13 @@ impl Planner<'_> {
                 part: has_scheme.then_some(Part::Url),
                 view: None,
             };
-            lines.push(self.given_line(give.name.name.clone(), give.name.loc, target, endpoint));
+            lines.push(self.given_line(
+                unit_name,
+                give.name.name.clone(),
+                give.name.loc,
+                target,
+                endpoint,
+            ));
         }
         for output in way.outputs() {
             let target = Target::Output {
@@ -33,6 +41,7 @@ impl Planner<'_> {
                 view: None,
             };
             lines.push(self.given_line(
+                unit_name,
                 format!("outputs.{}", output.name.name),
                 output.name.loc,
                 target,
@@ -44,6 +53,7 @@ impl Planner<'_> {
 
     fn given_line(
         &mut self,
+        unit_name: &str,
         name: String,
         loc: Loc,
         target: Target,
@@ -53,25 +63,37 @@ impl Planner<'_> {
             loc,
             kind: ExprKind::Ref(Reference {
                 loc,
-                inner: name.clone(),
+                inner: format!("{unit_name}.{name}"),
                 target,
             }),
         };
         let mut seen = |asker: Asker| -> Option<(Seen, Option<Resolved>)> {
             let scope = Scope { unit: None, asker };
-            match self.resolver.resolve(&reference, scope) {
-                Ok(value) => Some((Seen::Value(Shown::of(&value)), Some(value))),
-                Err(Fail::View(ViewProblem::NotPublished { port, .. })) => Some((
-                    Seen::Unreachable(format!("its port {port} is not published to the host")),
-                    None,
-                )),
-                Err(Fail::View(ViewProblem::NotOpened { port, .. })) => Some((
-                    Seen::Unreachable(format!(
+            let problems = match self.resolver.resolve(&reference, scope) {
+                Ok(value) => return Some((Seen::Value(Shown::of(&value)), Some(value))),
+                Err(Fail::Reported) => return None,
+                Err(Fail::View(problems)) => problems,
+            };
+            let mut unreachable = Vec::new();
+            for problem in problems {
+                match &problem {
+                    ViewProblem::NotPublished { port, .. } => {
+                        unreachable.push(format!("its port {port} is not published to the host"));
+                    }
+                    ViewProblem::NotOpened { port, .. } => unreachable.push(format!(
                         "its port {port} is published, but nothing in the plan opens it on the host"
                     )),
-                    None,
-                )),
-                Err(Fail::View(ViewProblem::NeedsView { .. })) | Err(Fail::Reported) => None,
+                    // An address with no view in a value of a unit that is
+                    // made has no form for anyone.
+                    ViewProblem::NeedsView { at, .. } => {
+                        let who = "a value of a unit that is made, which runs nowhere, holds it";
+                        self.resolver.d.push(view_error(who, *at, problem.clone()));
+                    }
+                }
+            }
+            match unreachable.is_empty() {
+                true => None,
+                false => Some((Seen::Unreachable(unreachable.join("; ")), None)),
             }
         };
         let (from_host, host_value) = seen(Asker::Host)?;
