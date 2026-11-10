@@ -103,10 +103,10 @@ impl Client {
         environment
             .machine
             .make_socket_folder(environment.id.as_str())?;
-        if let Some(client) = Client::find(environment).await? {
-            if let Some(client) = client.of_this_tay().await? {
-                return Ok(client);
-            }
+        if let Some(client) = Client::find(environment).await?
+            && let Some(client) = client.of_this_tay().await?
+        {
+            return Ok(client);
         }
         // One command starts the daemon: the one that holds this lock.
         let bootstrap = environment.bootstrap_lock();
@@ -116,10 +116,10 @@ impl Client {
         let until = Instant::now() + START;
         let mut started = false;
         loop {
-            if let Some(client) = Client::find(environment).await? {
-                if let Some(client) = client.of_this_tay().await? {
-                    return Ok(client);
-                }
+            if let Some(client) = Client::find(environment).await?
+                && let Some(client) = client.of_this_tay().await?
+            {
+                return Ok(client);
             }
             // Holding the daemon's lock proves that no daemon runs, so a
             // socket left behind is stale. A daemon that holds it and does
