@@ -7,12 +7,6 @@
 pub mod cli;
 mod definition;
 mod diagnostic;
-mod expr;
-mod fields;
 mod module;
-mod names;
-mod output;
 mod plan;
-mod read;
-mod source;
-mod yaml;
+mod syntax;

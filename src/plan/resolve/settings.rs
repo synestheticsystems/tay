@@ -2,10 +2,10 @@
 //! declared so.
 
 use crate::definition::SettingValue;
+use crate::diagnostic::source::Loc;
 use crate::diagnostic::{Diagnostic, Diagnostics};
-use crate::expr::Type;
-use crate::plan::value::{Hole, Resolved, Shape};
-use crate::source::Loc;
+use crate::plan::resolve::value::{Hole, Resolved, Shape};
+use crate::syntax::expr::Type;
 
 use super::{Asker, Fail, Key, Res, Resolver, Scope};
 

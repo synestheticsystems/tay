@@ -1,10 +1,14 @@
 //! What a module tells the planner about a unit, in terms that name no module.
 
-use crate::expr::Expr;
-use crate::names::NameAt;
-use crate::source::Loc;
+use crate::diagnostic::source::Loc;
+use crate::syntax::expr::Expr;
+use crate::syntax::names::NameAt;
 
-use super::want::Want;
+use crate::diagnostic::Diagnostics;
+use crate::syntax::expr;
+use crate::syntax::yaml::Node;
+
+use super::want::{Form, Want};
 
 /// A module's account of one unit, read from the unit's settings. The planner
 /// works from this alone.
@@ -57,6 +61,19 @@ pub struct Slot {
     pub expr: Expr,
     pub want: Want,
     pub place: Place,
+}
+
+impl Slot {
+    /// Reads a setting's value. Its written form is checked now; a reference
+    /// in it is checked once it is resolved.
+    pub fn read(node: &Node, want: Want, place: Place, d: &mut Diagnostics) -> Option<Slot> {
+        let expr = expr::from_node(node, d)?;
+        if let Some(problem) = Form::of_written(&expr).and_then(|form| want.problem(&form)) {
+            d.error(node.loc, format!("this {problem}"));
+            return None;
+        }
+        Some(Slot { expr, want, place })
+    }
 }
 
 /// Where a value ends up, which decides whether a secret may go there.

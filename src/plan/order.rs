@@ -2,8 +2,8 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
+use crate::diagnostic::source::Loc;
 use crate::diagnostic::{Diagnostic, Diagnostics};
-use crate::source::Loc;
 
 /// `from` starts only after `to`.
 pub struct Edge {
@@ -140,7 +140,7 @@ fn circle_through<'e>(start: usize, edges: &[&'e Edge]) -> Option<Vec<&'e Edge>>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source::Sources;
+    use crate::diagnostic::source::Sources;
 
     fn edges(pairs: &[(usize, usize)]) -> Vec<Edge> {
         let mut sources = Sources::default();

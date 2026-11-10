@@ -6,11 +6,11 @@
 //! | asked from a container | the host's name for containers, and its port | the unit's name and the port inside |
 
 use crate::definition::Endpoint;
-use crate::expr::{Part, Reference};
 use crate::module::{Form, Runs};
+use crate::syntax::expr::{Part, Reference};
 
 use super::{Asker, Fail, Res, Resolver, Scope, ViewProblem};
-use crate::plan::value::{Bit, Resolved, Shape};
+use crate::plan::resolve::value::{Bit, Resolved, Shape};
 
 const LOOPBACK: &str = "127.0.0.1";
 

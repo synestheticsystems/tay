@@ -11,19 +11,20 @@ mod endpoint;
 mod environment;
 mod settings;
 mod unit_values;
+pub mod value;
 
 pub use environment::Environment;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use crate::definition::Stack;
+use crate::diagnostic::source::Loc;
 use crate::diagnostic::{Diagnostic, Diagnostics};
-use crate::expr::{Expr, ExprKind, Part, Piece, Reference, Target, Type, View};
 use crate::module::Runs;
-use crate::source::Loc;
+use crate::syntax::expr::{Expr, ExprKind, Part, Piece, Reference, Target, Type, View};
 
 use super::choices::{self, Layered};
-use super::value::{Bit, Hole, Resolved, Shape};
+use value::{Bit, Hole, Resolved, Shape};
 
 /// Who uses a value, which decides the view of an address.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

@@ -1,9 +1,9 @@
 //! The values units give, and the files they build.
 
 use crate::definition::GiveValue;
-use crate::expr::{Part, Reference, Type, UnitRef};
 use crate::module::GivenValue;
-use crate::plan::value::{Hole, Resolved, Shape};
+use crate::plan::resolve::value::{Hole, Resolved, Shape};
+use crate::syntax::expr::{Part, Reference, Type, UnitRef};
 
 use super::{Asker, Fail, Key, Res, Resolver, Scope};
 

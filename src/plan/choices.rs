@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 
 use crate::definition::{Choices, SettingValue, Unit};
 use crate::diagnostic::Diagnostic;
-use crate::names::NameAt;
-use crate::source::Loc;
+use crate::diagnostic::source::Loc;
+use crate::syntax::names::NameAt;
 
 /// The choices in force once every place has had its say.
 #[derive(Debug, Default)]
@@ -100,7 +100,7 @@ pub fn choose(unit: &Unit, layered: &Layered) -> Result<(usize, Option<Loc>), Di
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source::{Loc, Sources};
+    use crate::diagnostic::source::{Loc, Sources};
 
     fn names(list: &[&str]) -> Vec<NameAt> {
         let mut sources = Sources::default();

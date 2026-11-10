@@ -3,7 +3,9 @@
 //! tay reports every error it can find in one run, so errors are collected
 //! rather than returned one at a time.
 
-use crate::source::{Loc, Sources};
+pub mod source;
+
+use source::{Loc, Sources};
 
 /// One error: where it is, what is wrong, and the other places involved.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]

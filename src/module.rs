@@ -2,19 +2,14 @@
 //! describes the unit in a [`UnitShape`]; nothing outside a module's own file
 //! and the list below knows which modules exist.
 
-mod command;
-mod common;
-mod container;
-mod file;
-mod port;
-mod process;
-mod secret;
+mod made;
+mod running;
 pub mod shape;
 mod want;
 
 use crate::diagnostic::Diagnostics;
-use crate::source::Loc;
-use crate::yaml::Node;
+use crate::diagnostic::source::Loc;
+use crate::syntax::yaml::Node;
 
 pub use shape::{Concern, GivenValue, Place, RestartDefault, Runs, UnitShape};
 pub use want::{Form, Want};
@@ -40,12 +35,12 @@ pub struct Cx<'a> {
 
 /// Every module that ships with tay.
 static MODULES: [&dyn Module; 6] = [
-    &process::Process,
-    &container::Container,
-    &command::Command,
-    &port::Port,
-    &file::File,
-    &secret::Secret,
+    &running::process::Process,
+    &running::container::Container,
+    &running::command::Command,
+    &made::port::Port,
+    &made::file::File,
+    &made::secret::Secret,
 ];
 
 pub fn find(name: &str) -> Option<&'static dyn Module> {
@@ -59,8 +54,8 @@ pub fn names() -> impl Iterator<Item = &'static str> {
 #[cfg(test)]
 pub(crate) mod testing {
     use crate::diagnostic::Diagnostics;
-    use crate::source::{Loc, Sources};
-    use crate::yaml;
+    use crate::diagnostic::source::{Loc, Sources};
+    use crate::syntax::yaml;
 
     use super::{Cx, UnitShape};
 

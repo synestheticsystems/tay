@@ -2,11 +2,11 @@
 
 use std::path::Path;
 
+use crate::definition::read::ENVIRONMENT_FOLDER;
 use crate::definition::{Profile, Stack};
 use crate::diagnostic::Diagnostics;
-use crate::expr::{EnvField, Reference, Type};
-use crate::plan::value::{Hole, Resolved, Shape};
-use crate::read::ENVIRONMENT_FOLDER;
+use crate::plan::resolve::value::{Hole, Resolved, Shape};
+use crate::syntax::expr::{EnvField, Reference, Type};
 
 use super::{Res, Resolver};
 

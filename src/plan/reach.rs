@@ -2,17 +2,21 @@
 //! those need, under the alternatives chosen. `after` brings nothing in, and
 //! a unit that is an action comes up only when `up` names it.
 
+mod given;
+mod usage;
+mod visit;
+
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::definition::{Profile, Stack};
 use crate::diagnostic::Diagnostic;
-use crate::names::NameAt;
+use crate::syntax::names::NameAt;
 
 use super::Planner;
 use super::model::{After, Because, Need, Plan};
 use super::order::{self, Edge, EdgeKind};
 use super::production::Chosen;
-use super::visit::Visit;
+use visit::Visit;
 
 pub struct Reached {
     /// The units that come up, in the order they were found.

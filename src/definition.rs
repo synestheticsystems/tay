@@ -1,11 +1,13 @@
 //! A stack's definitions as read: what the reader gives the planner.
 
+pub mod read;
+
 use std::path::PathBuf;
 
-use crate::expr::{Expr, Type};
+use crate::diagnostic::source::Loc;
 use crate::module::{GivenValue, Module, UnitShape};
-use crate::names::NameAt;
-use crate::source::Loc;
+use crate::syntax::expr::{Expr, Type};
+use crate::syntax::names::NameAt;
 
 #[derive(Debug)]
 pub struct Stack {

@@ -1,14 +1,16 @@
 //! The command line: `tay plan`, `tay --version` and `tay --help`.
 
+mod output;
+
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+use crate::definition::read::{self, STACK_FILE, THIS_TAY};
 use crate::diagnostic::Diagnostics;
-use crate::output::{json, text};
+use crate::diagnostic::source::Sources;
 use crate::plan::{self, Options, Outcome};
-use crate::read::{self, STACK_FILE, THIS_TAY};
-use crate::source::Sources;
+use output::{json, text};
 
 /// The plan is sound.
 const SOUND: u8 = 0;

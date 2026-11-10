@@ -4,10 +4,10 @@
 use std::path::{Component, Path, PathBuf};
 
 use crate::diagnostic::Diagnostic;
-use crate::expr::{Expr, ExprKind, Piece, Target};
+use crate::diagnostic::source::Loc;
 use crate::module::{Concern, Runs};
-use crate::names::NameAt;
-use crate::source::Loc;
+use crate::syntax::expr::{Expr, ExprKind, Piece, Target};
+use crate::syntax::names::NameAt;
 
 use super::Planner;
 use super::resolve::{Asker, Scope};

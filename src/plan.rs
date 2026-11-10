@@ -4,26 +4,21 @@
 //! asks which module a unit uses.
 
 mod choices;
-mod given;
 mod model;
 mod order;
 mod production;
 mod reach;
-mod references;
 mod resolve;
-mod usage;
-mod value;
-mod visit;
 
 use std::path::{Path, PathBuf};
 
+use crate::definition::read;
 use crate::definition::{Choices, Profile, Stack};
+use crate::diagnostic::source::{Loc, Sources};
 use crate::diagnostic::{Diagnostic, Diagnostics};
-use crate::read;
-use crate::source::{Loc, Sources};
 
 pub use model::{Because, GivenLine, Plan, PlannedUnit, Readiness, Running, Seen, Shown, Way};
-pub use value::Exact;
+pub use resolve::value::Exact;
 
 use resolve::{Environment, Resolver};
 
@@ -87,7 +82,7 @@ pub fn plan(root: &Path, options: &Options, sources: &mut Sources, d: &mut Diagn
     // With a file that did not parse, the set of units is not known, and
     // every reference to a unit in it would be reported as missing.
     if every_file_parsed {
-        references::check(&stack, &places, d);
+        read::references::check(&stack, &places, d);
     }
     if !d.is_empty() {
         return Outcome::Errors;

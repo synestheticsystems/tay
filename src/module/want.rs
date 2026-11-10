@@ -1,6 +1,6 @@
 //! What a value must be where it is used, checked against what is known of it.
 
-use crate::expr::{Expr, ExprKind, Piece};
+use crate::syntax::expr::{Expr, ExprKind, Piece};
 
 use super::shape::Place;
 

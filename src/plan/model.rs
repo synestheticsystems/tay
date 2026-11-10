@@ -1,6 +1,6 @@
 //! The plan as `tay plan` prints it, in text or JSON.
 
-use super::value::{Exact, Resolved};
+use super::resolve::value::{Exact, Resolved};
 
 #[derive(Debug)]
 pub struct Plan {
