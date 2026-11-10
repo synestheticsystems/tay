@@ -1,7 +1,7 @@
 //! The values units give, and the files they build.
 
 use crate::definition::GiveValue;
-use crate::module::{GivenValue, UnitKind};
+use crate::module::{ModuleValue, UnitKind};
 use crate::plan::resolve::value::{Hole, Resolved, Shape};
 use crate::syntax::expr::{Part, Reference, Type, UnitRef};
 
@@ -74,22 +74,24 @@ impl Resolver<'_> {
             asker,
         };
         let mut value = match &give.value {
-            GiveValue::Value(expr) => self.keyed(key, None, reference.loc, asker, |this| {
+            GiveValue::Value(expr) => self.remembered(key, None, reference.loc, asker, |this| {
                 this.resolve(expr, scope)
             }),
-            GiveValue::Module(GivenValue::Expr(expr)) => {
-                self.keyed(key, None, reference.loc, asker, |this| {
+            GiveValue::Module(ModuleValue::Expr(expr)) => {
+                self.remembered(key, None, reference.loc, asker, |this| {
                     this.resolve(expr, scope)
                 })
             }
-            GiveValue::Endpoint(endpoint) => self.keyed(key, part, reference.loc, asker, |this| {
-                this.endpoint(owner, endpoint, part, asker, reference)
-            }),
-            GiveValue::Module(GivenValue::Port) => Ok(Resolved::known(Shape::Opaque {
+            GiveValue::Endpoint(endpoint) => {
+                self.remembered(key, part, reference.loc, asker, |this| {
+                    this.endpoint(owner, endpoint, part, asker, reference)
+                })
+            }
+            GiveValue::Module(ModuleValue::Port) => Ok(Resolved::known(Shape::Opaque {
                 ty: Some(Type::Number),
                 hole: Hole::Port(unit.name.name.clone()),
             })),
-            GiveValue::Module(GivenValue::Generated { secret }) => {
+            GiveValue::Module(ModuleValue::Generated { secret }) => {
                 let hole = match secret {
                     true => Hole::Secret,
                     false => Hole::Generated {
@@ -106,7 +108,7 @@ impl Resolver<'_> {
                 }
                 Ok(value)
             }
-            GiveValue::Module(GivenValue::Produced { secret }) => {
+            GiveValue::Module(ModuleValue::Produced { secret }) => {
                 let hole = match secret {
                     true => Hole::Secret,
                     false => Hole::Produced {
@@ -161,7 +163,7 @@ impl Resolver<'_> {
             unit: Some(owner),
             asker: Asker::Host,
         };
-        let path = self.keyed(key, None, reference.loc, Asker::Host, |this| {
+        let path = self.remembered(key, None, reference.loc, Asker::Host, |this| {
             this.resolve(&output.path, scope)
         })?;
         let mut value = self.host_path(path, output.path.loc);

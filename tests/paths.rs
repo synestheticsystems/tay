@@ -75,3 +75,15 @@ fn a_file_name_and_template_path_built_from_values_known_before_start_are_checke
         format!("{}/.tay/state/files/named-conf/site.conf", root())
     );
 }
+
+#[test]
+fn a_watched_path_must_exist() {
+    let run = plan("paths", &["--set", "up=forgetful"]);
+    assert_eq!(
+        run.errors(),
+        [format!(
+            "tay.yaml:33:13: `{}/nothing-here`, which this unit watches, does not exist",
+            root()
+        )]
+    );
+}

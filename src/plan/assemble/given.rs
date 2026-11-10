@@ -10,7 +10,7 @@ use crate::plan::model::{GivenLine, Seen, Shown};
 use crate::plan::resolve::value::Resolved;
 use crate::plan::resolve::{Asker, Fail, Scope, ViewProblem};
 
-use super::usage::view_error;
+use crate::plan::reach::usage::view_error;
 
 impl Planner<'_> {
     /// Each value the unit gives, as the host and as a container would see it.

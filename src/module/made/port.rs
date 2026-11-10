@@ -4,7 +4,9 @@ use crate::syntax::fields::Fields;
 use crate::syntax::names::NameAt;
 use crate::syntax::yaml::Node;
 
-use crate::module::shape::{Given, GivenValue, Place, RestartDefault, Slot, UnitKind, UnitShape};
+use crate::module::shape::{
+    ModuleGive, ModuleValue, Place, RestartDefault, Slot, UnitKind, UnitShape,
+};
 use crate::module::want::Want;
 use crate::module::{Cx, Module};
 
@@ -44,12 +46,12 @@ impl Module for Port {
         }
         (cx.d.len() == errors_before).then(|| UnitShape {
             slots,
-            gives: vec![Given {
+            gives: vec![ModuleGive {
                 name: NameAt {
                     name: "number".to_string(),
                     loc: cx.uses,
                 },
-                value: GivenValue::Port,
+                value: ModuleValue::Port,
             }],
             ..UnitShape::new(UnitKind::Made, "when it is held", RestartDefault::Never)
         })

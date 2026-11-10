@@ -1,10 +1,11 @@
 //! Settings: the value in force, typed as declared, and kept secret when
 //! declared so. A setting's value is literal, so it is built from nothing.
 
-use crate::definition::{Literal, SettingValue};
+use crate::definition::SettingValue;
 use crate::diagnostic::Diagnostic;
 use crate::diagnostic::source::Loc;
 use crate::plan::resolve::value::{Hole, Resolved, Shape};
+use crate::syntax::expr::Literal;
 
 use super::{Fail, Res, Resolver};
 

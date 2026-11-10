@@ -8,7 +8,7 @@ use crate::syntax::yaml::Node;
 
 use super::common::{self, environment, run_form};
 use crate::module::shape::{
-    Given, GivenValue, Output, Place, RestartDefault, Runs, Slot, UnitKind, UnitShape,
+    ModuleGive, ModuleValue, Output, Place, RestartDefault, Runs, Slot, UnitKind, UnitShape,
 };
 use crate::module::want::{PathUse, Want};
 use crate::module::{Cx, Module};
@@ -174,7 +174,7 @@ fn runs(settings: &Fields<'_>, d: &mut Diagnostics) -> Runs {
 
 /// `produces`: a list of names, or a mapping from a name to
 /// `{ secret: true }` for a value that is a credential.
-fn produced(node: &Node, d: &mut Diagnostics) -> Vec<Given> {
+fn produced(node: &Node, d: &mut Diagnostics) -> Vec<ModuleGive> {
     const WHAT: &str = "a produced value";
     let named: Vec<(NameAt, bool)> = match node.as_map() {
         Some(_) => fields::keyed(node, WHAT, names::value_name_problem, d)
@@ -192,16 +192,16 @@ fn produced(node: &Node, d: &mut Diagnostics) -> Vec<Given> {
             .map(|name| (name, false))
             .collect(),
     };
-    let mut gives: Vec<Given> = Vec::new();
+    let mut gives: Vec<ModuleGive> = Vec::new();
     for (name, secret) in named {
         match gives.iter().find(|given| given.name.name == name.name) {
             Some(first) => d.push(
                 Diagnostic::new(name.loc, format!("`{}` is listed twice", name.name))
                     .with(first.name.loc, "the first one is here"),
             ),
-            None => gives.push(Given {
+            None => gives.push(ModuleGive {
                 name,
-                value: GivenValue::Produced { secret },
+                value: ModuleValue::Produced { secret },
             }),
         }
     }
@@ -211,7 +211,7 @@ fn produced(node: &Node, d: &mut Diagnostics) -> Vec<Given> {
 #[cfg(test)]
 mod tests {
     use crate::module::testing::check;
-    use crate::module::{GivenValue, PathUse, Runs, UnitKind, Want};
+    use crate::module::{ModuleValue, PathUse, Runs, UnitKind, Want};
 
     #[test]
     fn where_a_command_runs() {
@@ -315,7 +315,7 @@ mod tests {
         let shape = shape.unwrap();
         assert!(matches!(
             shape.gives[0].value,
-            GivenValue::Produced { secret: false }
+            ModuleValue::Produced { secret: false }
         ));
         assert_eq!(shape.outputs[0].name.name, "server");
         let (shape, errors) = check(
@@ -327,7 +327,7 @@ mod tests {
             .unwrap()
             .gives
             .iter()
-            .map(|given| matches!(given.value, GivenValue::Produced { secret: true }))
+            .map(|given| matches!(given.value, ModuleValue::Produced { secret: true }))
             .collect();
         assert_eq!(secret, [true, false]);
         let (_, errors) = check("command", "run: [x]\nproduces: [a, a]\n");

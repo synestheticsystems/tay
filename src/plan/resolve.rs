@@ -7,7 +7,7 @@
 //! address to whoever finally uses it, so switching where one consumer runs
 //! never hands it an address meant for another.
 
-mod endpoint;
+pub mod endpoint;
 mod environment;
 pub mod paths;
 mod settings;
@@ -307,9 +307,10 @@ impl<'s> Resolver<'s> {
         }
     }
 
-    /// Resolves the value `key` names, remembering the result for this part
-    /// and asker, and reporting a circle when the value is built from itself.
-    fn keyed(
+    /// Resolves the value `key` names once for this part and asker, and
+    /// remembers the result; a value built from itself is a circle,
+    /// reported.
+    fn remembered(
         &mut self,
         key: Key,
         part: Option<Part>,

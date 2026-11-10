@@ -11,8 +11,8 @@ use crate::syntax::fields::{self, Fields};
 use crate::syntax::names::{self, NameAt};
 use crate::syntax::yaml::Node;
 
-mod parts;
 pub mod template;
+mod unit_fields;
 
 use template::Template;
 
@@ -72,13 +72,15 @@ impl<'n> WayFields<'n> {
             after: names("after", d),
             gives: fields
                 .get("gives")
-                .map(|node| parts::gives(node, d))
+                .map(|node| unit_fields::gives(node, d))
                 .unwrap_or_default(),
-            ready: fields.get("ready").and_then(|node| parts::ready(node, d)),
+            ready: fields
+                .get("ready")
+                .and_then(|node| unit_fields::ready(node, d)),
             restart: fields
                 .get("restart")
-                .and_then(|node| parts::restart(node, d)),
-            watch: fields.get("watch").map(|node| parts::watch(node, d)),
+                .and_then(|node| unit_fields::restart(node, d)),
+            watch: fields.get("watch").map(|node| unit_fields::watch(node, d)),
         }
     }
 }
@@ -95,7 +97,7 @@ pub fn read_fields(name: NameAt, fields: &Fields<'_>, d: &mut Diagnostics) -> Un
         .and_then(|node| fields::boolean(node, "`action`", d))
         .unwrap_or(false);
     let args = match fields.entry("args") {
-        Some((_, args)) if is_action => parts::args(args, d),
+        Some((_, args)) if is_action => unit_fields::args(args, d),
         Some((key, _)) => {
             d.error(
                 key.loc,

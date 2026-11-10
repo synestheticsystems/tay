@@ -10,22 +10,16 @@ use crate::syntax::expr::Expr;
 use crate::syntax::names::NameAt;
 
 use super::Planner;
+use super::reach::Reached;
 use super::resolve::paths::normalized;
 use super::resolve::{Asker, Scope};
 
-/// A unit in the plan, with the way it runs and where that was chosen.
-pub struct Chosen {
-    pub unit: usize,
-    pub way: usize,
-    pub chosen_at: Option<Loc>,
-}
-
 impl Planner<'_> {
-    pub fn refuse_for_production(&mut self, profile: &NameAt, marked_at: Loc, units: &[Chosen]) {
+    pub fn refuse_for_production(&mut self, profile: &NameAt, marked_at: Loc, reached: &Reached) {
         let stack = self.resolver.stack;
-        for chosen in units {
-            let unit = &stack.units[chosen.unit];
-            let way = &unit.ways[chosen.way];
+        for (index, visit) in &reached.visits {
+            let unit = &stack.units[*index];
+            let way = &unit.ways[visit.way];
             let Some(module) = &way.module else {
                 continue;
             };
@@ -40,7 +34,7 @@ impl Planner<'_> {
                     }
                     Concern::MountsHostPath(from) => {
                         let asker = Asker::of(&module.shape.kind);
-                        if let Some(why) = self.mount_outside(chosen.unit, from, asker) {
+                        if let Some(why) = self.mount_outside(*index, from, asker) {
                             refusals.push((from.loc, why));
                         }
                     }
@@ -58,7 +52,7 @@ impl Planner<'_> {
                     ),
                 )
                 .with(marked_at, "the profile is marked production here");
-                if let (Some(at), Some(name)) = (chosen.chosen_at, &way.name) {
+                if let (Some(at), Some(name)) = (visit.chosen_at, &way.name) {
                     error = error.with(at, format!("way `{}` is chosen here", name.name));
                 }
                 self.resolver.d.push(error);

@@ -171,7 +171,7 @@ mod tests {
         ["a", "b", "c", "d"][unit].to_string()
     }
 
-    fn runs(_: usize) -> bool {
+    fn none_made(_: usize) -> bool {
         false
     }
 
@@ -181,7 +181,7 @@ mod tests {
         let order = order(
             &[0, 1, 2, 3],
             &name,
-            &runs,
+            &none_made,
             &edges(&[(0, 2), (1, 2), (2, 3)]),
             &mut d,
         );
@@ -203,7 +203,7 @@ mod tests {
         let order = order(
             &[0, 1, 2, 3],
             &name,
-            &runs,
+            &none_made,
             &edges(&[(0, 1), (1, 2), (2, 0), (3, 0)]),
             &mut d,
         );
@@ -220,7 +220,10 @@ mod tests {
     #[test]
     fn a_unit_that_needs_itself_is_a_circle() {
         let mut d = Diagnostics::default();
-        assert_eq!(order(&[0], &name, &runs, &edges(&[(0, 0)]), &mut d), None);
+        assert_eq!(
+            order(&[0], &name, &none_made, &edges(&[(0, 0)]), &mut d),
+            None
+        );
         assert_eq!(
             d.into_sorted()[0].message,
             "a circle among units: `a` needs `a`"

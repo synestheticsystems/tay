@@ -4,7 +4,9 @@ use crate::syntax::fields::{self, Fields};
 use crate::syntax::names::NameAt;
 use crate::syntax::yaml::Node;
 
-use crate::module::shape::{Given, GivenValue, Place, RestartDefault, Slot, UnitKind, UnitShape};
+use crate::module::shape::{
+    ModuleGive, ModuleValue, Place, RestartDefault, Slot, UnitKind, UnitShape,
+};
 use crate::module::want::Want;
 use crate::module::{Cx, Module};
 
@@ -92,12 +94,12 @@ impl Module for Secret {
         }
         shape.gives = gives
             .iter()
-            .map(|(name, secret)| Given {
+            .map(|(name, secret)| ModuleGive {
                 name: NameAt {
                     name: (*name).to_string(),
                     loc: cx.uses,
                 },
-                value: GivenValue::Generated { secret: *secret },
+                value: ModuleValue::Generated { secret: *secret },
             })
             .collect();
         (cx.d.len() == errors_before).then_some(shape)
@@ -106,7 +108,7 @@ impl Module for Secret {
 
 #[cfg(test)]
 mod tests {
-    use crate::module::GivenValue;
+    use crate::module::ModuleValue;
     use crate::module::testing::check;
 
     /// What the unit gives, each with whether it is secret.
@@ -117,7 +119,7 @@ mod tests {
             .gives
             .into_iter()
             .map(|g| {
-                let GivenValue::Generated { secret } = g.value else {
+                let ModuleValue::Generated { secret } = g.value else {
                     panic!("a secret's values are generated");
                 };
                 (g.name.name, secret)

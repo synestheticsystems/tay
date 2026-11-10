@@ -28,6 +28,25 @@ impl Type {
     }
 }
 
+/// A value written out in full: what a setting holds. A `${` in it is not
+/// a reference.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Literal {
+    Text(String),
+    Number(i64),
+    Bool(bool),
+}
+
+impl Literal {
+    pub fn ty(&self) -> Type {
+        match self {
+            Literal::Text(_) => Type::Text,
+            Literal::Number(_) => Type::Number,
+            Literal::Bool(_) => Type::Bool,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Expr {
     pub loc: Loc,

@@ -33,6 +33,8 @@ pub struct NeedEdge {
 /// What visiting one unit adds to the plan.
 pub struct Visit {
     pub way: usize,
+    /// Where the way was chosen, for a unit with ways.
+    pub chosen_at: Option<Loc>,
     /// `None` when one of its values could not be resolved; that is reported.
     pub planned: Option<PlannedUnit>,
     pub needs: Vec<NeedEdge>,
@@ -46,7 +48,7 @@ pub struct Visit {
 }
 
 impl Planner<'_> {
-    pub fn visit(&mut self, unit: usize, way_index: usize) -> Visit {
+    pub fn visit(&mut self, unit: usize, way_index: usize, chosen_at: Option<Loc>) -> Visit {
         let stack = self.resolver.stack;
         let definition = &stack.units[unit];
         let way = &definition.ways[way_index];
@@ -107,6 +109,7 @@ impl Planner<'_> {
         })();
         Visit {
             way: way_index,
+            chosen_at,
             planned,
             needs,
             after,

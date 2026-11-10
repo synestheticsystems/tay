@@ -54,7 +54,7 @@ fn every_way_gives_the_same_value_names_and_a_missing_one_is_reported_once() {
 }
 
 #[test]
-fn a_way_writing_no_ready_or_restart_has_its_units() {
+fn a_way_writing_no_ready_or_restart_takes_the_ones_its_unit_writes() {
     let plan = plan_json("ways-shared", &[]);
     let server = unit(&plan, "server");
     assert_eq!(server["ready"]["check"], "log");
@@ -68,7 +68,7 @@ fn a_way_writing_no_ready_or_restart_has_its_units() {
 }
 
 #[test]
-fn a_units_with_is_joined_into_each_way_setting_by_setting_and_env_entry_by_entry() {
+fn the_with_a_unit_writes_is_joined_into_each_way_setting_by_setting_and_env_entry_by_entry() {
     // The ways replace `REPLACED`, which is not a value, and keep `KEPT`,
     // which is not one either; `source` replaces `workdir` and `image` does
     // not; and `held`, a port, has neither setting.

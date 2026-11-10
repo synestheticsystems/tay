@@ -27,3 +27,7 @@ units:
     with:
       template: "${environment.root}/stack/units/conf/site.conf.tmpl"
       name: "${settings.conf_name}.conf"
+  forgetful:
+    uses: process
+    with: { command: [work] }
+    watch: [./nothing-here]

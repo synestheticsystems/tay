@@ -73,6 +73,28 @@ fn the_container_a_command_runs_inside_comes_up_as_its_need() {
     );
 }
 
+#[test]
+fn a_circle_of_needs_is_an_error_showing_the_whole_circle() {
+    let run = plan("needs-circle", &[]);
+    assert_eq!(run.code, 2);
+    assert_eq!(
+        run.errors(),
+        [
+            "tay.yaml:4:28: a circle among units: `a` needs `b`, `b` needs `c`, and `c` needs `a`",
+            "  tay.yaml:6:28: the circle closes here",
+        ]
+    );
+}
+
+#[test]
+fn a_command_runs_inside_a_unit_only_if_that_unit_runs_in_a_container_of_its_own() {
+    let run = plan("in-needs", &["--set", "up=bad-in"]);
+    assert_eq!(
+        run.errors(),
+        ["tay.yaml:8:40: `in` names unit `worker`, which does not run in a container of its own"]
+    );
+}
+
 fn plan_text() -> String {
     let run = plan("made-values", &[]);
     assert_eq!(run.code, 0, "{}", run.stderr);

@@ -109,18 +109,21 @@ pub fn read(root: &Path, sources: &mut Sources, d: &mut Diagnostics) -> Outcome 
     }
 }
 
-/// Reads a choices file outside the stack (the personal one), if it exists.
-pub fn optional_choices(
-    path: &Path,
+/// Reads this person's own choices for the stack `stack`,
+/// `~/.config/tay/<stack>.yaml`, if the file exists.
+pub fn personal_choices(
+    home: &Path,
+    stack: &str,
     root: &Path,
     sources: &mut Sources,
     d: &mut Diagnostics,
 ) -> Option<Choices> {
+    let path = home.join(".config/tay").join(format!("{stack}.yaml"));
     if !path.is_file() {
         return None;
     }
     let mut reader = Reader::new(root, sources, d);
-    let node = reader.parse(path)?;
+    let node = reader.parse(&path)?;
     choices_file(&node, reader.d)
 }
 

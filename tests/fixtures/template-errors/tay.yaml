@@ -10,4 +10,5 @@ units:
   fourth: { from: named, params: { module: port } }
   fifth: { from: listed }
   sixth: { from: joined, params: { env: { REPLACED: [a, list], KEPT: [a, list] } } }
+  seventh: { from: database, params: { name: x }, uses: port }
 up: []

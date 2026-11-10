@@ -3,6 +3,7 @@
 //! could start in. It works from what modules say about units and never
 //! asks which module a unit uses.
 
+mod assemble;
 mod choices;
 mod model;
 mod order;
@@ -65,8 +66,7 @@ pub fn plan(root: &Path, options: &Options, sources: &mut Sources, d: &mut Diagn
     // A production stack must not change with whoever runs the command.
     let personal = match (&options.home, &stack.name, production) {
         (Some(home), Some(name), None) => {
-            let path = home.join(".config/tay").join(format!("{}.yaml", name.name));
-            read::optional_choices(&path, root, sources, d)
+            read::personal_choices(home, &name.name, root, sources, d)
         }
         _ => None,
     };
@@ -126,7 +126,7 @@ pub fn plan(root: &Path, options: &Options, sources: &mut Sources, d: &mut Diagn
     };
     let reached = planner.reach(&layered.up);
     if let (Some(profile), Some(marked_at)) = (profile, production) {
-        planner.refuse_for_production(&profile.name, marked_at, &reached.chosen);
+        planner.refuse_for_production(&profile.name, marked_at, &reached);
     }
     let plan = planner.finish(reached, &stack, &stack_name.name, profile);
     planner.resolver.report_unset_settings();

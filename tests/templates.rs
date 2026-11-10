@@ -34,6 +34,7 @@ fn a_missing_required_parameter_and_an_undeclared_one_are_errors() {
             // A mapping parameter joins with a way's `env` entry by entry: the
             // way's `REPLACED` wins and the parameter's `KEPT` is read.
             "tay.yaml:12:70: a value is text, a whole number or true or false; this is a list",
+            "tay.yaml:13:51: a unit made `from` a template has only `doc`, `from`, `params`, `needs` and `after`; `uses` belongs in the template",
             // An error in the template's own text, found for each unit made
             // from it, is reported once, naming each.
             "stack/templates/bad-setting.yaml:5:11: `colour` is not a field of the settings of a `port` unit; its fields are prefer, fixed",
@@ -49,6 +50,7 @@ fn a_missing_required_parameter_and_an_undeclared_one_are_errors() {
             "stack/templates/listed.yaml:2:7: a template's unit must be a mapping; this is a list",
             // A parameter cannot fill a field that is written out.
             "stack/templates/named.yaml:4:10: `${params.module}` cannot fill `uses`: references are not allowed in `uses`, `from`, `needs`, `after` or `action`",
+            "stack/templates/nested.yaml:2:3: a template may not itself use `from`",
         ]
     );
 }

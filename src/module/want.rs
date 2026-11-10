@@ -120,7 +120,7 @@ impl Want {
     fn accepts(&self, text: &str) -> bool {
         match self {
             Want::OneOf(choices) => choices.contains(&text),
-            Want::Duration => parse_duration(text).is_some(),
+            Want::Duration => is_duration(text),
             Want::FileMode => {
                 (3..=4).contains(&text.len()) && text.chars().all(|c| ('0'..='7').contains(&c))
             }
@@ -151,20 +151,13 @@ impl Want {
 }
 
 /// Seconds in a duration written as a whole number and `s`, `m` or `h`.
-pub fn parse_duration(text: &str) -> Option<u64> {
-    let unit = text.chars().last()?;
-    let scale = match unit {
-        's' => 1,
-        'm' => 60,
-        'h' => 3600,
-        _ => return None,
+fn is_duration(text: &str) -> bool {
+    let Some(number) = text.strip_suffix(['s', 'm', 'h']) else {
+        return false;
     };
-    let number = &text[..text.len() - 1];
-    if number.is_empty() || !number.chars().all(|c| c.is_ascii_digit()) {
-        return None;
-    }
-    let value: u64 = number.parse().ok()?;
-    (value > 0).then(|| value.saturating_mul(scale))
+    !number.is_empty()
+        && number.chars().all(|c| c.is_ascii_digit())
+        && number.parse::<u64>().is_ok_and(|n| n > 0)
 }
 
 #[cfg(test)]
@@ -177,11 +170,11 @@ mod tests {
 
     #[test]
     fn durations() {
-        assert_eq!(parse_duration("2m"), Some(120));
-        assert_eq!(parse_duration("30s"), Some(30));
-        assert_eq!(parse_duration("1h"), Some(3600));
+        for good in ["2m", "30s", "1h"] {
+            assert!(is_duration(good), "{good}");
+        }
         for bad in ["2", "m", "1.5m", "0s", "2d", "-1s"] {
-            assert_eq!(parse_duration(bad), None, "{bad}");
+            assert!(!is_duration(bad), "{bad}");
         }
     }
 

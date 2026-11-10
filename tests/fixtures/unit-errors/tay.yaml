@@ -1,0 +1,16 @@
+format: 1
+stack: unit-errors
+up: []
+units:
+  twice:
+    gives: { name: a }
+    run:
+      only: { uses: port, gives: { name: b } }
+  empty: { run: {} }
+  both:
+    uses: process
+    with:
+      command: [x]
+      env: { TOKEN: a }
+      secret_env: { TOKEN: "${pw.value}" }
+  pw: { uses: secret, with: { kind: password } }

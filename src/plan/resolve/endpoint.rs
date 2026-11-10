@@ -15,7 +15,9 @@ use crate::syntax::expr::{Part, Reference};
 use super::{Asker, Fail, Res, Resolver, Scope, ViewProblem};
 use crate::plan::resolve::value::{Bit, Exact, Resolved, Shape};
 
-const LOOPBACK: &str = "127.0.0.1";
+/// The host's own address, which a unit on the host reaches another at and
+/// a published port is opened on unless its entry names another.
+pub const LOOPBACK: &str = "127.0.0.1";
 
 /// The name Docker gives the host inside its containers.
 const HOST_SEEN_FROM_CONTAINERS: &str = "host.docker.internal";

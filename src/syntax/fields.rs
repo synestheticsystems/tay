@@ -1,10 +1,9 @@
 //! Reading a mapping strictly: each field taken by name, and any key that is
 //! not a field of the thing being read reported as an error.
 
-use crate::definition::Literal;
 use crate::diagnostic::Diagnostics;
 use crate::diagnostic::source::Loc;
-use crate::syntax::expr::{self, Expr};
+use crate::syntax::expr::{self, Expr, Literal};
 use crate::syntax::names::{self, NameAt};
 use crate::syntax::yaml::{Kind, Node, Scalar};
 

@@ -64,3 +64,18 @@ fn folders_and_files_that_define_no_unit_are_errors_rather_than_skipped() {
         ]
     );
 }
+
+#[test]
+fn a_value_given_twice_a_run_with_no_ways_and_a_variable_set_twice_are_errors() {
+    let run = plan("unit-errors", &[]);
+    assert_eq!(
+        run.errors(),
+        [
+            "tay.yaml:8:36: `name` is given twice",
+            "  tay.yaml:6:14: it is given here first",
+            "tay.yaml:9:17: `run` lists no ways",
+            "tay.yaml:15:21: `TOKEN` is set in both `env` and `secret_env`",
+            "  tay.yaml:14:14: it is set in `env` here",
+        ]
+    );
+}

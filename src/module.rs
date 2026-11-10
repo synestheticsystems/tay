@@ -12,7 +12,7 @@ use crate::diagnostic::source::Loc;
 use crate::syntax::yaml::Node;
 
 pub use shape::{
-    Concern, GivenValue, Output, Place, Published, RestartDefault, Runs, UnitKind, UnitShape,
+    Concern, ModuleValue, Output, Place, Published, RestartDefault, Runs, UnitKind, UnitShape,
     VolumeMount,
 };
 pub use want::{Form, PathUse, Want};

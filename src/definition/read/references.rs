@@ -4,7 +4,7 @@
 
 use crate::definition::{Check, Choices, GiveValue, SettingValue, Stack, Unit, Way};
 use crate::diagnostic::{Diagnostic, Diagnostics};
-use crate::module::{GivenValue, Runs, UnitKind, VolumeMount};
+use crate::module::{ModuleValue, Runs, UnitKind, VolumeMount};
 use crate::syntax::expr::{Expr, Part, Reference, Target, UnitRef, View};
 use crate::syntax::names::NameAt;
 
@@ -62,7 +62,7 @@ fn exprs(way: &Way) -> Vec<&Expr> {
     }
     for give in &way.gives {
         match &give.value {
-            GiveValue::Value(expr) | GiveValue::Module(GivenValue::Expr(expr)) => all.push(expr),
+            GiveValue::Value(expr) | GiveValue::Module(ModuleValue::Expr(expr)) => all.push(expr),
             GiveValue::Endpoint(endpoint) => {
                 all.push(&endpoint.port);
                 all.extend(

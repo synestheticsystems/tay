@@ -125,35 +125,3 @@ fn a_circle_among_values_known_before_start_is_an_error_showing_the_circle() {
         ]
     );
 }
-
-#[test]
-fn a_circle_of_needs_is_an_error_showing_the_whole_circle() {
-    let run = plan("needs-circle", &[]);
-    assert_eq!(run.code, 2);
-    assert_eq!(
-        run.errors(),
-        [
-            "tay.yaml:4:28: a circle among units: `a` needs `b`, `b` needs `c`, and `c` needs `a`",
-            "  tay.yaml:6:28: the circle closes here",
-        ]
-    );
-}
-
-#[test]
-fn after_brings_nothing_in_and_an_action_comes_up_only_when_named() {
-    let dev = plan_json("actions", &[]);
-    assert_eq!(unit_names(&dev), ["app"]);
-    assert_eq!(
-        unit(&dev, "app")["after"],
-        json!([{ "unit": "logger", "comes_up": false }])
-    );
-    let seeding = plan_json("actions", &["--profile", "seeding"]);
-    assert_eq!(unit_names(&seeding), ["app", "seed"]);
-    let run = plan("actions", &["--profile", "broken"]);
-    assert_eq!(
-        run.errors(),
-        [
-            "tay.yaml:13:37: unit `needs-seed` needs `seed`, which is an action: it comes up only when `up` names it"
-        ]
-    );
-}

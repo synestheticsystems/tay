@@ -19,7 +19,7 @@ pub struct UnitShape {
     /// it goes.
     pub slots: Vec<Slot>,
     /// The values the module gives, used as `${unit.name}`.
-    pub gives: Vec<Given>,
+    pub gives: Vec<ModuleGive>,
     /// The files the unit builds, used as `${unit.outputs.name}`.
     pub outputs: Vec<Output>,
     /// The named volumes the unit owns.
@@ -159,13 +159,13 @@ pub struct Output {
 
 /// A value a module gives.
 #[derive(Clone, Debug)]
-pub struct Given {
+pub struct ModuleGive {
     pub name: NameAt,
-    pub value: GivenValue,
+    pub value: ModuleValue,
 }
 
 #[derive(Clone, Debug)]
-pub enum GivenValue {
+pub enum ModuleValue {
     /// Built from other values, all known before start unless one is produced.
     Expr(Expr),
     /// A host port this environment holds: a number, known before start,

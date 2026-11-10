@@ -4,3 +4,5 @@ up: [setup]
 units:
   db: { uses: container, with: { image: example/db } }
   setup: { uses: command, with: { in: db, run: [setup] } }
+  worker: { uses: process, with: { command: [work] } }
+  bad-in: { uses: command, with: { in: worker, run: [x] } }

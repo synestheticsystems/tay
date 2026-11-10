@@ -3,7 +3,8 @@
 
 mod support;
 
-use support::{given, plan, plan_json, unit};
+use serde_json::json;
+use support::{given, plan, plan_json, unit, unit_names};
 
 #[test]
 fn an_actions_arguments_print_as_placeholders() {
@@ -25,6 +26,25 @@ fn args_go_only_with_an_action_and_a_reference_names_one_it_declares() {
             "tay.yaml:7:5: `args` goes with `action: true`: only an action is asked for with arguments",
             "tay.yaml:10:18: `${args.x}` is an action's argument, and unit `other` is not an action",
             "tay.yaml:15:26: `${args.nobody}`: action `mint` declares no argument `nobody`",
+        ]
+    );
+}
+
+#[test]
+fn after_brings_nothing_in_and_an_action_comes_up_only_when_named() {
+    let dev = plan_json("actions", &[]);
+    assert_eq!(unit_names(&dev), ["app"]);
+    assert_eq!(
+        unit(&dev, "app")["after"],
+        json!([{ "unit": "logger", "comes_up": false }])
+    );
+    let seeding = plan_json("actions", &["--profile", "seeding"]);
+    assert_eq!(unit_names(&seeding), ["app", "seed"]);
+    let run = plan("actions", &["--profile", "broken"]);
+    assert_eq!(
+        run.errors(),
+        [
+            "tay.yaml:13:37: unit `needs-seed` needs `seed`, which is an action: it comes up only when `up` names it"
         ]
     );
 }

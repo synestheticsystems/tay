@@ -243,7 +243,7 @@ mod tests {
     }
 
     #[test]
-    fn a_bad_set_names_its_place_and_never_its_value() {
+    fn a_bad_set_is_an_error_at_its_place() {
         assert_eq!(
             set("colour=red").1,
             [

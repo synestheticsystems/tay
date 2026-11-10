@@ -7,7 +7,7 @@ use crate::syntax::names::NameAt;
 use crate::syntax::yaml::Node;
 
 use crate::module::shape::{
-    Claim, Given, GivenValue, Place, RestartDefault, Slot, UnitKind, UnitShape,
+    Claim, ModuleGive, ModuleValue, Place, RestartDefault, Slot, UnitKind, UnitShape,
 };
 use crate::module::want::{PathUse, Want};
 use crate::module::{Cx, Module};
@@ -121,12 +121,12 @@ impl Module for File {
         let mut path = dir.clone();
         path.push(Piece::Lit("/".to_string()));
         path.extend(name_pieces);
-        let given = |name: &str, pieces: Vec<Piece>| Given {
+        let given = |name: &str, pieces: Vec<Piece>| ModuleGive {
             name: NameAt {
                 name: name.to_string(),
                 loc: cx.uses,
             },
-            value: GivenValue::Expr(Expr {
+            value: ModuleValue::Expr(Expr {
                 loc: cx.uses,
                 kind: ExprKind::Text(pieces),
             }),
@@ -190,7 +190,7 @@ mod tests {
             let shape = check("file", with).0.unwrap();
             let names: Vec<_> = shape.gives.iter().map(|g| g.name.name.as_str()).collect();
             assert_eq!(names, ["path", "dir"]);
-            let GivenValue::Expr(path) = &shape.gives[0].value else {
+            let ModuleValue::Expr(path) = &shape.gives[0].value else {
                 panic!("the path is built from values");
             };
             let ExprKind::Text(pieces) = &path.kind else {
