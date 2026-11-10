@@ -220,6 +220,21 @@ impl Pass {
             }
             Ok(Found::Lost { attempt }) => Begin::Lost { attempt },
         };
+        // Until its task first says how it stands, it is said to be found,
+        // so that no one reads the state the table gave it before.
+        let found = match &begin {
+            Begin::UnderWay(under_way) => {
+                Some(format!("attempt {}, found under way", under_way.attempt))
+            }
+            Begin::Ended { attempt, .. } => Some(format!("attempt {attempt}, found ended")),
+            Begin::Lost { attempt } => Some(format!(
+                "attempt {attempt}, found with no record of how it ended"
+            )),
+            Begin::Fresh => None,
+        };
+        if let Some(found) = found {
+            supervisor.record(&planned.name, UnitState::new(State::Starting, found), None);
+        }
         supervisor.tend(planned, running, begin, up);
         None
     }
