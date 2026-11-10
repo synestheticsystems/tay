@@ -213,32 +213,40 @@ impl Units {
             .collect()
     }
 
-    /// Every unit but `named` that needs one of them, or needs in turn a
-    /// unit that does, or that mounts a volume one of them owns, in the
-    /// order units start in: what would hold what `named` keep while it
-    /// runs.
+    /// Every unit but `named` that needs one of them or mounts a volume one
+    /// of them owns, directly or through other units that do, in the order
+    /// units start in: what would hold what `named` keep while it runs.
     pub fn holding(&self, named: &[String]) -> Vec<Arc<PlannedUnit>> {
-        let mut needed: HashSet<&str> = named.iter().map(String::as_str).collect();
-        let mut holding = Vec::new();
-        // A unit starts after what it needs, so going from the first finds
-        // each need before what needs it.
-        for known in &self.known {
-            let planned = &known.planned;
-            if named.contains(&planned.name) {
-                continue;
-            }
-            let needs = (planned.needs.iter()).any(|need| needed.contains(need.unit.as_str()));
-            let mounts = (planned.mechanism.iter())
-                .flat_map(|mechanism| &mechanism.mounts_volumes_of)
-                .any(|owner| named.contains(owner));
-            if needs {
-                needed.insert(planned.name.as_str());
-            }
-            if needs || mounts {
-                holding.push(Arc::clone(planned));
+        let mut held: HashSet<&str> = named.iter().map(String::as_str).collect();
+        // Mounting a volume orders nothing, so a unit may start before the
+        // one whose volume it mounts: the units are gone over until a pass
+        // finds no more.
+        let mut found = true;
+        while found {
+            found = false;
+            for known in &self.known {
+                let planned = &known.planned;
+                if held.contains(planned.name.as_str()) {
+                    continue;
+                }
+                let needs = (planned.needs.iter()).any(|need| held.contains(need.unit.as_str()));
+                let mounts = (planned.mechanism.iter())
+                    .flat_map(|mechanism| &mechanism.mounts_volumes_of)
+                    .any(|owner| held.contains(owner.as_str()));
+                if needs || mounts {
+                    held.insert(planned.name.as_str());
+                    found = true;
+                }
             }
         }
-        holding
+        self.known
+            .iter()
+            .map(|known| &known.planned)
+            .filter(|planned| {
+                held.contains(planned.name.as_str()) && !named.contains(&planned.name)
+            })
+            .cloned()
+            .collect()
     }
 
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = &Known> {

@@ -53,19 +53,23 @@ fn wiping_a_container_removes_its_volumes_and_brings_it_up_from_nothing() {
 }
 
 #[test]
-fn a_container_that_mounts_the_volumes_wiped_is_stopped_first_and_brought_up_again() {
+fn what_mounts_the_volumes_wiped_and_what_needs_it_are_stopped_first_and_brought_up_again() {
     let machine = Machine::with_docker();
     let root = machine.stack("containers");
-    let up = machine.at(&root, "up", &["keeper-data", "data-reader"]);
+    let up = machine.at(&root, "up", &["keeper-data", "reader-user"]);
     assert_eq!(up.code, 0, "{}{}", up.stdout, up.stderr);
     let reader = super::container(&machine, &root, "data-reader").unwrap();
     // The reader does not need the keeper, and holds its volume: Docker
-    // removes no volume a container uses.
+    // removes no volume a container uses. What needs the reader is stopped
+    // before it, the last to start the first to stop.
     let wipe = machine.at(&root, "wipe", &["keeper-data", "--yes"]);
     assert_eq!(wipe.code, 0, "{}{}", wipe.stdout, wipe.stderr);
     assert_eq!(
-        wipe.changes()[0],
-        "data-reader stopped stopped by `tay wipe`"
+        wipe.changes()[..2],
+        [
+            "reader-user stopped stopped by `tay wipe`",
+            "data-reader stopped stopped by `tay wipe`"
+        ]
     );
     assert!(
         wipe.stdout
