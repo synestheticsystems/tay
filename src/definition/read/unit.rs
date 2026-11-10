@@ -3,7 +3,7 @@
 
 use std::borrow::Cow;
 
-use crate::definition::{Action, Give, GiveValue, ModuleUse, Ready, Restart, Unit, Way};
+use crate::definition::{Action, Body, Give, GiveValue, Mechanism, Ready, Restart, Unit, Way};
 use crate::diagnostic::{Diagnostic, Diagnostics};
 use crate::module::{self, Cx, Module, UnitKind};
 use crate::syntax::expr::Expr;
@@ -41,7 +41,7 @@ pub fn unreadable(name: NameAt) -> Unit {
         name,
         doc: None,
         action: None,
-        ways: Vec::new(),
+        body: Body::Unreadable,
     }
 }
 
@@ -112,7 +112,7 @@ pub fn read_fields(name: NameAt, fields: &Fields<'_>, d: &mut Diagnostics) -> Un
     if let Some((key, _)) = fields.entry("params") {
         d.error(key.loc, "`params` goes with `from`: they fill a template");
     }
-    let ways = match (fields.entry("uses"), fields.entry("run")) {
+    let body = match (fields.entry("uses"), fields.entry("run")) {
         (Some(_), Some((run, _))) => {
             d.error(
                 run.loc,
@@ -122,23 +122,24 @@ pub fn read_fields(name: NameAt, fields: &Fields<'_>, d: &mut Diagnostics) -> Un
         }
         (Some(_), None) => {
             let own = WayFields::read(fields, d);
-            way(&name.name, None, fields, own, &WayFields::default(), d).map(|way| vec![way])
+            mechanism(&name.name, fields, own, &WayFields::default(), d)
+                .map(|mechanism| Body::Module(Box::new(mechanism)))
         }
-        (None, Some((_, run))) => ways(&name, fields, run, d),
-        (None, None) => group(fields, d),
+        (None, Some((_, run))) => ways(&name, fields, run, d).map(Body::Ways),
+        (None, None) => Some(group(fields, d)),
     };
-    match ways {
-        Some(ways) if d.len() == errors_before => Unit {
+    match body {
+        Some(body) if d.len() == errors_before => Unit {
             name,
             doc,
             action,
-            ways,
+            body,
         },
         _ => unreadable(name),
     }
 }
 
-fn group(fields: &Fields<'_>, d: &mut Diagnostics) -> Option<Vec<Way>> {
+fn group(fields: &Fields<'_>, d: &mut Diagnostics) -> Body {
     for (field, key) in fields.present() {
         if !matches!(field, "doc" | "needs") {
             d.error(
@@ -149,16 +150,9 @@ fn group(fields: &Fields<'_>, d: &mut Diagnostics) -> Option<Vec<Way>> {
             );
         }
     }
-    Some(vec![Way {
-        name: None,
-        module: None,
+    Body::Group {
         needs: WayFields::read(fields, d).needs,
-        after: Vec::new(),
-        gives: Vec::new(),
-        ready: None,
-        restart: None,
-        watch: Vec::new(),
-    }])
+    }
 }
 
 fn ways(name: &NameAt, fields: &Fields<'_>, run: &Node, d: &mut Diagnostics) -> Option<Vec<Way>> {
@@ -184,7 +178,11 @@ fn ways(name: &NameAt, fields: &Fields<'_>, run: &Node, d: &mut Diagnostics) -> 
         .map(|(way_name, node)| {
             let fields = Fields::of(node, "a way", WAY_FIELDS, d)?;
             let own = WayFields::read(&fields, d);
-            way(&name.name, Some(way_name), &fields, own, &shared, d)
+            let mechanism = mechanism(&name.name, &fields, own, &shared, d)?;
+            Some(Way {
+                name: way_name,
+                mechanism,
+            })
         })
         .collect();
     let ways: Vec<Way> = ways.into_iter().collect::<Option<_>>()?;
@@ -192,17 +190,16 @@ fn ways(name: &NameAt, fields: &Fields<'_>, run: &Node, d: &mut Diagnostics) -> 
     Some(ways)
 }
 
-/// One way to run: a module and its settings, with what the unit writes for
-/// all its ways joined to what this one writes. `fields` holds the way's
-/// `uses`.
-fn way(
+/// A module and its settings, with what a unit writes for all its ways
+/// joined to what this way writes; for a unit with `uses`, `shared` is
+/// empty. `fields` holds the `uses`.
+fn mechanism(
     unit: &str,
-    way_name: Option<NameAt>,
     fields: &Fields<'_>,
     own: WayFields<'_>,
     shared: &WayFields<'_>,
     d: &mut Diagnostics,
-) -> Option<Way> {
+) -> Option<Mechanism> {
     let (uses_key, uses) = fields.entry("uses").or_else(|| {
         d.error(
             fields.loc(),
@@ -259,13 +256,10 @@ fn way(
             None => gives.push(give),
         }
     }
-    Some(Way {
-        name: way_name,
-        module: Some(ModuleUse {
-            module,
-            uses: uses_key.loc,
-            shape,
-        }),
+    Some(Mechanism {
+        module,
+        uses: uses_key.loc,
+        shape,
         needs: joined(&shared.needs, own.needs),
         after: joined(&shared.after, own.after),
         gives,
@@ -308,11 +302,13 @@ pub fn joined(first: &[NameAt], more: Vec<NameAt>) -> Vec<NameAt> {
 /// does not break when the unit is switched to another way of running.
 fn same_value_names(unit: &NameAt, ways: &[Way], d: &mut Diagnostics) {
     let given = |way: &Way| -> Vec<NameAt> {
-        let outputs = way.outputs().iter().map(|output| NameAt {
+        let mechanism = &way.mechanism;
+        let outputs = mechanism.outputs().iter().map(|output| NameAt {
             name: format!("outputs.{}", output.name.name),
             loc: output.name.loc,
         });
-        way.gives
+        mechanism
+            .gives
             .iter()
             .map(|give| give.name.clone())
             .chain(outputs)
@@ -321,19 +317,14 @@ fn same_value_names(unit: &NameAt, ways: &[Way], d: &mut Diagnostics) {
     // Each name, with the first way that gives it and where.
     let mut every: Vec<(NameAt, &NameAt)> = Vec::new();
     for way in ways {
-        let Some(way_name) = &way.name else {
-            continue;
-        };
         for name in given(way) {
             if !every.iter().any(|(n, _)| n.name == name.name) {
-                every.push((name, way_name));
+                every.push((name, &way.name));
             }
         }
     }
     for way in ways {
-        let Some(this) = &way.name else {
-            continue;
-        };
+        let this = &way.name;
         let names = given(way);
         for (name, that) in &every {
             if names.iter().any(|n| n.name == name.name) {

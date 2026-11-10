@@ -13,14 +13,14 @@ use crate::syntax::names::NameAt;
 
 use super::Planner;
 use super::model::Shown;
-use super::resolve::Asker;
 use super::resolve::endpoint::LOOPBACK;
+use super::resolve::{Asker, Chosen};
 use usage::{User, Uses};
 use visit::{OpenedAt, Visit};
 
 /// The published ports something in the plan opens, by container unit and
 /// container port.
-pub fn opened_ports(visits: &[(usize, Visit)]) -> HashSet<(String, i64)> {
+pub fn opened_ports(visits: &[(usize, Visit<'_>)]) -> HashSet<(String, i64)> {
     visits
         .iter()
         .flat_map(|(_, visit)| &visit.opens)
@@ -30,12 +30,12 @@ pub fn opened_ports(visits: &[(usize, Visit)]) -> HashSet<(String, i64)> {
 
 /// The units that come up, each with its visit, in the order they were
 /// found.
-pub struct Reached {
-    pub visits: Vec<(usize, Visit)>,
+pub struct Reached<'s> {
+    pub visits: Vec<(usize, Visit<'s>)>,
 }
 
-impl Planner<'_> {
-    pub fn reach(&mut self, up: &[NameAt]) -> Reached {
+impl<'s> Planner<'s> {
+    pub fn reach(&mut self, up: &[NameAt]) -> Reached<'s> {
         let named: Vec<usize> = up
             .iter()
             .filter_map(|name| self.resolver.unit_index(&name.name))
@@ -48,10 +48,10 @@ impl Planner<'_> {
                 if !seen.insert(unit) {
                     continue;
                 }
-                let Some((way, chosen_at)) = self.resolver.way(unit) else {
+                let Some(chosen) = self.resolver.chosen(unit) else {
                     continue;
                 };
-                let visit = self.visit(unit, way, chosen_at);
+                let visit = self.visit(unit, chosen);
                 let needed: Vec<usize> = visit.needs.iter().map(|need| need.unit).collect();
                 self.queue_needs(unit, &visit, &needed, &named, &mut queue);
                 reached.visits.push((unit, visit));
@@ -69,7 +69,7 @@ impl Planner<'_> {
     fn queue_needs(
         &mut self,
         unit: usize,
-        visit: &Visit,
+        visit: &Visit<'_>,
         needed: &[usize],
         named: &[usize],
         queue: &mut VecDeque<usize>,
@@ -99,7 +99,7 @@ impl Planner<'_> {
     /// whether any port was newly opened.
     fn open_published(
         &mut self,
-        reached: &mut Reached,
+        reached: &mut Reached<'s>,
         named: &[usize],
         queue: &mut VecDeque<usize>,
     ) -> bool {
@@ -108,10 +108,10 @@ impl Planner<'_> {
         let mut any = false;
         for index in 0..reached.visits.len() {
             let unit = reached.visits[index].0;
-            let way = &stack.units[unit].ways[reached.visits[index].1.way];
-            let Some(UnitKind::Runs(Runs::OwnContainer { published })) =
-                way.module.as_ref().map(|module| &module.shape.kind)
-            else {
+            let Chosen::Mechanism { mechanism, .. } = reached.visits[index].1.chosen else {
+                continue;
+            };
+            let UnitKind::Runs(Runs::OwnContainer { published }) = &mechanism.shape.kind else {
                 continue;
             };
             let name = &stack.units[unit].name.name;

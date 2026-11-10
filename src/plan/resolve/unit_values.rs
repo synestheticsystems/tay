@@ -5,7 +5,7 @@ use crate::module::{ModuleValue, UnitKind};
 use crate::plan::resolve::value::{Hole, Resolved, Shape};
 use crate::syntax::expr::{Part, Reference, Type, UnitRef};
 
-use super::{Asker, Fail, Key, Res, Resolver, Scope};
+use super::{Asker, Chosen, Fail, Key, Res, Resolver, Scope};
 
 impl Resolver<'_> {
     pub(super) fn owner(
@@ -44,9 +44,12 @@ impl Resolver<'_> {
         reference: &Reference,
     ) -> Res {
         let stack = self.stack;
-        let (way, _) = self.way(owner).ok_or(Fail::Reported)?;
         let unit = &stack.units[owner];
-        let Some(give) = unit.ways[way].give(name) else {
+        let give = match self.chosen(owner).ok_or(Fail::Reported)? {
+            Chosen::Mechanism { mechanism, .. } => mechanism.give(name),
+            Chosen::Group(_) => None,
+        };
+        let Some(give) = give else {
             return self.fail(
                 reference.loc,
                 format!(
@@ -139,13 +142,12 @@ impl Resolver<'_> {
     /// the unit has run, so using it is a need for the unit.
     pub(super) fn output(&mut self, owner: usize, name: &str, reference: &Reference) -> Res {
         let stack = self.stack;
-        let (way, _) = self.way(owner).ok_or(Fail::Reported)?;
         let unit_name = &stack.units[owner].name.name;
-        let Some(output) = stack.units[owner].ways[way]
-            .outputs()
-            .iter()
-            .find(|output| output.name.name == name)
-        else {
+        let outputs = match self.chosen(owner).ok_or(Fail::Reported)? {
+            Chosen::Mechanism { mechanism, .. } => mechanism.outputs(),
+            Chosen::Group(_) => &[],
+        };
+        let Some(output) = outputs.iter().find(|output| output.name.name == name) else {
             return self.fail(
                 reference.loc,
                 format!(

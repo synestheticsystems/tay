@@ -1,5 +1,6 @@
-//! A unit as read: its ways, the values it gives, and how it is known to be
-//! ready and restarted.
+//! A unit as read: what it is (a group, one module, ways under `run`, or a
+//! definition that could not be read), the values it gives, and how it is
+//! known to be ready and restarted.
 
 use crate::diagnostic::source::Loc;
 use crate::module::{Module, ModuleValue, Output, UnitShape};
@@ -12,31 +13,48 @@ pub struct Unit {
     pub doc: Option<String>,
     /// `Some` for a unit that runs only when asked for by name.
     pub action: Option<Action>,
-    /// The ways the unit can run: one, unnamed, for a unit with `uses` (or a
-    /// group, whose way has no module), and one per name under `run`. Empty
-    /// when the unit's definition could not be read, so that other units may
-    /// still name it.
-    pub ways: Vec<Way>,
+    pub body: Body,
+}
+
+/// What a unit is, as its definition writes it.
+#[derive(Debug)]
+pub enum Body {
+    /// A unit with none of `uses`, `run` and `from`: asking for it asks for
+    /// what it needs.
+    Group { needs: Vec<NameAt> },
+    /// A unit with `uses`: one module.
+    Module(Box<Mechanism>),
+    /// A unit with `run`: the ways it can run, at least one, of which a
+    /// choice picks one.
+    Ways(Vec<Way>),
+    /// A unit whose definition has errors, which have been reported. It is
+    /// kept so that other units may still name it.
+    Unreadable,
 }
 
 impl Unit {
-    /// Whether the unit lists ways under `run`, so that a choice picks one.
-    pub fn has_ways(&self) -> bool {
-        self.ways.first().is_some_and(|way| way.name.is_some())
+    /// Every mechanism the unit may run by: its module, or each of its ways.
+    pub fn mechanisms(&self) -> Vec<&Mechanism> {
+        match &self.body {
+            Body::Module(mechanism) => vec![mechanism],
+            Body::Ways(ways) => ways.iter().map(|way| &way.mechanism).collect(),
+            Body::Group { .. } | Body::Unreadable => Vec::new(),
+        }
     }
 
-    /// The index of the way named `name`.
-    pub fn way(&self, name: &str) -> Option<usize> {
-        self.ways
-            .iter()
-            .position(|way| way.name.as_ref().is_some_and(|own| own.name == name))
+    /// The way named `name`, for a unit with ways.
+    pub fn way(&self, name: &str) -> Option<&Way> {
+        match &self.body {
+            Body::Ways(ways) => ways.iter().find(|way| way.name.name == name),
+            _ => None,
+        }
     }
 
     pub fn way_names(&self) -> Vec<&str> {
-        self.ways
-            .iter()
-            .filter_map(|way| way.name.as_ref().map(|name| name.name.as_str()))
-            .collect()
+        match &self.body {
+            Body::Ways(ways) => ways.iter().map(|way| way.name.name.as_str()).collect(),
+            _ => Vec::new(),
+        }
     }
 }
 
@@ -55,13 +73,21 @@ pub struct Arg {
     pub ty: Option<Type>,
 }
 
-/// One way a unit runs, with what the unit writes for all its ways joined in.
+/// One way under `run`: its name, and the mechanism it is, with what the
+/// unit writes for all its ways joined in.
 #[derive(Debug)]
 pub struct Way {
-    /// The way's name under `run`; `None` for a unit with `uses`, or a group.
-    pub name: Option<NameAt>,
-    /// `None` for a group.
-    pub module: Option<ModuleUse>,
+    pub name: NameAt,
+    pub mechanism: Mechanism,
+}
+
+/// A module and the fields that go with it: what a unit with `uses` runs
+/// by, and what each of a unit's ways is.
+pub struct Mechanism {
+    pub module: &'static dyn Module,
+    /// Where `uses` names the module.
+    pub uses: Loc,
+    pub shape: UnitShape,
     pub needs: Vec<NameAt>,
     pub after: Vec<NameAt>,
     pub gives: Vec<Give>,
@@ -70,32 +96,29 @@ pub struct Way {
     pub watch: Vec<Expr>,
 }
 
-impl Way {
+impl Mechanism {
     pub fn give(&self, name: &str) -> Option<&Give> {
         self.gives.iter().find(|give| give.name.name == name)
     }
 
-    /// The files the way builds; a group builds none.
+    /// The files the mechanism builds.
     pub fn outputs(&self) -> &[Output] {
-        self.module
-            .as_ref()
-            .map_or(&[], |module| &module.shape.outputs)
+        &self.shape.outputs
     }
 }
 
-pub struct ModuleUse {
-    pub module: &'static dyn Module,
-    /// Where `uses` names the module.
-    pub uses: Loc,
-    pub shape: UnitShape,
-}
-
-impl std::fmt::Debug for ModuleUse {
+impl std::fmt::Debug for Mechanism {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ModuleUse")
+        f.debug_struct("Mechanism")
             .field("module", &self.module.name())
             .field("uses", &self.uses)
             .field("shape", &self.shape)
+            .field("needs", &self.needs)
+            .field("after", &self.after)
+            .field("gives", &self.gives)
+            .field("ready", &self.ready)
+            .field("restart", &self.restart)
+            .field("watch", &self.watch)
             .finish()
     }
 }

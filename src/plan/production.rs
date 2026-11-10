@@ -12,35 +12,39 @@ use crate::syntax::names::NameAt;
 use super::Planner;
 use super::reach::Reached;
 use super::resolve::paths::normalized;
-use super::resolve::{Asker, Scope};
+use super::resolve::{Asker, Chosen, Scope};
 
 impl Planner<'_> {
-    pub fn refuse_for_production(&mut self, profile: &NameAt, marked_at: Loc, reached: &Reached) {
+    pub fn refuse_for_production(
+        &mut self,
+        profile: &NameAt,
+        marked_at: Loc,
+        reached: &Reached<'_>,
+    ) {
         let stack = self.resolver.stack;
         for (index, visit) in &reached.visits {
             let unit = &stack.units[*index];
-            let way = &unit.ways[visit.way];
-            let Some(module) = &way.module else {
+            let Chosen::Mechanism { mechanism, way } = visit.chosen else {
                 continue;
             };
             let mut refusals: Vec<(Loc, String)> = Vec::new();
-            if matches!(module.shape.kind, UnitKind::Runs(Runs::OnHost)) {
-                refusals.push((module.uses, "it runs on the host".to_string()));
+            if matches!(mechanism.shape.kind, UnitKind::Runs(Runs::OnHost)) {
+                refusals.push((mechanism.uses, "it runs on the host".to_string()));
             }
-            for concern in &module.shape.production {
+            for concern in &mechanism.shape.production {
                 match concern {
                     Concern::BuildsImage(loc) => {
                         refusals.push((*loc, "it builds an image".to_string()))
                     }
                     Concern::MountsHostPath(from) => {
-                        let asker = Asker::of(&module.shape.kind);
+                        let asker = Asker::of(&mechanism.shape.kind);
                         if let Some(why) = self.mount_outside(*index, from, asker) {
                             refusals.push((from.loc, why));
                         }
                     }
                 }
             }
-            if let Some(first) = way.watch.first() {
+            if let Some(first) = mechanism.watch.first() {
                 refusals.push((first.loc, "it watches files or folders".to_string()));
             }
             for (loc, why) in refusals {
@@ -52,7 +56,7 @@ impl Planner<'_> {
                     ),
                 )
                 .with(marked_at, "the profile is marked production here");
-                if let (Some(at), Some(name)) = (visit.chosen_at, &way.name) {
+                if let Some((name, at)) = way {
                     error = error.with(at, format!("way `{}` is chosen here", name.name));
                 }
                 self.resolver.d.push(error);

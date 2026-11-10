@@ -33,6 +33,8 @@ fn a_missing_required_parameter_and_an_undeclared_one_are_errors() {
             // way's `REPLACED` wins and the parameter's `KEPT` is read.
             "tay.yaml:12:70: a value is text, a whole number or true or false; this is a list",
             "tay.yaml:13:51: a unit made `from` a template has only `doc`, `from`, `params`, `needs` and `after`; `uses` belongs in the template",
+            // A template may make a group, and a group does not wait with `after`.
+            "tay.yaml:14:26: the template makes a group, which has only `doc` and `needs`; `after` does not belong here",
             // An error in the template's own text, found for each unit made
             // from it, is reported once, naming each.
             "stack/templates/bad-setting.yaml:5:11: `colour` is not a field of the settings of a `port` unit; its fields are prefer, fixed",

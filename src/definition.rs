@@ -13,7 +13,7 @@ use crate::syntax::names::NameAt;
 pub use choices::{Choices, Profile};
 pub use setting::{SettingDecl, SettingValue, Written};
 pub use unit::{
-    Action, Arg, Check, Endpoint, Give, GiveValue, ModuleUse, Ready, Restart, Unit, Way,
+    Action, Arg, Body, Check, Endpoint, Give, GiveValue, Mechanism, Ready, Restart, Unit, Way,
 };
 
 #[derive(Debug)]

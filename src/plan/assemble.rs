@@ -14,13 +14,14 @@ use super::model::{After, Need, OpenedPort, Plan, PublishedPort};
 use super::order::{self, Edge, EdgeKind};
 use super::reach::visit::{OpenedAt, Visit};
 use super::reach::{Reached, opened_ports};
+use super::resolve::Chosen;
 
 impl Planner<'_> {
     /// The plan, with the units in an order they could start in; `None` when
     /// there is none or a unit could not be planned, which is reported.
     pub fn finish(
         &mut self,
-        reached: Reached,
+        reached: Reached<'_>,
         stack: &Stack,
         stack_name: &str,
         profile: Option<&Profile>,
@@ -50,11 +51,9 @@ impl Planner<'_> {
         let made: HashSet<usize> = reached
             .visits
             .iter()
-            .filter(|(unit, visit)| {
-                stack.units[*unit].ways[visit.way]
-                    .module
-                    .as_ref()
-                    .is_some_and(|module| matches!(module.shape.kind, UnitKind::Made))
+            .filter(|(_, visit)| {
+                matches!(visit.chosen, Chosen::Mechanism { mechanism, .. }
+                    if matches!(mechanism.shape.kind, UnitKind::Made))
             })
             .map(|(unit, _)| *unit)
             .collect();
@@ -70,16 +69,22 @@ impl Planner<'_> {
                 .or_default()
                 .push(opening.opener.clone());
         }
-        let mut visits: HashMap<usize, Visit> = reached.visits.into_iter().collect();
+        let mut visits: HashMap<usize, Visit<'_>> = reached.visits.into_iter().collect();
         let mut planned = Vec::new();
         for unit in order {
             let visit = visits.remove(&unit)?;
-            let way = &stack.units[unit].ways[visit.way];
-            let gives: Option<Vec<_>> = self.gives(unit, way).into_iter().collect();
+            let mechanism = match visit.chosen {
+                Chosen::Mechanism { mechanism, .. } => Some(mechanism),
+                Chosen::Group(_) => None,
+            };
+            let gives: Option<Vec<_>> = match mechanism {
+                Some(mechanism) => self.gives(unit, mechanism).into_iter().collect(),
+                None => Some(Vec::new()),
+            };
             let mut unit_plan = visit.planned?;
             unit_plan.gives = gives?;
-            if let Some(module) = &way.module
-                && let UnitKind::Runs(Runs::OwnContainer { published }) = &module.shape.kind
+            if let Some(mechanism) = mechanism
+                && let UnitKind::Runs(Runs::OwnContainer { published }) = &mechanism.shape.kind
             {
                 for (entry, used) in published.iter().zip(visit.published) {
                     let opened = match used {

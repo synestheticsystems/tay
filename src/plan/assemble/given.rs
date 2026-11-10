@@ -1,7 +1,7 @@
 //! The values a unit gives, as the plan prints them: each seen from the host
 //! and from a container, since an address depends on who asks.
 
-use crate::definition::{GiveValue, Way};
+use crate::definition::{GiveValue, Mechanism};
 use crate::diagnostic::source::Loc;
 use crate::syntax::expr::{Expr, ExprKind, Part, Reference, Target, UnitRef};
 
@@ -14,10 +14,10 @@ use crate::plan::reach::usage::view_error;
 
 impl Planner<'_> {
     /// Each value the unit gives, as the host and as a container would see it.
-    pub(super) fn gives(&mut self, unit: usize, way: &Way) -> Vec<Option<GivenLine>> {
+    pub(super) fn gives(&mut self, unit: usize, mechanism: &Mechanism) -> Vec<Option<GivenLine>> {
         let unit_name = &self.resolver.stack.units[unit].name.name;
         let mut lines = Vec::new();
-        for give in &way.gives {
+        for give in &mechanism.gives {
             let endpoint = matches!(give.value, GiveValue::Endpoint(_));
             let has_scheme = matches!(&give.value, GiveValue::Endpoint(e) if e.scheme.is_some());
             let target = Target::Value {
@@ -34,7 +34,7 @@ impl Planner<'_> {
                 endpoint,
             ));
         }
-        for output in way.outputs() {
+        for output in mechanism.outputs() {
             let target = Target::Output {
                 unit: UnitRef::Named(unit_name.clone()),
                 name: output.name.name.clone(),

@@ -161,10 +161,9 @@ fn unique_claims(units: &[Unit], d: &mut Diagnostics) {
     let mut first: HashMap<&str, (&str, Loc)> = HashMap::new();
     for unit in units {
         let claims = unit
-            .ways
-            .iter()
-            .filter_map(|way| way.module.as_ref())
-            .flat_map(|module| &module.shape.claims);
+            .mechanisms()
+            .into_iter()
+            .flat_map(|mechanism| &mechanism.shape.claims);
         for claim in claims {
             match first.get(claim.what.as_str()) {
                 Some((owner, _)) if *owner == unit.name.name => {}

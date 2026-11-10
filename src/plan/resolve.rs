@@ -19,11 +19,12 @@ pub use environment::Environment;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 
-use crate::definition::Stack;
+use crate::definition::{Body, Mechanism, Stack};
 use crate::diagnostic::source::Loc;
 use crate::diagnostic::{Diagnostic, Diagnostics};
 use crate::module::{Runs, UnitKind};
 use crate::syntax::expr::{Expr, ExprKind, Part, Piece, Reference, Target, Type, View};
+use crate::syntax::names::NameAt;
 
 use super::choices::{self, Layered};
 use value::{Bit, Hole, Resolved, Shape};
@@ -82,6 +83,19 @@ pub enum Fail {
 
 pub type Res = Result<Resolved, Fail>;
 
+/// What a unit comes up as, under the way chosen for it.
+#[derive(Clone, Copy, Debug)]
+pub enum Chosen<'s> {
+    /// A group, and what it needs.
+    Group(&'s [NameAt]),
+    /// The mechanism the unit runs by, and for a unit with ways, the way's
+    /// name and where it was chosen.
+    Mechanism {
+        mechanism: &'s Mechanism,
+        way: Option<(&'s NameAt, Loc)>,
+    },
+}
+
 /// Where a value is resolved: the unit `self` means, and who asks.
 #[derive(Clone, Copy, Debug)]
 pub struct Scope {
@@ -103,7 +117,7 @@ pub struct Resolver<'s> {
     pub environment: Environment,
     pub d: Diagnostics,
     units: HashMap<&'s str, usize>,
-    chosen: HashMap<usize, Option<(usize, Option<Loc>)>>,
+    chosen: HashMap<usize, Option<Chosen<'s>>>,
     /// Results by value, the part of an endpoint asked for, and asker.
     memo: HashMap<(Key, Option<Part>, Asker), Res>,
     resolving: Vec<(Key, Loc)>,
@@ -151,37 +165,49 @@ impl<'s> Resolver<'s> {
         self.units.get(name).copied()
     }
 
-    /// The way `unit` runs, and where it was chosen. An error is
-    /// reported the first time the choice cannot be made.
-    pub fn way(&mut self, unit: usize) -> Option<(usize, Option<Loc>)> {
+    /// What `unit` comes up as, under the way chosen for it; `None` when
+    /// its definition could not be read, or no way can be chosen. An error
+    /// is reported the first time the choice cannot be made.
+    pub fn chosen(&mut self, unit: usize) -> Option<Chosen<'s>> {
         if let Some(chosen) = self.chosen.get(&unit) {
             return *chosen;
         }
         let definition = &self.stack.units[unit];
-        let chosen = if definition.ways.is_empty() {
-            None
-        } else {
-            match choices::choose(definition, self.layered) {
-                Ok(chosen) => Some(chosen),
+        let chosen = match &definition.body {
+            Body::Unreadable => None,
+            Body::Group { needs } => Some(Chosen::Group(needs)),
+            Body::Module(mechanism) => Some(Chosen::Mechanism {
+                mechanism,
+                way: None,
+            }),
+            Body::Ways(ways) => match choices::choose(definition, ways, self.layered) {
+                Ok((way, at)) => Some(Chosen::Mechanism {
+                    mechanism: &way.mechanism,
+                    way: Some((&way.name, at)),
+                }),
                 Err(error) => {
                     self.d.push(error);
                     None
                 }
-            }
+            },
         };
         self.chosen.insert(unit, chosen);
         chosen
     }
 
+    /// The mechanism `unit` runs by, under its chosen way; `None` for a
+    /// group, or a unit that cannot be planned.
+    pub fn mechanism(&mut self, unit: usize) -> Option<&'s Mechanism> {
+        match self.chosen(unit)? {
+            Chosen::Mechanism { mechanism, .. } => Some(mechanism),
+            Chosen::Group(_) => None,
+        }
+    }
+
     /// Whether `unit` runs, and where, under its chosen way; `None` for a
     /// group.
     pub fn kind(&mut self, unit: usize) -> Option<&'s UnitKind> {
-        let stack = self.stack;
-        let (way, _) = self.way(unit)?;
-        stack.units[unit].ways[way]
-            .module
-            .as_ref()
-            .map(|module| &module.shape.kind)
+        self.mechanism(unit).map(|mechanism| &mechanism.shape.kind)
     }
 
     pub fn resolve(&mut self, expr: &Expr, scope: Scope) -> Res {
@@ -294,7 +320,7 @@ impl<'s> Resolver<'s> {
             );
         };
         // A way that cannot be chosen has been reported.
-        self.way(unit).ok_or(Fail::Reported)?;
+        self.chosen(unit).ok_or(Fail::Reported)?;
         match self.kind(unit) {
             Some(kind @ UnitKind::Runs(_)) => Ok(Asker::of(kind)),
             _ => self.fail(

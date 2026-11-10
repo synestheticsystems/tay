@@ -1,17 +1,18 @@
 //! Visiting one unit that comes up: every value it uses resolved where it runs,
 //! what it needs and why, how it is known to be ready, and what it gives.
 
-use crate::definition::{Check, Way};
+use crate::definition::{Check, Mechanism};
 use crate::diagnostic::source::Loc;
 use crate::module::{PathUse, Place, RestartDefault, Runs, UnitKind, Want};
 
 use super::usage::{Opening, User, Uses};
 use crate::plan::Planner;
 use crate::plan::model::{
-    Because, Mechanism, PlannedUnit, Readiness, RestartPolicy, Running, Shown,
+    Because, Mechanism as PlannedMechanism, PlannedUnit, Readiness, RestartPolicy, Running, Shown,
 };
-use crate::plan::resolve::Asker;
 use crate::plan::resolve::value::Resolved;
+use crate::plan::resolve::{Asker, Chosen};
+use crate::syntax::names::NameAt;
 
 const READINESS: Place = Place::Readable("a readiness check");
 const WATCHED: Place = Place::Readable("a watched file or folder");
@@ -31,10 +32,8 @@ pub struct NeedEdge {
 }
 
 /// What visiting one unit adds to the plan.
-pub struct Visit {
-    pub way: usize,
-    /// Where the way was chosen, for a unit with ways.
-    pub chosen_at: Option<Loc>,
+pub struct Visit<'s> {
+    pub chosen: Chosen<'s>,
     /// `None` when one of its values could not be resolved; that is reported.
     pub planned: Option<PlannedUnit>,
     pub needs: Vec<NeedEdge>,
@@ -54,52 +53,67 @@ pub struct OpenedAt {
     pub host_port: Option<Shown>,
 }
 
-impl Planner<'_> {
-    pub fn visit(&mut self, unit: usize, way_index: usize, chosen_at: Option<Loc>) -> Visit {
+impl<'s> Planner<'s> {
+    pub fn visit(&mut self, unit: usize, chosen: Chosen<'s>) -> Visit<'s> {
         let stack = self.resolver.stack;
         let definition = &stack.units[unit];
-        let way = &definition.ways[way_index];
         let mut uses = Uses::default();
-        let (mechanism, ready, restart, watch) = match &way.module {
-            None => (
-                Mechanism::Group,
+        let (mechanism, ready, restart, watch) = match chosen {
+            Chosen::Group(_) => (
+                PlannedMechanism::Group,
                 Some(Readiness::Group),
                 Some(None),
                 Vec::new(),
             ),
-            Some(module) => {
-                let kind = &module.shape.kind;
+            Chosen::Mechanism { mechanism, way } => {
+                let kind = &mechanism.shape.kind;
                 let user = User {
                     unit,
                     name: &definition.name.name,
                     asker: Asker::of(kind),
                     readiness: false,
                 };
-                for slot in &module.shape.slots {
+                for slot in &mechanism.shape.slots {
                     self.use_value(user, &slot.expr, slot.want, slot.place, &mut uses);
                 }
                 let runs = self.running(kind);
-                let ready = self.readiness(user, way, module.shape.ready_without_check, &mut uses);
-                let restart = self.restart(user, way, module.shape.restart_by_default, &mut uses);
-                let watch = self.watch(user, way, &mut uses);
-                let mechanism = Mechanism::Module {
-                    module: module.module.name(),
-                    way: way.name.as_ref().map(|name| name.name.clone()),
+                let ready = self.readiness(
+                    user,
+                    mechanism,
+                    mechanism.shape.ready_without_check,
+                    &mut uses,
+                );
+                let restart = self.restart(
+                    user,
+                    mechanism,
+                    mechanism.shape.restart_by_default,
+                    &mut uses,
+                );
+                let watch = self.watch(user, mechanism, &mut uses);
+                let planned = PlannedMechanism::Module {
+                    module: mechanism.module.name(),
+                    way: way.map(|(name, _)| name.name.clone()),
                     runs,
                 };
-                (mechanism, ready, restart.map(Some), watch)
+                (planned, ready, restart.map(Some), watch)
             }
         };
-        let published = match way.module.as_ref().map(|module| &module.shape.kind) {
-            Some(UnitKind::Runs(Runs::OwnContainer { published })) => vec![None; published.len()],
-            _ => Vec::new(),
+        let (published, needs, after) = match chosen {
+            Chosen::Group(needs) => (Vec::new(), self.written_needs(needs), Vec::new()),
+            Chosen::Mechanism { mechanism, .. } => {
+                let published = match &mechanism.shape.kind {
+                    UnitKind::Runs(Runs::OwnContainer { published }) => vec![None; published.len()],
+                    _ => Vec::new(),
+                };
+                let needs = self.needs(unit, mechanism, uses.needs);
+                let after = mechanism
+                    .after
+                    .iter()
+                    .filter_map(|name| Some((self.resolver.unit_index(&name.name)?, name.loc)))
+                    .collect();
+                (published, needs, after)
+            }
         };
-        let needs = self.needs(unit, way, uses.needs);
-        let after = way
-            .after
-            .iter()
-            .filter_map(|name| Some((self.resolver.unit_index(&name.name)?, name.loc)))
-            .collect();
         let planned = (|| {
             Some(PlannedUnit {
                 name: definition.name.name.clone(),
@@ -115,8 +129,7 @@ impl Planner<'_> {
             })
         })();
         Visit {
-            way: way_index,
-            chosen_at,
+            chosen,
             planned,
             needs,
             after,
@@ -159,11 +172,11 @@ impl Planner<'_> {
     fn readiness(
         &mut self,
         user: User<'_>,
-        way: &Way,
+        mechanism: &Mechanism,
         without_check: &'static str,
         uses: &mut Uses,
     ) -> Option<Readiness> {
-        let Some(ready) = &way.ready else {
+        let Some(ready) = &mechanism.ready else {
             return Some(Readiness::Default(without_check));
         };
         // tay makes `http` and `tcp` checks itself, from the host.
@@ -205,12 +218,12 @@ impl Planner<'_> {
     fn restart(
         &mut self,
         user: User<'_>,
-        way: &Way,
+        mechanism: &Mechanism,
         default: RestartDefault,
         uses: &mut Uses,
     ) -> Option<RestartPolicy> {
         const RESTART: Place = Place::Readable("a restart policy");
-        let written = way.restart.as_ref();
+        let written = mechanism.restart.as_ref();
         let mut on = Shown::word(default.word());
         if let Some(expr) = written.and_then(|r| r.on.as_ref()) {
             let want = Want::OneOf(RESTART_ON);
@@ -230,8 +243,14 @@ impl Planner<'_> {
         Some(RestartPolicy { on, attempts })
     }
 
-    fn watch(&mut self, user: User<'_>, way: &Way, uses: &mut Uses) -> Vec<Option<Shown>> {
-        way.watch
+    fn watch(
+        &mut self,
+        user: User<'_>,
+        mechanism: &Mechanism,
+        uses: &mut Uses,
+    ) -> Vec<Option<Shown>> {
+        mechanism
+            .watch
             .iter()
             .map(|watched| {
                 let want = Want::Path(PathUse::Named);
@@ -254,20 +273,9 @@ impl Planner<'_> {
 
     /// The needs as written, then the container a command runs inside, then
     /// each unit whose value is used, each unit once.
-    fn needs(&mut self, unit: usize, way: &Way, uses: Vec<NeedEdge>) -> Vec<NeedEdge> {
-        let mut needs: Vec<NeedEdge> = way
-            .needs
-            .iter()
-            .filter_map(|name| {
-                Some(NeedEdge {
-                    unit: self.resolver.unit_index(&name.name)?,
-                    loc: name.loc,
-                    because: Because::Written,
-                })
-            })
-            .collect();
-        if let Some(module) = &way.module
-            && let UnitKind::Runs(Runs::InsideUnit(inner)) = &module.shape.kind
+    fn needs(&mut self, unit: usize, mechanism: &Mechanism, uses: Vec<NeedEdge>) -> Vec<NeedEdge> {
+        let mut needs = self.written_needs(&mechanism.needs);
+        if let UnitKind::Runs(Runs::InsideUnit(inner)) = &mechanism.shape.kind
             && let Some(container) = self.resolver.unit_index(&inner.name)
         {
             needs.push(NeedEdge {
@@ -278,6 +286,19 @@ impl Planner<'_> {
         }
         add_needs(&mut needs, unit, uses);
         needs
+    }
+
+    fn written_needs(&self, written: &[NameAt]) -> Vec<NeedEdge> {
+        written
+            .iter()
+            .filter_map(|name| {
+                Some(NeedEdge {
+                    unit: self.resolver.unit_index(&name.name)?,
+                    loc: name.loc,
+                    because: Because::Written,
+                })
+            })
+            .collect()
     }
 }
 

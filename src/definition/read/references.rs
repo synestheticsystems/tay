@@ -2,7 +2,7 @@
 //! exists: checked across all units and all their ways, whether or
 //! not they come up, so a mistake shows before the unit is ever used.
 
-use crate::definition::{Check, Choices, GiveValue, SettingValue, Stack, Unit, Way};
+use crate::definition::{Body, Check, Choices, GiveValue, Mechanism, SettingValue, Stack, Unit};
 use crate::diagnostic::{Diagnostic, Diagnostics};
 use crate::module::{ModuleValue, Runs, UnitKind, VolumeMount};
 use crate::syntax::expr::{Expr, Part, Reference, Target, UnitRef, View};
@@ -10,22 +10,21 @@ use crate::syntax::names::NameAt;
 
 pub fn check(stack: &Stack, places: &[&Choices], d: &mut Diagnostics) {
     for unit in &stack.units {
-        for way in &unit.ways {
-            for name in way.needs.iter().chain(&way.after) {
+        if let Body::Group { needs } = &unit.body {
+            for name in needs {
                 unit_named(stack, name, d);
             }
-            for mounted in way
-                .module
-                .iter()
-                .flat_map(|module| &module.shape.volume_mounts)
-            {
+        }
+        for mechanism in unit.mechanisms() {
+            for name in mechanism.needs.iter().chain(&mechanism.after) {
+                unit_named(stack, name, d);
+            }
+            for mounted in &mechanism.shape.volume_mounts {
                 volume_owned(stack, mounted, d);
             }
-            if let Some(module) = &way.module
-                && let UnitKind::Runs(Runs::InsideUnit(inner)) = &module.shape.kind
-            {
+            if let UnitKind::Runs(Runs::InsideUnit(inner)) = &mechanism.shape.kind {
                 unit_named(stack, inner, d);
-                if let Some(written) = way.needs.iter().find(|need| need.name == inner.name) {
+                if let Some(written) = mechanism.needs.iter().find(|need| need.name == inner.name) {
                     d.push(
                         Diagnostic::new(
                             written.loc,
@@ -38,7 +37,7 @@ pub fn check(stack: &Stack, places: &[&Choices], d: &mut Diagnostics) {
                     );
                 }
             }
-            for expr in exprs(way) {
+            for expr in exprs(mechanism) {
                 references(stack, expr, Some(unit), d);
             }
         }
@@ -48,19 +47,17 @@ pub fn check(stack: &Stack, places: &[&Choices], d: &mut Diagnostics) {
     }
 }
 
-/// Every value written in a way.
-fn exprs(way: &Way) -> Vec<&Expr> {
+/// Every value written in a mechanism.
+fn exprs(mechanism: &Mechanism) -> Vec<&Expr> {
     let mut all: Vec<&Expr> = Vec::new();
-    if let Some(module) = &way.module {
-        all.extend(module.shape.slots.iter().map(|slot| &slot.expr));
-        if let UnitKind::Runs(Runs::OwnContainer { published }) = &module.shape.kind {
-            for entry in published {
-                all.push(&entry.host_port.expr);
-                all.extend(entry.address.iter().map(|slot| &slot.expr));
-            }
+    all.extend(mechanism.shape.slots.iter().map(|slot| &slot.expr));
+    if let UnitKind::Runs(Runs::OwnContainer { published }) = &mechanism.shape.kind {
+        for entry in published {
+            all.push(&entry.host_port.expr);
+            all.extend(entry.address.iter().map(|slot| &slot.expr));
         }
     }
-    for give in &way.gives {
+    for give in &mechanism.gives {
         match &give.value {
             GiveValue::Value(expr) | GiveValue::Module(ModuleValue::Expr(expr)) => all.push(expr),
             GiveValue::Endpoint(endpoint) => {
@@ -76,17 +73,17 @@ fn exprs(way: &Way) -> Vec<&Expr> {
             GiveValue::Module(_) => {}
         }
     }
-    if let Some(ready) = &way.ready {
+    if let Some(ready) = &mechanism.ready {
         match &ready.check {
             Check::Http(expr) | Check::Tcp(expr) | Check::Log(expr) => all.push(expr),
             Check::Command(words) => all.extend(words),
         }
         all.push(&ready.within);
     }
-    if let Some(restart) = &way.restart {
+    if let Some(restart) = &mechanism.restart {
         all.extend(restart.on.iter().chain(&restart.attempts));
     }
-    all.extend(&way.watch);
+    all.extend(&mechanism.watch);
     all
 }
 
@@ -141,15 +138,15 @@ fn reference_target(
         } => {
             view_unit(stack, view.as_ref(), reference, d);
             let Some(owner) = owner(unit, d) else { return };
-            if owner.ways.is_empty() {
+            if matches!(owner.body, Body::Unreadable) {
                 return;
             }
-            let gives: Vec<_> = owner.ways.iter().filter_map(|way| way.give(name)).collect();
+            let mechanisms = owner.mechanisms();
+            let gives: Vec<_> = mechanisms.iter().filter_map(|m| m.give(name)).collect();
             if gives.is_empty() {
-                let mut names: Vec<&str> = owner
-                    .ways
+                let mut names: Vec<&str> = mechanisms
                     .iter()
-                    .flat_map(|v| v.gives.iter().map(|g| g.name.name.as_str()))
+                    .flat_map(|m| m.gives.iter().map(|g| g.name.name.as_str()))
                     .collect();
                 names.sort_unstable();
                 names.dedup();
@@ -192,11 +189,13 @@ fn reference_target(
         Target::Output { unit, name, view } => {
             view_unit(stack, view.as_ref(), reference, d);
             let Some(owner) = owner(unit, d) else { return };
-            if !owner.ways.is_empty()
-                && !owner
-                    .ways
-                    .iter()
-                    .any(|way| way.outputs().iter().any(|output| output.name.name == *name))
+            if !matches!(owner.body, Body::Unreadable)
+                && !owner.mechanisms().iter().any(|mechanism| {
+                    mechanism
+                        .outputs()
+                        .iter()
+                        .any(|output| output.name.name == *name)
+                })
             {
                 d.error(
                     reference.loc,
@@ -250,14 +249,13 @@ fn volume_owned(stack: &Stack, mounted: &VolumeMount, d: &mut Diagnostics) {
     let Some(owner) = unit_named(stack, &mounted.unit, d) else {
         return;
     };
-    if owner.ways.is_empty() {
+    if matches!(owner.body, Body::Unreadable) {
         return;
     }
     let mut owned: Vec<&str> = owner
-        .ways
-        .iter()
-        .filter_map(|way| way.module.as_ref())
-        .flat_map(|module| module.shape.volumes.iter().map(|v| v.name.as_str()))
+        .mechanisms()
+        .into_iter()
+        .flat_map(|mechanism| mechanism.shape.volumes.iter().map(|v| v.name.as_str()))
         .collect();
     if owned.contains(&mounted.volume.name.as_str()) {
         return;
@@ -298,12 +296,8 @@ fn view_unit(stack: &Stack, view: Option<&View>, reference: &Reference, d: &mut 
         );
         return;
     };
-    let runs = |way: &Way| {
-        way.module
-            .as_ref()
-            .is_some_and(|module| matches!(module.shape.kind, UnitKind::Runs(_)))
-    };
-    if !unit.ways.is_empty() && !unit.ways.iter().any(runs) {
+    let runs = |mechanism: &&Mechanism| matches!(mechanism.shape.kind, UnitKind::Runs(_));
+    if !matches!(unit.body, Body::Unreadable) && !unit.mechanisms().iter().any(runs) {
         d.error(
             reference.loc,
             format!(
@@ -327,15 +321,18 @@ fn choices(stack: &Stack, place: &Choices, d: &mut Diagnostics) {
         let Some(unit) = unit_named(stack, unit_name, d) else {
             continue;
         };
-        if unit.ways.is_empty() {
-            continue;
+        match unit.body {
+            Body::Unreadable => continue,
+            Body::Ways(_) => {}
+            Body::Group { .. } | Body::Module(_) => {
+                d.error(
+                    unit_name.loc,
+                    format!("unit `{}` has no ways to choose between", unit.name.name),
+                );
+                continue;
+            }
         }
-        if !unit.has_ways() {
-            d.error(
-                unit_name.loc,
-                format!("unit `{}` has no ways to choose between", unit.name.name),
-            );
-        } else if unit.way(&way.name).is_none() {
+        if unit.way(&way.name).is_none() {
             d.error(
                 way.loc,
                 format!(

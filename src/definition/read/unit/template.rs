@@ -10,7 +10,7 @@
 
 use std::collections::HashMap;
 
-use crate::definition::Unit;
+use crate::definition::{Body, Mechanism, Unit};
 use crate::diagnostic::{Diagnostic, Diagnostics};
 use crate::syntax::expr::{self, Expr, Reference, Target};
 use crate::syntax::fields::{self, Fields};
@@ -240,9 +240,24 @@ pub fn made_from(
             error
         });
     }
-    for way in &mut made.ways {
-        way.needs = unit::joined(&way.needs, needs.clone());
-        way.after = unit::joined(&way.after, after.clone());
+    let join = |mechanism: &mut Mechanism| {
+        mechanism.needs = unit::joined(&mechanism.needs, needs.clone());
+        mechanism.after = unit::joined(&mechanism.after, after.clone());
+    };
+    match &mut made.body {
+        Body::Group { needs: group_needs } => {
+            *group_needs = unit::joined(group_needs, needs.clone());
+            if let Some((key, _)) = fields.entry("after") {
+                d.error(
+                    key.loc,
+                    "the template makes a group, which has only `doc` and `needs`; `after` does not belong here",
+                );
+                return unit::unreadable(name);
+            }
+        }
+        Body::Module(mechanism) => join(mechanism),
+        Body::Ways(ways) => ways.iter_mut().for_each(|way| join(&mut way.mechanism)),
+        Body::Unreadable => {}
     }
     if doc.is_some() {
         made.doc = doc;

@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::definition::{Choices, Profile, SettingValue, Stack, Unit};
+use crate::definition::{Choices, Profile, SettingValue, Stack, Unit, Way};
 use crate::diagnostic::source::Loc;
 use crate::diagnostic::{Diagnostic, Diagnostics};
 use crate::syntax::names::NameAt;
@@ -125,24 +125,26 @@ pub fn check_required(
     }
 }
 
-/// The way `unit` runs: `run.units.<unit>` if given, otherwise the first
-/// name in `run.default` that is one of its ways. Gives the way's index, and
-/// where the choice was made if the unit has ways.
-pub fn choose(unit: &Unit, layered: &Layered) -> Result<(usize, Option<Loc>), Diagnostic> {
-    if !unit.has_ways() {
-        return Ok((0, None));
-    }
-    if let Some((_, way)) = layered.run_units.get(&unit.name.name)
-        && let Some(index) = unit.way(&way.name)
+/// The way a unit with `ways` runs: `run.units.<unit>` if given, otherwise
+/// the first name in `run.default` that is one of its ways. Gives the way,
+/// and where the choice was made.
+pub fn choose<'u>(
+    unit: &Unit,
+    ways: &'u [Way],
+    layered: &Layered,
+) -> Result<(&'u Way, Loc), Diagnostic> {
+    let way = |name: &str| ways.iter().find(|way| way.name.name == name);
+    if let Some((_, chosen)) = layered.run_units.get(&unit.name.name)
+        && let Some(way) = way(&chosen.name)
     {
-        return Ok((index, Some(way.loc)));
+        return Ok((way, chosen.loc));
     }
-    if let Some((index, loc)) = layered
+    if let Some((way, loc)) = layered
         .run_default
         .iter()
-        .find_map(|default| Some((unit.way(&default.name)?, default.loc)))
+        .find_map(|default| Some((way(&default.name)?, default.loc)))
     {
-        return Ok((index, Some(loc)));
+        return Ok((way, loc));
     }
     let quoted = |names: Vec<&str>| {
         names
