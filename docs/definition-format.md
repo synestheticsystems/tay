@@ -265,7 +265,7 @@ A unit gives values; other units use them by reference. A reference is `${...}` 
 | `${self.name}` | A value this same unit gives |
 | `${settings.a.b}` | A setting |
 | `${environment.name}` and the rest | This environment (see below) |
-| `${host.listen}` | The address a host process should listen on so that this machine's containers can reach it and other machines cannot |
+| `${host.listen}` | The address a host process listens on so that this machine's containers can reach it and other machines cannot. It is `127.0.0.1` where Docker runs in a virtual machine of its own, as on a Mac, and the host's address on the environment's network where Docker runs on the host itself, as on Linux |
 | `${params.name}` | A template's parameter. Templates only |
 | `${args.name}` | An action's argument. Actions only |
 
@@ -316,7 +316,7 @@ gives:
   api: { port: "${api-port.number}", scheme: http, path: "/v1" }
 ```
 
-For a `process` unit, `port` is the host port it listens on. For a `container` unit, `port` is a port inside the container; if `publish` maps it, the endpoint also has a host port.
+For a `process` unit, `port` is the host port it listens on, and the process must listen there on `${host.listen}`: that is the one address which both this machine's containers and the host itself, tay's own checks included, can reach on every system. For a `container` unit, `port` is a port inside the container; if `publish` maps it, the endpoint also has a host port.
 
 An endpoint is used through its parts.
 
@@ -330,7 +330,7 @@ Unless the endpoint writes its `host`, each part depends on where the unit that 
 
 | The unit that uses it runs | The endpoint belongs to a `process` | The endpoint belongs to a `container` |
 |---|---|---|
-| On the host (a `process`, a host `command`, or a readiness check tay makes itself) | `127.0.0.1` and its port | `127.0.0.1` and the published host port. If the port is not in `publish`, that is an error naming both units |
+| On the host (a `process`, a host `command`, or a readiness check tay makes itself) | The address `${host.listen}` names, and its port | `127.0.0.1` and the published host port. If the port is not in `publish`, that is an error naming both units |
 | In a container (a `container`, or a `command` with `in` or `image`) | The name containers have for the host, and its port | The container's unit name and the port inside it |
 
 A view may be asked for by name, whatever the user is. It may be written on a reference to any value of a unit, and settles every endpoint that value is built from.
