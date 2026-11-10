@@ -1,0 +1,18 @@
+format: 1
+stack: made-runs-nothing
+up: [api-port]
+units:
+  api-port:
+    uses: port
+    ready: { tcp: "127.0.0.1:1", within: 5s }
+    restart: { on: always }
+  config:
+    uses: file
+    with: { content: "x\n" }
+    watch: [tay.yaml]
+  site:
+    restart: { on: failure, attempts: 2 }
+    run:
+      source: { uses: process, with: { command: [serve] }, gives: { number: 8080 } }
+      fixed: { uses: port }
+  key: { from: kept-secret }

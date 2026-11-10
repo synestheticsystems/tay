@@ -4,6 +4,7 @@
 use std::borrow::Cow;
 
 use crate::definition::{Action, Body, Give, GiveValue, Mechanism, Ready, Restart, Unit, Way};
+use crate::diagnostic::source::Loc;
 use crate::diagnostic::{Diagnostic, Diagnostics, quoted_list};
 use crate::module::{self, Cx, Module, Slot, UnitKind};
 use crate::syntax::fields::{self, Fields};
@@ -22,6 +23,17 @@ pub const UNIT_FIELDS: &[&str] = &[
 
 const WAY_FIELDS: &[&str] = &[
     "uses", "with", "needs", "after", "ready", "restart", "watch", "gives",
+];
+
+/// The fields that belong to a unit that runs, and why each is no use on
+/// one that is made.
+const RUNNING_ONLY: &[(&str, &str)] = &[
+    (
+        "ready",
+        "it is ready when it exists, and nothing would ever run the check",
+    ),
+    ("restart", "nothing of it runs, so nothing of it exits"),
+    ("watch", "nothing of it runs, so nothing would run it again"),
 ];
 
 pub fn read(name: NameAt, node: &Node, templates: &[Template], d: &mut Diagnostics) -> Unit {
@@ -55,6 +67,8 @@ struct WayFields<'n> {
     ready: Option<Ready>,
     restart: Option<Restart>,
     watch: Option<Vec<Slot>>,
+    /// Where each field that belongs to a unit that runs is written.
+    running_only: Vec<(&'static str, &'static str, Loc)>,
 }
 
 impl<'n> WayFields<'n> {
@@ -82,6 +96,10 @@ impl<'n> WayFields<'n> {
             watch: fields
                 .get("watch")
                 .map(|node| unit_fields::watch(node, d).unwrap_or_default()),
+            running_only: RUNNING_ONLY
+                .iter()
+                .filter_map(|(field, why)| Some((*field, *why, fields.entry(field)?.0.loc)))
+                .collect(),
         }
     }
 }
@@ -237,6 +255,23 @@ fn mechanism(
     };
     let mut description = module.read(with.as_deref(), &mut cx)?;
     if matches!(description.kind, UnitKind::Made) {
+        for (field, why, at) in &own.running_only {
+            d.error(
+                *at,
+                format!("`{field}` belongs to a unit that runs, and `{unit}` is made: {why}"),
+            );
+        }
+        for (field, why, at) in &shared.running_only {
+            d.push(
+                Diagnostic::new(
+                    *at,
+                    format!(
+                        "`{field}`, written for all of `{unit}`'s ways, belongs to a unit that runs, and a way of it is made: {why}"
+                    ),
+                )
+                .with(uses_key.loc, "this way is made"),
+            );
+        }
         for give in shared.gives.iter().chain(&own.gives) {
             if let GiveValue::Endpoint(endpoint) = &give.value
                 && endpoint.host.is_none()

@@ -130,3 +130,24 @@ fn a_module_or_template_that_does_not_exist_is_an_error_listing_those_that_do() 
         ]
     );
 }
+
+#[test]
+fn ready_restart_and_watch_on_a_unit_that_is_made_are_errors_as_its_module_describes_it() {
+    // `api-port`, `config` and `key` are made, as their modules say; one of
+    // `site`'s ways is made, and the `restart` written for all its ways
+    // would be that way's. A template's unit is read as one written out.
+    let run = plan("made-runs-nothing", &[]);
+    assert_eq!(run.code, 2);
+    assert_eq!(
+        run.errors(),
+        [
+            "tay.yaml:7:5: `ready` belongs to a unit that runs, and `api-port` is made: it is ready when it exists, and nothing would ever run the check",
+            "tay.yaml:8:5: `restart` belongs to a unit that runs, and `api-port` is made: nothing of it runs, so nothing of it exits",
+            "tay.yaml:12:5: `watch` belongs to a unit that runs, and `config` is made: nothing of it runs, so nothing would run it again",
+            "tay.yaml:14:5: `restart`, written for all of `site`'s ways, belongs to a unit that runs, and a way of it is made: nothing of it runs, so nothing of it exits",
+            "  tay.yaml:17:16: this way is made",
+            "stack/templates/kept-secret.yaml:4:3: `ready` belongs to a unit that runs, and `key` is made: it is ready when it exists, and nothing would ever run the check",
+            "  tay.yaml:18:10: for unit `key`, made from the template here",
+        ]
+    );
+}
