@@ -172,6 +172,15 @@ impl Supervisor {
             .is_some_and(UnitTask::is_live)
     }
 
+    /// Whether a task looks after any unit, planned or not.
+    pub fn tends_any(&self) -> bool {
+        self.tending
+            .lock()
+            .expect("the tasks are not poisoned")
+            .values()
+            .any(UnitTask::is_live)
+    }
+
     /// Looks after `planned` with `running`, from `begin`, unless a task
     /// does already. `restarts` is whether its restart policy applies, as
     /// it does when the environment is meant to be up.

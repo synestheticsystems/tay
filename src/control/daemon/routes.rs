@@ -145,7 +145,8 @@ fn up(daemon: &Arc<Daemon>, asked: UpRequest) -> Response<Body> {
         None => {
             let change = Change::new(kind);
             *under_way = Some(Arc::clone(&change));
-            tokio::spawn(Arc::clone(daemon).bring_up(Arc::clone(&change), asked));
+            let bringing = Arc::clone(daemon).bring_up(Arc::clone(&change), asked);
+            tokio::spawn(then_leave_if_unneeded(Arc::clone(daemon), bringing));
             change
         }
         Some(change) if change.kind == kind => Arc::clone(change),
@@ -153,6 +154,13 @@ fn up(daemon: &Arc<Daemon>, asked: UpRequest) -> Response<Body> {
     };
     drop(under_way);
     follow(change)
+}
+
+/// Makes the change `changing`, and then leaves the daemon if it is no
+/// longer needed.
+async fn then_leave_if_unneeded(daemon: Arc<Daemon>, changing: impl Future<Output = ()>) {
+    changing.await;
+    daemon.leave_if_unneeded().await;
 }
 
 /// Begins the change `kind`, which `make` makes, unless another change is
@@ -175,14 +183,20 @@ where
     let change = Change::new(kind);
     let made = match make(Arc::clone(&change)) {
         Ok(made) => made,
-        Err(NotBegun::DoesNotFit(problem)) => {
-            return json(StatusCode::UNPROCESSABLE_ENTITY, &Problem { problem });
+        Err(not_begun) => {
+            // A change refused is as done as one made.
+            tokio::spawn(Arc::clone(daemon).leave_if_unneeded());
+            return match not_begun {
+                NotBegun::DoesNotFit(problem) => {
+                    json(StatusCode::UNPROCESSABLE_ENTITY, &Problem { problem })
+                }
+                NotBegun::Refused(refused) => json(StatusCode::CONFLICT, &refused),
+            };
         }
-        Err(NotBegun::Refused(refused)) => return json(StatusCode::CONFLICT, &refused),
     };
     *under_way = Some(Arc::clone(&change));
     drop(under_way);
-    tokio::spawn(made);
+    tokio::spawn(then_leave_if_unneeded(Arc::clone(daemon), made));
     follow(change)
 }
 

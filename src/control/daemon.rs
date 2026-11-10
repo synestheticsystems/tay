@@ -42,6 +42,7 @@ use crate::plan::{self, Options, Plan, PlannedUnit};
 use crate::print;
 
 use change::{Change, NotBegun};
+use down::Down;
 
 /// What the daemon holds while it runs.
 pub struct Daemon {
@@ -337,6 +338,43 @@ impl Daemon {
                 at: clock::now(),
             });
         }
+    }
+
+    /// Once a change is over, takes the environment down as `tay down`
+    /// does, and so exits, if it is down and nothing of it runs: a daemon
+    /// started for a change on an environment that is down is not left
+    /// behind, nor what its units share where they run.
+    async fn leave_if_unneeded(self: Arc<Self>) {
+        let down = matches!(Intent::read(&self.environment.layout), Ok(Intent::Down));
+        if !down || self.supervisor.tends_any() {
+            return;
+        }
+        // What runs that no task looks after, as what a daemon found of
+        // units its plan lacks, keeps the daemon too.
+        match self.supervisor.found_left().await {
+            Ok(left) if left.is_empty() => {}
+            Ok(_) => return,
+            Err(why) => {
+                log(&format!(
+                    "whether anything of the environment runs cannot be told, so the daemon stays: {why}"
+                ));
+                return;
+            }
+        }
+        // It holds the place of a change, so that none begins meanwhile.
+        let change = {
+            let mut under_way = self
+                .change
+                .lock()
+                .expect("the change under way is not poisoned");
+            if under_way.is_some() || self.exit.borrow().is_some() {
+                return;
+            }
+            let change = Change::new(change::Kind::Down);
+            *under_way = Some(Arc::clone(&change));
+            change
+        };
+        self.take_down(change, None, Down::Unneeded).await;
     }
 
     /// The change is over: what followers are told ends, and another

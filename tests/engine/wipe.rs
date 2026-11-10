@@ -102,11 +102,11 @@ fn wiping_what_is_made_or_a_process_on_an_environment_down_removes_it_and_brings
         "{}",
         wipe.stdout
     );
+    // The daemon started for the wipe leaves once it is done.
     assert!(
-        machine
-            .processes()
-            .iter()
-            .all(|pid| { crate::harness::command_of(*pid).contains("tay daemon") })
+        eventually(Duration::from_secs(20), || machine.processes().is_empty()),
+        "{:?}",
+        machine.processes()
     );
     // The next `tay up` makes them afresh.
     assert_eq!(machine.at(&root, "up", &[]).code, 0);
@@ -126,8 +126,13 @@ fn a_command_whose_undo_needs_a_unit_that_is_not_up_is_refused() {
     assert_eq!(machine.at(&root, "down", &[]).code, 0);
     let down = machine.at(&root, "wipe", &["schema", "--yes"]);
     assert_eq!((down.code, down.stderr.as_str()), (4, refused));
-    // Nothing was undone.
+    // Nothing was undone, and the daemon started to be asked leaves.
     assert!(root.join(".tay/state/schema-made").exists());
+    assert!(
+        eventually(Duration::from_secs(20), || machine.processes().is_empty()),
+        "{:?}",
+        machine.processes()
+    );
 }
 
 #[test]

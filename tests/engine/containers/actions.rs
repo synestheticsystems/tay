@@ -3,8 +3,10 @@
 //! one that is up without that port is never replaced for it, and the run
 //! is refused, naming it.
 
-use super::container;
-use crate::harness::Machine;
+use std::time::Duration;
+
+use super::{container, labelled};
+use crate::harness::{Machine, eventually};
 
 #[test]
 fn an_action_that_would_replace_a_container_that_is_up_is_refused_naming_it() {
@@ -34,8 +36,14 @@ fn an_action_brings_up_a_container_it_needs_with_the_port_it_uses_and_stops_it_a
     assert_eq!(run.code, 0, "{}{}", run.stdout, run.stderr);
     let port = crate::harness::kept_ports(&root)["quiet-port"].clone();
     assert_eq!(run.stdout, format!("asked 127.0.0.1:{port}\n"));
+    // Nothing of the environment is left in Docker, and the daemon
+    // started for the run leaves.
     assert!(
-        container(&machine, &root, "quiet").is_none_or(|quiet| quiet["State"]["Running"] == false),
-        "the container still runs"
+        eventually(Duration::from_secs(20), || machine.processes().is_empty()),
+        "{:?}",
+        machine.processes()
     );
+    let [containers, _, networks] = labelled(&machine, &root);
+    assert!(containers.is_empty(), "{containers:?}");
+    assert!(networks.is_empty(), "{networks:?}");
 }

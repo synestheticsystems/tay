@@ -7,8 +7,9 @@
 
 use std::fs;
 use std::path::Path;
+use std::time::Duration;
 
-use crate::harness::{Machine, alive, child};
+use crate::harness::{Machine, alive, child, eventually};
 
 /// Every file under `folder`, with what it holds, as text.
 fn every_file(folder: &Path) -> Vec<(String, String)> {
@@ -202,13 +203,19 @@ fn run_on_an_environment_that_is_down_brings_up_what_it_needs_and_leaves_it_down
         never.stdout
     );
     assert!(never.stderr.contains("  web   ready"), "{}", never.stderr);
-    // What it needed was stopped again, and nothing is meant to be up.
+    // What it needed was stopped again, nothing is meant to be up, and the
+    // daemon started for it leaves.
     assert!(!alive(child(&root, "web")));
     assert_ne!(
         fs::read_to_string(root.join(".tay/state/intent"))
             .unwrap_or_default()
             .trim(),
         "up"
+    );
+    assert!(
+        eventually(Duration::from_secs(20), || machine.processes().is_empty()),
+        "{:?}",
+        machine.processes()
     );
     assert_eq!(machine.at(&root, "up", &[]).code, 0);
     assert_eq!(machine.at(&root, "down", &[]).code, 0);

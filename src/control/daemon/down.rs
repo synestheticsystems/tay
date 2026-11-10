@@ -1,6 +1,7 @@
 //! Taking the environment down: `tay down`, or what the daemon does when the
-//! environment's folder has gone. Either stops every unit and the daemon
-//! exits.
+//! environment's folder has gone, or once a change on an environment that
+//! is down leaves nothing of it running. Each stops every unit and the
+//! daemon exits.
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -22,6 +23,9 @@ pub enum Down {
     /// `tay wipe --all` asked, which then removes what the environment
     /// keeps.
     Wiped,
+    /// A change on an environment that is down is over, and nothing of it
+    /// runs.
+    Unneeded,
 }
 
 impl Down {
@@ -31,6 +35,7 @@ impl Down {
             Down::Asked => "stopped by `tay down`",
             Down::Gone => "stopped: the environment's folder has gone",
             Down::Wiped => "stopped by `tay wipe --all`",
+            Down::Unneeded => "stopped: the environment is down",
         }
     }
 
@@ -40,6 +45,7 @@ impl Down {
             Down::Asked => "taken down by `tay down`",
             Down::Gone => "the environment's folder has gone",
             Down::Wiped => "taken down by `tay wipe --all`",
+            Down::Unneeded => "the environment is down and nothing of it runs",
         }
     }
 }
