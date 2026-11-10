@@ -110,9 +110,9 @@ impl Planner<'_> {
                     }
                     // An address with no view in a value of a unit that is
                     // made has no form for anyone.
-                    ViewProblem::NeedsView { at, .. } => {
+                    ViewProblem::NeedsView { .. } => {
                         let who = "a value of a unit that is made, which runs nowhere, holds it";
-                        self.resolver.d.push(view_error(who, *at, problem.clone()));
+                        self.resolver.d.push(view_error(who, problem.clone()));
                     }
                 }
             }

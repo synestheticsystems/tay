@@ -51,22 +51,41 @@ impl Asker {
     }
 }
 
-/// Why a value cannot be resolved for this asker, though its definition is sound.
+/// Why a value cannot be resolved for this asker, though its definition is
+/// sound. `at` is where the address is used: the reference in the text
+/// furthest out that brings it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ViewProblem {
     /// The host asks for a container's address that is not published.
     NotPublished {
         owner: String,
         port: String,
+        at: Loc,
         endpoint: Loc,
     },
-    /// The asker runs nowhere and the reference, written at `at`, names no
-    /// view.
+    /// The asker runs nowhere and the reference names no view.
     NeedsView {
         reference: String,
         at: Loc,
         endpoint: Loc,
     },
+}
+
+impl ViewProblem {
+    pub fn at(&self) -> Loc {
+        match self {
+            ViewProblem::NotPublished { at, .. } | ViewProblem::NeedsView { at, .. } => *at,
+        }
+    }
+
+    /// The problem, with the address used at `used`: a reference further out
+    /// that brings it.
+    pub fn used_at(mut self, used: Loc) -> ViewProblem {
+        match &mut self {
+            ViewProblem::NotPublished { at, .. } | ViewProblem::NeedsView { at, .. } => *at = used,
+        }
+        self
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -237,7 +256,11 @@ impl<'s> Resolver<'s> {
                         bits.extend(value.value.bits());
                     }
                     Err(Fail::Reported) => reported = true,
-                    Err(Fail::View(problems)) => views.extend(problems),
+                    Err(Fail::View(problems)) => views.extend(
+                        problems
+                            .into_iter()
+                            .map(|problem| problem.used_at(reference.loc)),
+                    ),
                 },
             }
         }

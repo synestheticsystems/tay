@@ -79,13 +79,14 @@ fn an_unpublished_container_port_used_from_the_host_is_an_error_naming_both_unit
             "tay.yaml:18:43: unit `box-user` runs in a container, and uses here an address of unit `hidden` as the host sees it, but `hidden` publishes no host port for its port 5432",
             "  tay.yaml:8:11: the endpoint of `hidden` is defined here",
             // A file is read by whoever reads it, so it must say which view.
-            "tay.yaml:21:22: unit `config` is made, and runs nowhere, so `${hidden.db}` must say which view of the address it wants: add `@host`, `@net`, or `@` and the name of the unit that uses it",
+            "tay.yaml:21:28: unit `config` is made, and runs nowhere, so `${hidden.db}` must say which view of the address it wants: add `@host`, `@net`, or `@` and the name of the unit that uses it",
             "  tay.yaml:8:11: the endpoint is defined here",
-            // Every address in one text that its user cannot have is reported.
-            "tay.yaml:29:28: unit `both-user` runs on the host, and uses here an address of unit `also-hidden` as the host sees it, but `also-hidden` publishes no host port for its port 6543",
-            "  tay.yaml:26:11: the endpoint of `also-hidden` is defined here",
-            "tay.yaml:29:28: unit `both-user` runs on the host, and uses here an address of unit `hidden` as the host sees it, but `hidden` publishes no host port for its port 5432",
+            // Every address in one text that its user cannot have is
+            // reported, each at the reference that uses it.
+            "tay.yaml:29:29: unit `both-user` runs on the host, and uses here an address of unit `hidden` as the host sees it, but `hidden` publishes no host port for its port 5432",
             "  tay.yaml:8:11: the endpoint of `hidden` is defined here",
+            "tay.yaml:29:46: unit `both-user` runs on the host, and uses here an address of unit `also-hidden` as the host sees it, but `also-hidden` publishes no host port for its port 6543",
+            "  tay.yaml:26:11: the endpoint of `also-hidden` is defined here",
             // A unit that is made gives an endpoint whose host needs a view.
             "tay.yaml:33:22: a value of a unit that is made, which runs nowhere, holds it, so `${hidden.db.host}` must say which view of the address it wants: add `@host`, `@net`, or `@` and the name of the unit that uses it",
             "  tay.yaml:8:11: the endpoint is defined here",

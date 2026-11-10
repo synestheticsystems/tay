@@ -58,3 +58,19 @@ fn a_template_file_is_read_once_and_its_references_checked_as_a_definitions_are(
         ]
     );
 }
+
+#[test]
+fn an_address_a_template_file_cannot_have_is_reported_at_its_reference_in_the_file() {
+    let run = plan("template-file-addresses", &[]);
+    assert_eq!(
+        run.errors(),
+        [
+            "site.tmpl:3:5: unit `conf` is made, and runs nowhere, and uses here an address of unit `api` as the host sees it, but `api` publishes no host port for its port 8080",
+            "  tay.yaml:8:20: the endpoint of `api` is defined here",
+            "  tay.yaml:9:41: read for unit `conf` here",
+            "site.tmpl:4:6: unit `conf` is made, and runs nowhere, and uses here an address of unit `api` as the host sees it, but `api` publishes no host port for its port 8080",
+            "  tay.yaml:8:20: the endpoint of `api` is defined here",
+            "  tay.yaml:9:41: read for unit `conf` here",
+        ]
+    );
+}

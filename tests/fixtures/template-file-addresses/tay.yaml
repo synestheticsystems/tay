@@ -1,0 +1,9 @@
+format: 1
+stack: template-file-addresses
+up: [conf]
+units:
+  api:
+    uses: container
+    with: { image: example/api }
+    gives: { http: { port: 8080, scheme: http } }
+  conf: { uses: file, with: { template: ./site.tmpl } }

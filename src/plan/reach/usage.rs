@@ -8,7 +8,7 @@ use crate::definition::read::cross_references::references as cross_references;
 use crate::diagnostic::source::Loc;
 use crate::diagnostic::{Diagnostic, quoted_list};
 use crate::module::{Destination, Form, PathUse, Slot, Want};
-use crate::syntax::expr::{self, Expr};
+use crate::syntax::expr::{self, Expr, ExprKind};
 
 use super::visit::NeedEdge;
 use crate::plan::Planner;
@@ -79,9 +79,12 @@ impl Planner<'_> {
             Err(Fail::Reported) => return None,
             Err(Fail::View(problems)) => {
                 for problem in problems {
-                    self.resolver
-                        .d
-                        .push(view_error(&user.who(), expr.loc, problem));
+                    // A value that is one reference is used where it is.
+                    let problem = match &expr.kind {
+                        ExprKind::Ref(_) => problem.used_at(expr.loc),
+                        _ => problem,
+                    };
+                    self.resolver.d.push(view_error(&user.who(), problem));
                 }
                 return None;
             }
@@ -243,7 +246,7 @@ impl Planner<'_> {
             let source = self.resolver.sources.add_file(file, &self.root);
             let read = expr::parse_document(&text, source).map(|pieces| Expr {
                 loc: Loc::new(source, 1, 1),
-                kind: expr::ExprKind::Text(pieces),
+                kind: ExprKind::Text(pieces),
             });
             self.template_files.insert(path.to_string(), read);
         }
@@ -257,13 +260,15 @@ impl Planner<'_> {
     }
 }
 
-/// An address `who` uses at `at` and cannot have.
-pub fn view_error(who: &str, at: Loc, problem: ViewProblem) -> Diagnostic {
+/// An address `who` uses where the problem says, and cannot have.
+pub fn view_error(who: &str, problem: ViewProblem) -> Diagnostic {
+    let at = problem.at();
     match problem {
         ViewProblem::NotPublished {
             owner,
             port,
             endpoint,
+            ..
         } => Diagnostic::new(
             at,
             format!(

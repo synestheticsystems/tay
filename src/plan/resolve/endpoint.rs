@@ -153,6 +153,7 @@ impl<'s> Resolver<'s> {
             Err(Fail::View(vec![ViewProblem::NotPublished {
                 owner: owner_name.clone(),
                 port: port.value.shown(),
+                at: reference.loc,
                 endpoint: endpoint.loc,
             }]))
         };
