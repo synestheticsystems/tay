@@ -5,13 +5,17 @@
 //! once it ends and what it wrote is copied. Either way its secrets reach it
 //! through its environment, and the file its `TAY_VALUES` names is fetched
 //! from where it ran into the place on the host the command module reads
-//! its values from.
+//! its values from, and how it ended is recorded, since Docker keeps nothing
+//! of it once it has ended.
+
+mod record;
 
 use std::path::Path;
 
 use bollard::models::{
     ContainerCreateBody, ContainerStateStatusEnum, HostConfig, NetworkingConfig,
 };
+use serde::{Deserialize, Serialize};
 
 use super::docker::ours::{ATTEMPT, STEP};
 use super::docker::{Docker, Exec, Exited, OurContainer, Owner, copy_output, runs};
@@ -45,6 +49,8 @@ pub struct CommandStep {
 }
 
 /// How a step run in a container ended.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ContainerStepEnd {
     /// Its program exited, as these words say, with this code.
     Exited { code: i64, words: String },
@@ -52,16 +58,16 @@ pub enum ContainerStepEnd {
     NotStarted(String),
 }
 
-/// A command's container of its own, as a daemon that did not start it
-/// finds it.
-pub enum FoundOwn {
+/// A command's last step in a container, as a daemon that did not start
+/// it finds it.
+pub enum FoundStep {
     Never,
-    /// A step runs in it.
+    /// It runs, in a container of the command's own.
     UnderWay {
         attempt: u32,
         step: String,
     },
-    /// A step ended in it, and has its values fetched.
+    /// It ended, and has its values fetched.
     Ended {
         attempt: u32,
         step: String,
@@ -107,6 +113,7 @@ pub async fn run_inside(
     };
     let inside = inside_values(place, &step);
     step.env.push(format!("TAY_VALUES={inside}"));
+    record::forget(place)?;
     let mut log = unit_log(place)?;
     note(
         &mut log,
@@ -177,6 +184,7 @@ pub async fn run_inside(
         )?;
     }
     fetched?;
+    record::keep(place, step.attempt, step.step, &ended)?;
     Ok(ended)
 }
 
@@ -211,6 +219,7 @@ pub async fn run_own(
     if let Some((left, _)) = docker.container(id, &name).await? {
         remove_copied(&docker, place, left, &mut log).await?;
     }
+    record::forget(place)?;
     step.env.push(format!("TAY_VALUES={OWN_VALUES}"));
     make_mount_folders(mounts, place)?;
     let mounts = mounts
@@ -268,6 +277,7 @@ pub async fn run_own(
         docker.remove(container).await?;
         let ended = ContainerStepEnd::NotStarted(error.to_string());
         note(&mut log, &step, &ended.how())?;
+        record::keep(place, step.attempt, step.step, &ended)?;
         return Ok(ended);
     }
     if let (Some(fed), Some(stdin)) = (fed, &step.stdin) {
@@ -278,16 +288,27 @@ pub async fn run_own(
             since: clock::now_millis(),
         });
     }
-    let ended = waited(&docker, place, container, values, &mut log).await?;
+    let ended = waited(
+        &docker,
+        place,
+        container,
+        step.attempt,
+        step.step,
+        values,
+        &mut log,
+    )
+    .await?;
     note(&mut log, &step, &ended.how())?;
     Ok(ended)
 }
 
-/// Waits for the step under way in the command's container of its own to
-/// end, as a daemon that did not start it does, then fetches its values
-/// into `values` and removes it.
+/// Waits for step `step` of attempt `attempt`, under way in the command's
+/// container of its own, to end, as a daemon that did not start it does,
+/// then fetches its values into `values` and removes it.
 pub async fn wait_own(
     place: &UnitPlace,
+    attempt: u32,
+    step: &str,
     values: &Path,
     running: Option<&Steps>,
 ) -> Result<ContainerStepEnd, Failure> {
@@ -304,17 +325,24 @@ pub async fn wait_own(
         });
     }
     let mut log = unit_log(place)?;
-    waited(&docker, place, container, values, &mut log).await
+    waited(&docker, place, container, attempt, step, values, &mut log).await
 }
 
-/// The command's container of its own, found by its name and the
-/// environment's label; one whose step has ended has its values fetched
-/// into `values`, and is removed.
-pub async fn found_own(place: &UnitPlace, values: &Path) -> Result<FoundOwn, Failure> {
+/// The last step of a command run inside another unit's container, as its
+/// record says.
+pub fn found_inside(place: &UnitPlace) -> Result<FoundStep, Failure> {
+    record::found(place)
+}
+
+/// The last step of a command run in containers of its own: in its
+/// container, found by its name and the environment's label, or as its
+/// record says once that container is gone. A container whose step has
+/// ended has its values fetched into `values`, and is removed.
+pub async fn found_own(place: &UnitPlace, values: &Path) -> Result<FoundStep, Failure> {
     let docker = Docker::connect()?;
     let id = place.environment.id.as_str();
     let Some((container, inspected)) = docker.container(id, &container_name(place)).await? else {
-        return Ok(FoundOwn::Never);
+        return record::found(place);
     };
     let attempt = container
         .label(ATTEMPT)
@@ -324,33 +352,38 @@ pub async fn found_own(place: &UnitPlace, values: &Path) -> Result<FoundOwn, Fai
         // A container of the unit that is not one of its steps' is left
         // over from where it ran in another way, and goes.
         docker.remove(container).await?;
-        return Ok(FoundOwn::Never);
+        return Ok(FoundStep::Never);
     };
     match inspected.state.as_ref().and_then(|state| state.status) {
         Some(ContainerStateStatusEnum::CREATED) => {
             // Its daemon ended before it started the step, which is simply
-            // not done.
+            // not done; the record of an earlier step's end no longer
+            // speaks for the command.
             docker.remove(container).await?;
-            return Ok(FoundOwn::Never);
+            record::forget(place)?;
+            return Ok(FoundStep::Never);
         }
-        _ if runs(&inspected) => return Ok(FoundOwn::UnderWay { attempt, step }),
+        _ if runs(&inspected) => return Ok(FoundStep::UnderWay { attempt, step }),
         _ => {}
     }
     let mut log = unit_log(place)?;
-    let ended = waited(&docker, place, container, values, &mut log).await?;
-    Ok(FoundOwn::Ended {
+    let ended = waited(&docker, place, container, attempt, &step, values, &mut log).await?;
+    Ok(FoundStep::Ended {
         attempt,
         step,
         ended,
     })
 }
 
-/// Copies what `container` prints until it ends, then fetches its values
-/// into `values`, and removes it; how it ended.
+/// Copies what `container`, which runs step `step` of attempt `attempt`,
+/// prints until it ends, then fetches its values into `values`, records how
+/// it ended, and removes it; how it ended.
 async fn waited(
     docker: &Docker,
     place: &UnitPlace,
     container: OurContainer,
+    attempt: u32,
+    step: &str,
     values: &Path,
     log: &mut Adding,
 ) -> Result<ContainerStepEnd, Failure> {
@@ -370,6 +403,9 @@ async fn waited(
         },
     };
     fetch(docker, &container, OWN_VALUES, values).await?;
+    // Recorded before the container goes, so that a daemon that ends
+    // between the two finds one or the other.
+    record::keep(place, attempt, step, &ended)?;
     docker.remove(container).await?;
     Ok(ended)
 }

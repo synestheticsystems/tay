@@ -8,9 +8,10 @@
 //!
 //! A command killed part-way, or whose daemon was killed during it, is
 //! simply not done: the next `tay up` checks again and runs it again. One on
-//! the host, or in a container of its own, is found again by the next
-//! daemon; one inside another unit's container leaves nothing to be found
-//! by, so is simply not done.
+//! the host, or in a container of its own, is found again under way by the
+//! next daemon; one inside another unit's container leaves nothing to be
+//! found by, so is simply not done. A step that has ended, wherever it ran,
+//! is found again as it ended.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -22,7 +23,7 @@ use crate::module::operations::{
     Steps, UnderWay, UnitPlace,
 };
 use crate::module::running::command_line::{RunForm, filled_run_form};
-use crate::module::running::container::{self, CommandStep, ContainerStepEnd, FoundOwn};
+use crate::module::running::container::{self, CommandStep, ContainerStepEnd, FoundStep};
 use crate::module::running::host;
 use crate::value::Filled;
 
@@ -193,41 +194,52 @@ impl CommandSettings<Filled> {
 
     /// The command as a daemon that did not start it finds it.
     async fn found_now(&self, place: &UnitPlace) -> Result<Found, Failure> {
-        let (attempt, step, end) = match self.where_it_runs() {
-            Where::Inside(_) => return Ok(Found::Never),
-            Where::Host => match host::files(place).look()? {
-                Look::Never => return Ok(Found::Never),
-                Look::Running(record) => {
-                    return Ok(Found::UnderWay(UnderWay {
+        let found = match self.where_it_runs() {
+            Where::Host => {
+                return match host::files(place).look()? {
+                    Look::Never => Ok(Found::Never),
+                    Look::Running(record) => Ok(Found::UnderWay(UnderWay {
                         attempt: record.attempt,
                         step: record.step,
-                    }));
-                }
-                Look::Lost(record) => {
-                    return Ok(Found::Lost {
+                    })),
+                    Look::Lost(record) => Ok(Found::Lost {
                         attempt: record.attempt,
-                    });
-                }
-                Look::Ended(record, ended) => (
-                    record.attempt,
-                    record.step,
-                    StepOutcome::on_host(host::StepEnd::Ended(ended)),
-                ),
-            },
-            Where::Own(_) => match container::found_own(place, &produced::file(place)).await? {
-                FoundOwn::Never => return Ok(Found::Never),
-                FoundOwn::UnderWay { attempt, step } => {
-                    return Ok(Found::UnderWay(UnderWay { attempt, step }));
-                }
-                FoundOwn::Ended {
-                    attempt,
-                    step,
-                    ended,
-                } => (attempt, step, StepOutcome::in_container(ended)),
-            },
+                    }),
+                    Look::Ended(record, ended) => self.found_ended(
+                        place,
+                        record.attempt,
+                        &record.step,
+                        &StepOutcome::on_host(host::StepEnd::Ended(ended)),
+                    ),
+                };
+            }
+            Where::Inside(_) => container::found_inside(place)?,
+            Where::Own(_) => container::found_own(place, &produced::file(place)).await?,
         };
-        let outcome = match step.as_str() {
-            CHECK => match self.checked(&end) {
+        match found {
+            FoundStep::Never => Ok(Found::Never),
+            FoundStep::UnderWay { attempt, step } => {
+                Ok(Found::UnderWay(UnderWay { attempt, step }))
+            }
+            FoundStep::Ended {
+                attempt,
+                step,
+                ended,
+            } => self.found_ended(place, attempt, &step, &StepOutcome::in_container(ended)),
+        }
+    }
+
+    /// The command as a daemon that did not start it finds it, when step
+    /// `step` of attempt `attempt` was the last, and ended so.
+    fn found_ended(
+        &self,
+        place: &UnitPlace,
+        attempt: u32,
+        step: &str,
+        end: &StepOutcome,
+    ) -> Result<Found, Failure> {
+        let outcome = match step {
+            CHECK => match self.checked(end) {
                 AfterCheck::Done => {
                     self.done(place, "done: its check exited with 0", Kept::Given)?
                 }
@@ -236,7 +248,7 @@ impl CommandSettings<Filled> {
                 )),
                 AfterCheck::Outcome(outcome) => outcome,
             },
-            RUN => self.ran(place, &end, ", while no daemon ran", Kept::Given)?,
+            RUN => self.ran(place, end, ", while no daemon ran", Kept::Given)?,
             other => return Err(CommandError::UnknownStep(other.to_string()).into()),
         };
         Ok(Found::Ended { attempt, outcome })
@@ -257,7 +269,7 @@ impl CommandSettings<Filled> {
             // attempt, which then goes no further.
             let _ = steps.send(Step::Before("checking".to_string()));
             let end = match under_way {
-                true => self.wait(place, None).await?,
+                true => self.wait(place, attempt, CHECK, None).await?,
                 false => {
                     let check = self
                         .check
@@ -276,7 +288,7 @@ impl CommandSettings<Filled> {
             }
         }
         let end = match under_way && from == RUN {
-            true => self.wait(place, Some(steps)).await?,
+            true => self.wait(place, attempt, RUN, Some(steps)).await?,
             false => {
                 produced::clear(place)?;
                 let stdin = match &self.stdin {
@@ -328,17 +340,19 @@ impl CommandSettings<Filled> {
         })
     }
 
-    /// Waits for the step under way, which a daemon that did not start it
-    /// found, to end.
+    /// Waits for step `step` of attempt `attempt`, under way, which a daemon
+    /// that did not start it found, to end.
     async fn wait(
         &self,
         place: &UnitPlace,
+        attempt: u32,
+        step: &str,
         running: Option<&Steps>,
     ) -> Result<StepOutcome, Failure> {
         Ok(match self.where_it_runs() {
             Where::Host => StepOutcome::on_host(host::wait(&host::files(place), running).await?),
             Where::Own(_) => StepOutcome::in_container(
-                container::wait_own(place, &produced::file(place), running).await?,
+                container::wait_own(place, attempt, step, &produced::file(place), running).await?,
             ),
             Where::Inside(_) => return Err(CommandError::NotFoundInside.into()),
         })

@@ -34,7 +34,10 @@ use unit::ContainerUnit;
 
 pub use host::{HOST_IN_CONTAINERS, Occasion, host_listen};
 pub use left::{anything_left, anything_left_of_environment, found_left, remove_shared, stop};
-pub use step::{CommandStep, ContainerStepEnd, FoundOwn, found_own, run_inside, run_own, wait_own};
+pub use step::{
+    CommandStep, ContainerStepEnd, FoundStep, found_inside, found_own, run_inside, run_own,
+    wait_own,
+};
 pub use unit::check_inside;
 
 pub struct Container;

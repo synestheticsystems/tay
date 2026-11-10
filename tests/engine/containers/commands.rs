@@ -88,6 +88,30 @@ fn commands_in_a_container_check_then_run_hand_on_their_values_and_leave_no_cont
 }
 
 #[test]
+fn a_command_that_ran_in_a_container_is_found_done_by_a_daemon_started_afresh() {
+    let machine = Machine::with_docker();
+    let root = machine.stack("containers");
+    let up = machine.at(&root, "up", &["shown"]);
+    assert_eq!(up.code, 0, "{}{}", up.stdout, up.stderr);
+    machine.kill_daemon(&root);
+    // Nothing of either is left where it ran, inside the store or in a
+    // container of its own: the daemon that saw each end kept how.
+    let status = machine.at(&root, "status", &["--json"]).json();
+    for unit in ["seeded", "stamped"] {
+        assert_eq!(
+            Machine::state(&status, unit),
+            "ready done: it ran and exited with 0",
+            "{unit}"
+        );
+    }
+    // What uses their values is looked after again, its settings filled
+    // from what they gave.
+    machine.until_state(&root, "shown", Duration::from_secs(20), |state| {
+        state.starts_with("ready ")
+    });
+}
+
+#[test]
 fn a_commands_container_found_created_and_never_started_is_not_done() {
     let machine = Machine::with_docker();
     let root = machine.stack("containers");
