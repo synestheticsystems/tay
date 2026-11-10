@@ -10,7 +10,7 @@ use crate::definition::{Profile, Stack};
 use crate::module::UnitKind;
 
 use super::Planner;
-use super::model::{After, Need, OpenedPort, Plan, PublishedPort};
+use super::model::{After, Need, OpenedPort, Opener, Plan, PlannedUnit, PublishedPort};
 use super::order::{self, Edge, EdgeKind};
 use super::reach::visit::{OpenedAt, Visit};
 use super::reach::{Reached, opened_ports};
@@ -58,82 +58,111 @@ impl Planner<'_> {
             .map(|(unit, _)| *unit)
             .collect();
         let is_made = |unit: usize| made.contains(&unit);
-        let order = order::order(&units, &name, &is_made, &edges, &mut self.resolver.d)?;
+        let order = order::order(&units, &name, &is_made, &edges, &mut self.resolver.d);
         // What each unit gives is shown as the plan leaves it, so an address
         // through a published port that nothing opens is not shown as one.
         let opened = opened_ports(&reached.visits);
-        let mut openers: HashMap<(String, i64), Vec<_>> = HashMap::new();
+        let mut openers: HashMap<(String, i64), Vec<Opener>> = HashMap::new();
         for opening in reached.visits.iter().flat_map(|(_, visit)| &visit.opens) {
             openers
                 .entry((opening.container.clone(), opening.port))
                 .or_default()
                 .push(opening.opener.clone());
         }
-        let mut visits: HashMap<usize, Visit<'_>> = reached.visits.into_iter().collect();
-        let mut planned = Vec::new();
-        for unit in order {
-            let visit = visits.remove(&unit)?;
-            let mechanism = match visit.chosen {
-                Chosen::Mechanism { mechanism, .. } => Some(mechanism),
-                Chosen::Group(_) => None,
-            };
-            let gives: Option<Vec<_>> = match mechanism {
-                Some(mechanism) => self.gives(unit, mechanism, &opened).into_iter().collect(),
-                None => Some(Vec::new()),
-            };
-            let mut unit_plan = visit.planned?;
-            unit_plan.gives = gives?;
-            if let Some(mechanism) = mechanism
-                && let Some(planned) = &mut unit_plan.mechanism
-            {
-                let published = &mechanism.description.published;
-                for (entry, used) in published.iter().zip(visit.published) {
-                    let opened = match used {
-                        None => None,
-                        Some(OpenedAt { address, host_port }) => {
-                            let mut by = openers
-                                .remove(&(name(unit), entry.container_port))
-                                .unwrap_or_default();
-                            by.sort();
-                            by.dedup();
-                            Some(OpenedPort {
-                                address: address?,
-                                host_port: host_port?,
-                                always: entry.always,
-                                by,
-                            })
-                        }
-                    };
-                    planned.publishes.push(PublishedPort {
-                        container_port: entry.container_port,
-                        opened,
-                    });
-                }
-            }
-            unit_plan.needs = visit
-                .needs
-                .into_iter()
-                .map(|need| Need {
-                    unit: name(need.unit),
-                    because: need.because,
-                })
-                .collect();
-            unit_plan.after = visit
-                .after
-                .iter()
-                .map(|(waited, _)| After {
-                    unit: name(*waited),
-                    comes_up: in_plan.contains(waited),
-                })
-                .collect();
-            planned.push(unit_plan);
+        // Every unit is assembled, whatever the order and whether another
+        // could not be, so that every error is reported.
+        let mut assembled: HashMap<usize, Option<PlannedUnit>> = HashMap::new();
+        for (unit, visit) in reached.visits {
+            let planned = self.assemble(unit, visit, &in_plan, &opened, &mut openers);
+            assembled.insert(unit, planned);
         }
+        let units = order?
+            .into_iter()
+            .map(|unit| {
+                assembled
+                    .remove(&unit)
+                    .expect("every unit in the order was visited")
+            })
+            .collect::<Option<_>>()?;
         Some(Plan {
             stack: stack_name.to_string(),
             root: self.resolver.environment.root.clone(),
             profile: profile.map(|profile| profile.name.name.clone()),
             production: self.production,
-            units: planned,
+            units,
         })
+    }
+
+    /// One unit of the plan, with what it needs and waits for, the ports it
+    /// publishes and the values it gives; `None` when one of its values could
+    /// not be resolved, which is reported.
+    fn assemble(
+        &mut self,
+        unit: usize,
+        visit: Visit<'_>,
+        in_plan: &HashSet<usize>,
+        opened: &HashSet<(String, i64)>,
+        openers: &mut HashMap<(String, i64), Vec<Opener>>,
+    ) -> Option<PlannedUnit> {
+        let stack = self.resolver.stack;
+        let name = |unit: usize| stack.units[unit].name.name.clone();
+        let mechanism = match visit.chosen {
+            Chosen::Mechanism { mechanism, .. } => Some(mechanism),
+            Chosen::Group(_) => None,
+        };
+        let gives: Option<Vec<_>> = match mechanism {
+            Some(mechanism) => self.gives(unit, mechanism, opened).into_iter().collect(),
+            None => Some(Vec::new()),
+        };
+        let publishes: Option<Vec<PublishedPort>> = mechanism
+            .map(|mechanism| &mechanism.description.published[..])
+            .unwrap_or_default()
+            .iter()
+            .zip(visit.published)
+            .map(|(entry, used)| {
+                let Some(OpenedAt { address, host_port }) = used else {
+                    return Some(PublishedPort {
+                        container_port: entry.container_port,
+                        opened: None,
+                    });
+                };
+                let mut by = openers
+                    .remove(&(name(unit), entry.container_port))
+                    .unwrap_or_default();
+                by.sort();
+                by.dedup();
+                Some(PublishedPort {
+                    container_port: entry.container_port,
+                    opened: Some(OpenedPort {
+                        address: address?,
+                        host_port: host_port?,
+                        always: entry.always,
+                        by,
+                    }),
+                })
+            })
+            .collect();
+        let mut planned = visit.planned?;
+        planned.gives = gives?;
+        if let Some(mechanism) = &mut planned.mechanism {
+            mechanism.publishes = publishes?;
+        }
+        planned.needs = visit
+            .needs
+            .into_iter()
+            .map(|need| Need {
+                unit: name(need.unit),
+                because: need.because,
+            })
+            .collect();
+        planned.after = visit
+            .after
+            .iter()
+            .map(|(waited, _)| After {
+                unit: name(*waited),
+                comes_up: in_plan.contains(waited),
+            })
+            .collect();
+        Some(planned)
     }
 }

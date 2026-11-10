@@ -1,0 +1,20 @@
+format: 1
+stack: every-unit-errors
+settings:
+  first_port: { default: one }
+  second_port: { default: two }
+up: [db, a, b]
+units:
+  db:
+    uses: container
+    with: { image: example/db }
+    ready: { tcp: "${self.sql}", within: 30s }
+    gives: { sql: { port: 5432 } }
+  a:
+    uses: process
+    with: { command: [a] }
+    gives: { x: { port: "${settings.first_port}" } }
+  b:
+    uses: process
+    with: { command: [b] }
+    gives: { y: { port: "${settings.second_port}" } }
