@@ -16,12 +16,12 @@ use crate::diagnostic::source::Loc;
 use crate::syntax::yaml::Node;
 
 pub use description::{
-    Concern, Description, ModuleValue, Output, Published, RestartDefault, Runs, UnitKind,
-    VolumeMount,
+    Concern, Description, ModuleValue, Output, Published, ReadyWithoutCheck, RestartOn, Runs,
+    UnitKind, VolumeMount,
 };
 pub use running::container::HOST_IN_CONTAINERS;
 pub use settings::{Destination, Settings};
-pub use want::{Form, PathUse, Want};
+pub use want::{Duration, Form, PathUse, Want};
 
 /// One mechanism a unit can use.
 pub trait Module: Sync {

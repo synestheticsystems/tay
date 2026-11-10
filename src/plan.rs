@@ -18,10 +18,8 @@ use crate::definition::{Choices, Profile, Stack};
 use crate::diagnostic::source::{Loc, Sources};
 use crate::diagnostic::{Diagnostic, Diagnostics};
 
-pub use crate::value::Exact;
 pub use model::{
-    Because, GivenLine, Mechanism, OpenedBy, Plan, PlannedUnit, PublishedPort, Readiness, Running,
-    Seen, Shown,
+    Because, Given, OpenedBy, Plan, PlannedMechanism, PlannedUnit, PublishedPort, Readiness, Seen,
 };
 
 use resolve::{Environment, Resolver};
@@ -192,10 +190,8 @@ mod tests {
     /// A unit's settings in the plan, as `Debug` writes them.
     fn settings(plan: &Plan, unit: &str) -> String {
         let unit = plan.units.iter().find(|u| u.name == unit).unwrap();
-        match &unit.mechanism {
-            Mechanism::Module { settings, .. } => format!("{settings:?}"),
-            Mechanism::Group => panic!("`{}` is a group", unit.name),
-        }
+        let mechanism = unit.mechanism.as_ref().expect("the unit is not a group");
+        format!("{:?}", mechanism.settings)
     }
 
     #[test]

@@ -14,6 +14,8 @@ pub struct Description {
     pub kind: UnitKind,
     /// The module's own settings, every value still to be resolved.
     pub settings: Box<dyn WrittenSettings>,
+    /// The ports a unit in a container of its own publishes to the host.
+    pub published: Vec<Published>,
     /// The values the module gives, used as `${unit.name}`. Reading the unit
     /// moves them in among the values the unit gives.
     pub gives: Vec<ModuleGive>,
@@ -29,8 +31,9 @@ pub struct Description {
     /// the host, which the planner sees in `kind`.
     pub production: Vec<Concern>,
     /// How the unit is known to be ready when it has no `ready` check.
-    pub ready_without_check: &'static str,
-    pub restart_by_default: RestartDefault,
+    pub ready_without_check: ReadyWithoutCheck,
+    /// What the unit restarts on when its `restart` does not say.
+    pub restart_by_default: RestartOn,
 }
 
 impl Description {
@@ -39,12 +42,13 @@ impl Description {
     pub fn new(
         kind: UnitKind,
         settings: Box<dyn WrittenSettings>,
-        ready_without_check: &'static str,
-        restart_by_default: RestartDefault,
+        ready_without_check: ReadyWithoutCheck,
+        restart_by_default: RestartOn,
     ) -> Description {
         Description {
             kind,
             settings,
+            published: Vec::new(),
             gives: Vec::new(),
             outputs: Vec::new(),
             volumes: Vec::new(),
@@ -93,10 +97,8 @@ pub enum UnitKind {
 pub enum Runs {
     OnHost,
     /// In a container of its own on the environment's network, reached there
-    /// by the unit's name and from the host through `published` ports.
-    OwnContainer {
-        published: Vec<Published>,
-    },
+    /// by the unit's name and from the host through the ports it publishes.
+    OwnContainer,
     /// Inside another unit's container.
     InsideUnit(NameAt),
     /// In a container made for one run, on the environment's network.
@@ -151,20 +153,47 @@ pub enum Concern {
     MountsHostPath(Expr),
 }
 
-/// What a unit restarts on when its `restart` does not say: failure for a
-/// unit that keeps running, never for one that runs once or is made.
+/// How a unit with no `ready` is known to be ready.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RestartDefault {
-    OnFailure,
+pub enum ReadyWithoutCheck {
+    /// It has started.
+    Started,
+    /// Its image's own health check passes, or it has started if the image
+    /// has none.
+    Healthy,
+    /// It has exited with 0.
+    Exited,
+    /// Its port is held.
+    Held,
+    /// It has been generated.
+    Generated,
+    /// It has been written.
+    Written,
+}
+
+/// When a unit that runs is started again: `restart.on`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RestartOn {
+    Failure,
+    Always,
     Never,
 }
 
-impl RestartDefault {
-    /// The word `restart.on` would be written with.
+impl RestartOn {
+    /// The words `restart.on` is written with.
+    pub const WORDS: &[&str] = &["failure", "always", "never"];
+
     pub fn word(self) -> &'static str {
         match self {
-            RestartDefault::OnFailure => "failure",
-            RestartDefault::Never => "never",
+            RestartOn::Failure => "failure",
+            RestartOn::Always => "always",
+            RestartOn::Never => "never",
         }
+    }
+
+    pub fn of_word(word: &str) -> Option<RestartOn> {
+        [RestartOn::Failure, RestartOn::Always, RestartOn::Never]
+            .into_iter()
+            .find(|on| on.word() == word)
     }
 }

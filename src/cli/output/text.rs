@@ -1,8 +1,8 @@
 //! The plan as a person reads it.
 
+use crate::module::{RestartOn, Runs, UnitKind};
 use crate::plan::{
-    Because, GivenLine, Mechanism, OpenedBy, Plan, PlannedUnit, PublishedPort, Readiness, Running,
-    Seen,
+    Because, Given, OpenedBy, Plan, PlannedMechanism, PlannedUnit, PublishedPort, Readiness, Seen,
 };
 
 pub fn plan(plan: &Plan) -> String {
@@ -29,23 +29,22 @@ pub fn plan(plan: &Plan) -> String {
 }
 
 fn unit_lines(lines: &mut Vec<String>, number: usize, unit: &PlannedUnit) {
-    let mechanism = match &unit.mechanism {
-        Mechanism::Group => "a group".to_string(),
-        Mechanism::Module {
-            module, way, runs, ..
-        } => {
-            let way = way
+    let what = match &unit.mechanism {
+        None => "a group".to_string(),
+        Some(mechanism) => {
+            let way = mechanism
+                .way
                 .as_ref()
                 .map(|way| format!(" (way `{way}`)"))
                 .unwrap_or_default();
-            let runs = match runs {
-                Some(runs) => running(runs),
-                None => "is made".to_string(),
-            };
-            format!("uses `{}`{way}, {runs}", module.name())
+            format!(
+                "uses `{}`{way}, {}",
+                mechanism.module.name(),
+                kind(&mechanism.kind)
+            )
         }
     };
-    lines.push(format!("{number}. {}: {mechanism}", unit.name));
+    lines.push(format!("{number}. {}: {what}", unit.name));
     if let Some(doc) = &unit.doc {
         lines.push(format!("   {doc}"));
     }
@@ -68,41 +67,39 @@ fn unit_lines(lines: &mut Vec<String>, number: usize, unit: &PlannedUnit) {
         };
         lines.push(format!("   waits for {} (after){comes_up}", after.unit));
     }
-    match &unit.ready {
-        Readiness::Group => {}
-        Readiness::Default(how) => lines.push(format!("   ready: {how}")),
-        Readiness::Check {
-            check,
-            target,
-            within,
-        } => {
-            let target: Vec<&str> = target.iter().map(|t| t.text.as_str()).collect();
-            lines.push(format!(
-                "   ready: {check} check of {}, within {}",
-                target.join(" "),
-                within.text
-            ));
-        }
-    }
-    if let Some(restart) = &unit.restart {
-        let attempts = restart
-            .attempts
-            .as_ref()
-            .map(|a| format!(", up to {} attempts", a.text))
-            .unwrap_or_default();
-        lines.push(match restart.on.text.as_str() {
-            "never" => "   restart: never".to_string(),
-            on => format!("   restart: on {on}{attempts}"),
-        });
-    }
-    for folder in &unit.watch {
-        lines.push(format!("   watches {}", folder.text));
-    }
-    for published in &unit.publishes {
-        lines.push(published_line(published));
+    if let Some(mechanism) = &unit.mechanism {
+        mechanism_lines(lines, mechanism);
     }
     for given in &unit.gives {
         given_lines(lines, given);
+    }
+}
+
+fn mechanism_lines(lines: &mut Vec<String>, mechanism: &PlannedMechanism) {
+    lines.push(match &mechanism.ready {
+        Readiness::WithoutCheck(ready) => {
+            format!("   ready: {}", super::ready_without_check(*ready))
+        }
+        Readiness::Check { check, within } => {
+            let (kind, target) = super::check(check);
+            let target: Vec<String> = target.iter().map(|value| value.shown()).collect();
+            format!(
+                "   ready: {kind} check of {}, within {within}",
+                target.join(" ")
+            )
+        }
+    });
+    let restart = &mechanism.restart;
+    lines.push(match (restart.on, restart.attempts) {
+        (RestartOn::Never, _) => "   restart: never".to_string(),
+        (on, Some(attempts)) => format!("   restart: on {}, up to {attempts} attempts", on.word()),
+        (on, None) => format!("   restart: on {}", on.word()),
+    });
+    for folder in &mechanism.watch {
+        lines.push(format!("   watches {}", folder.shown()));
+    }
+    for published in &mechanism.publishes {
+        lines.push(published_line(published));
     }
 }
 
@@ -127,22 +124,25 @@ fn published_line(published: &PublishedPort) -> String {
     }
     format!(
         "   publishes {port} at {}:{}, opened for {}",
-        opened.address.text,
-        opened.host_port.text,
+        opened.address.shown(),
+        opened.host_port.shown(),
         by.join(", ")
     )
 }
 
-fn running(runs: &Running) -> String {
-    match runs {
-        Running::OnHost => "runs on the host".to_string(),
-        Running::OwnContainer => "runs in its own container".to_string(),
-        Running::InsideUnit(unit) => format!("runs inside the container of `{unit}`"),
-        Running::OneOffContainer => "runs in a container made for the run".to_string(),
+fn kind(kind: &UnitKind) -> String {
+    match kind {
+        UnitKind::Made => "is made".to_string(),
+        UnitKind::Runs(Runs::OnHost) => "runs on the host".to_string(),
+        UnitKind::Runs(Runs::OwnContainer) => "runs in its own container".to_string(),
+        UnitKind::Runs(Runs::InsideUnit(unit)) => {
+            format!("runs inside the container of `{}`", unit.name)
+        }
+        UnitKind::Runs(Runs::OneOffContainer) => "runs in a container made for the run".to_string(),
     }
 }
 
-fn given_lines(lines: &mut Vec<String>, given: &GivenLine) {
+fn given_lines(lines: &mut Vec<String>, given: &Given) {
     let mut notes = Vec::new();
     if given.secret {
         notes.push("secret".to_string());
@@ -159,7 +159,7 @@ fn given_lines(lines: &mut Vec<String>, given: &GivenLine) {
         format!(" ({})", notes.join("; "))
     };
     let seen = |seen: &Seen| match seen {
-        Seen::Value(value) => value.text.clone(),
+        Seen::Value(value) => value.shown(),
         Seen::Unreachable(why) => format!("not reachable: {why}"),
     };
     let (host, containers) = (seen(&given.from_host), seen(&given.from_containers));

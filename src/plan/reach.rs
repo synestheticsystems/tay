@@ -8,11 +8,10 @@ pub mod visit;
 use std::collections::{HashSet, VecDeque};
 
 use crate::diagnostic::Diagnostic;
-use crate::module::{Runs, UnitKind};
 use crate::syntax::names::NameAt;
+use crate::value::Value;
 
 use super::Planner;
-use super::model::Shown;
 use super::resolve::endpoint::LOOPBACK;
 use super::resolve::{Asker, Chosen};
 use usage::{User, Uses};
@@ -111,10 +110,7 @@ impl<'s> Planner<'s> {
             let Chosen::Mechanism { mechanism, .. } = reached.visits[index].1.chosen else {
                 continue;
             };
-            let UnitKind::Runs(Runs::OwnContainer { published }) = &mechanism.description.kind
-            else {
-                continue;
-            };
+            let published = &mechanism.description.published;
             let name = &stack.units[unit].name.name;
             for (entry_index, entry) in published.iter().enumerate() {
                 let visit = &reached.visits[index].1;
@@ -133,12 +129,12 @@ impl<'s> Planner<'s> {
                 let slot = &entry.host_port;
                 let host_port = self
                     .use_value(user, &slot.expr, slot.want, slot.destination, &mut uses)
-                    .map(|value| Shown::of(&value));
+                    .map(|resolved| resolved.value);
                 let address = match &entry.address {
                     Some(slot) => self
                         .use_value(user, &slot.expr, slot.want, slot.destination, &mut uses)
-                        .map(|value| Shown::of(&value)),
-                    None => Some(Shown::word(LOOPBACK)),
+                        .map(|resolved| resolved.value),
+                    None => Some(Value::text(LOOPBACK)),
                 };
                 let visit = &mut reached.visits[index].1;
                 visit.published[entry_index] = Some(OpenedAt { address, host_port });

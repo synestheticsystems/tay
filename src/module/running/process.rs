@@ -6,7 +6,7 @@ use crate::syntax::yaml::Node;
 use crate::value::Value;
 
 use super::common::{Variables, argv, argv_list, variables};
-use crate::module::description::{Description, RestartDefault, Runs, UnitKind};
+use crate::module::description::{Description, ReadyWithoutCheck, RestartOn, Runs, UnitKind};
 use crate::module::settings::{Destination, Settings, Slot, WrittenSettings, each, maybe};
 use crate::module::want::{PathUse, Want};
 use crate::module::{Cx, Module};
@@ -88,8 +88,8 @@ impl Module for Process {
         Some(Description::new(
             UnitKind::Runs(Runs::OnHost),
             Box::new(settings),
-            "when it has started",
-            RestartDefault::OnFailure,
+            ReadyWithoutCheck::Started,
+            RestartOn::Failure,
         ))
     }
 }
@@ -174,7 +174,7 @@ mod tests {
     fn a_process_runs_on_the_host_and_restarts_on_failure() {
         let description = check("process", "command: [a]\n").0.unwrap();
         assert!(matches!(description.kind, UnitKind::Runs(Runs::OnHost)));
-        assert_eq!(description.restart_by_default, RestartDefault::OnFailure);
+        assert_eq!(description.restart_by_default, RestartOn::Failure);
     }
 
     #[test]

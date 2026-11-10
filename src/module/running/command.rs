@@ -9,7 +9,7 @@ use crate::value::Value;
 
 use super::common::{Mount, RunForm, Variables, mounts, run_form, variables};
 use crate::module::description::{
-    Description, ModuleGive, ModuleValue, Output, RestartDefault, Runs, UnitKind,
+    Description, ModuleGive, ModuleValue, Output, ReadyWithoutCheck, RestartOn, Runs, UnitKind,
 };
 use crate::module::settings::{Destination, Settings, Slot, WrittenSettings, each_named, maybe};
 use crate::module::want::{PathUse, Want};
@@ -151,8 +151,8 @@ impl Module for Command {
             ..Description::new(
                 UnitKind::Runs(runs),
                 Box::new(settings),
-                "when it exits with 0",
-                RestartDefault::Never,
+                ReadyWithoutCheck::Exited,
+                RestartOn::Never,
             )
         })
     }

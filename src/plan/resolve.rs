@@ -44,9 +44,9 @@ impl Asker {
     pub fn of(kind: &UnitKind) -> Asker {
         match kind {
             UnitKind::Runs(Runs::OnHost) => Asker::Host,
-            UnitKind::Runs(
-                Runs::OwnContainer { .. } | Runs::InsideUnit(_) | Runs::OneOffContainer,
-            ) => Asker::Container,
+            UnitKind::Runs(Runs::OwnContainer | Runs::InsideUnit(_) | Runs::OneOffContainer) => {
+                Asker::Container
+            }
             UnitKind::Made => Asker::Nowhere,
         }
     }

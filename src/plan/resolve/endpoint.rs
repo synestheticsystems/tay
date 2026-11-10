@@ -146,7 +146,7 @@ impl<'s> Resolver<'s> {
             }
             (Asker::Host, Runs::OnHost) => (LOOPBACK.to_string(), port),
             (Asker::Host, Runs::OneOffContainer) => return not_published(&port),
-            (Asker::Host, Runs::OwnContainer { .. } | Runs::InsideUnit(_)) => {
+            (Asker::Host, Runs::OwnContainer | Runs::InsideUnit(_)) => {
                 let container = match runs {
                     Runs::InsideUnit(inner) => {
                         self.unit_index(&inner.name).ok_or(Fail::Reported)?
@@ -174,7 +174,7 @@ impl<'s> Resolver<'s> {
                 (LOOPBACK.to_string(), host_port)
             }
             (Asker::Container, Runs::OnHost) => (HOST_IN_CONTAINERS.to_string(), port),
-            (Asker::Container, Runs::OwnContainer { .. } | Runs::OneOffContainer) => {
+            (Asker::Container, Runs::OwnContainer | Runs::OneOffContainer) => {
                 (owner_name.clone(), port)
             }
             (Asker::Container, Runs::InsideUnit(inner)) => (inner.name.clone(), port),
@@ -184,10 +184,11 @@ impl<'s> Resolver<'s> {
 
     /// The `publish` entry of the container `unit` for its port `port`, if any.
     fn published(&mut self, unit: usize, port: i64) -> Option<&'s Published> {
-        let Some(UnitKind::Runs(Runs::OwnContainer { published })) = self.kind(unit) else {
-            return None;
-        };
-        published.iter().find(|entry| entry.container_port == port)
+        self.mechanism(unit)?
+            .description
+            .published
+            .iter()
+            .find(|entry| entry.container_port == port)
     }
 }
 

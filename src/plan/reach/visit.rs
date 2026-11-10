@@ -1,27 +1,25 @@
-//! Visiting one unit that comes up: every value it uses resolved where it runs,
-//! what it needs and why, how it is known to be ready, and what it gives.
+//! Visiting one unit that comes up: its settings and every other value it
+//! uses resolved where it runs, what it needs and why, and how it is known
+//! to be ready and restarted.
 
 use crate::definition::{Check, Mechanism};
 use crate::diagnostic::source::Loc;
-use crate::module::{Destination, PathUse, RestartDefault, Runs, UnitKind, Want};
+use crate::module::{Destination, Duration, PathUse, RestartOn, Runs, UnitKind, Want};
+use crate::syntax::expr::Expr;
+use crate::syntax::names::NameAt;
+use crate::value::Value;
 
 use super::usage::{Opening, User, Uses};
 use crate::plan::Planner;
-use crate::plan::model::{
-    Because, Mechanism as PlannedMechanism, PlannedUnit, Readiness, RestartPolicy, Running, Shown,
-};
-use crate::plan::resolve::value::Resolved;
+use crate::plan::model::{Because, PlannedMechanism, PlannedUnit, Readiness, Restart};
 use crate::plan::resolve::{Asker, Chosen};
-use crate::syntax::names::NameAt;
 
 const READINESS: Destination = Destination::Readable("a readiness check");
 const WATCHED: Destination = Destination::Readable("a watched file or folder");
-
-/// What `restart.on` may be.
-const RESTART_ON: &[&str] = &["failure", "always", "never"];
+const RESTART: Destination = Destination::Readable("a restart policy");
 
 /// The attempts a unit that restarts gets when its `restart` does not say.
-const RESTART_ATTEMPTS: i64 = 5;
+const RESTART_ATTEMPTS: u64 = 5;
 
 /// A unit needs another: as written, because it runs inside the other's
 /// container, or because it uses a value the other makes or produces.
@@ -49,137 +47,123 @@ pub struct Visit<'s> {
 /// could not be used, which has been reported.
 #[derive(Clone)]
 pub struct OpenedAt {
-    pub address: Option<Shown>,
-    pub host_port: Option<Shown>,
+    pub address: Option<Value>,
+    pub host_port: Option<Value>,
 }
 
 impl<'s> Planner<'s> {
     pub fn visit(&mut self, unit: usize, chosen: Chosen<'s>) -> Visit<'s> {
-        let stack = self.resolver.stack;
-        let definition = &stack.units[unit];
-        let mut uses = Uses::default();
-        let (mechanism, ready, restart, watch) = match chosen {
-            Chosen::Group(_) => (
-                Some(PlannedMechanism::Group),
-                Some(Readiness::Group),
-                Some(None),
-                Vec::new(),
-            ),
+        let definition = &self.resolver.stack.units[unit];
+        // What it needs, waits for and gives is added once every unit that
+        // comes up has been visited.
+        let planned = |mechanism| PlannedUnit {
+            name: definition.name.name.clone(),
+            doc: definition.doc.clone(),
+            mechanism,
+            needs: Vec::new(),
+            after: Vec::new(),
+            gives: Vec::new(),
+        };
+        match chosen {
+            Chosen::Group(needs) => Visit {
+                chosen,
+                planned: Some(planned(None)),
+                needs: self.written_needs(needs),
+                after: Vec::new(),
+                opens: Vec::new(),
+                published: Vec::new(),
+            },
             Chosen::Mechanism { mechanism, way } => {
-                let kind = &mechanism.description.kind;
                 let user = User {
                     unit,
                     name: &definition.name.name,
-                    asker: Asker::of(kind),
+                    asker: Asker::of(&mechanism.description.kind),
                     readiness: false,
                 };
-                let settings = mechanism.description.settings.resolve(&mut |slot| {
-                    self.use_value(user, &slot.expr, slot.want, slot.destination, &mut uses)
-                        .map(|resolved| resolved.value)
-                });
-                let runs = self.running(kind);
-                let ready = self.readiness(
-                    user,
-                    mechanism,
-                    mechanism.description.ready_without_check,
-                    &mut uses,
-                );
-                let restart = self.restart(
-                    user,
-                    mechanism,
-                    mechanism.description.restart_by_default,
-                    &mut uses,
-                );
-                let watch = self.watch(user, mechanism, &mut uses);
-                let planned = settings.map(|settings| PlannedMechanism::Module {
-                    module: mechanism.module,
-                    way: way.map(|(name, _)| name.name.clone()),
-                    runs,
-                    settings,
-                });
-                (planned, ready, restart.map(Some), watch)
-            }
-        };
-        let (published, needs, after) = match chosen {
-            Chosen::Group(needs) => (Vec::new(), self.written_needs(needs), Vec::new()),
-            Chosen::Mechanism { mechanism, .. } => {
-                let published = match &mechanism.description.kind {
-                    UnitKind::Runs(Runs::OwnContainer { published }) => vec![None; published.len()],
-                    _ => Vec::new(),
-                };
-                let needs = self.needs(unit, mechanism, uses.needs);
+                let mut uses = Uses::default();
+                let planned_mechanism = self.plan_mechanism(user, mechanism, way, &mut uses);
                 let after = mechanism
                     .after
                     .iter()
                     .filter_map(|name| Some((self.resolver.unit_index(&name.name)?, name.loc)))
                     .collect();
-                (published, needs, after)
+                Visit {
+                    chosen,
+                    planned: planned_mechanism.map(|mechanism| planned(Some(mechanism))),
+                    needs: self.needs(unit, mechanism, uses.needs),
+                    after,
+                    opens: uses.opens,
+                    published: vec![None; mechanism.description.published.len()],
+                }
             }
-        };
-        let planned = (|| {
-            Some(PlannedUnit {
-                name: definition.name.name.clone(),
-                doc: definition.doc.clone(),
-                mechanism: mechanism?,
-                needs: Vec::new(),
-                after: Vec::new(),
-                ready: ready?,
-                restart: restart?,
-                watch: watch.into_iter().collect::<Option<_>>()?,
-                publishes: Vec::new(),
-                gives: Vec::new(),
-            })
-        })();
-        Visit {
-            chosen,
-            planned,
-            needs,
-            after,
-            opens: uses.opens,
-            published,
         }
     }
 
-    /// Where the unit runs, as the plan says it; `None` for a unit that is
-    /// made. A unit run inside another's container needs that container to
-    /// be one of its own.
-    fn running(&mut self, kind: &UnitKind) -> Option<Running> {
-        let UnitKind::Runs(runs) = kind else {
-            return None;
-        };
-        Some(match runs {
-            Runs::OnHost => Running::OnHost,
-            Runs::OwnContainer { .. } => Running::OwnContainer,
-            Runs::OneOffContainer => Running::OneOffContainer,
-            Runs::InsideUnit(inner) => {
-                if let Some(index) = self.resolver.unit_index(&inner.name)
-                    && !matches!(
-                        self.resolver.kind(index),
-                        Some(UnitKind::Runs(Runs::OwnContainer { .. }))
-                    )
-                {
-                    self.resolver.d.error(
-                        inner.loc,
-                        format!(
-                            "`in` names unit `{}`, which does not run in a container of its own",
-                            inner.name
-                        ),
-                    );
-                }
-                Running::InsideUnit(inner.name.clone())
-            }
+    /// The mechanism with its settings and fields resolved for `user`, its
+    /// unit; `None` when a value cannot be, which is reported. Every value
+    /// is tried, so that every error is found.
+    fn plan_mechanism(
+        &mut self,
+        user: User<'_>,
+        mechanism: &'s Mechanism,
+        way: Option<(&NameAt, Loc)>,
+        uses: &mut Uses,
+    ) -> Option<PlannedMechanism> {
+        let description = &mechanism.description;
+        let settings = description.settings.resolve(&mut |slot| {
+            self.use_value(user, &slot.expr, slot.want, slot.destination, uses)
+                .map(|resolved| resolved.value)
+        });
+        self.check_inside(&description.kind);
+        let ready = self.readiness(user, mechanism, uses);
+        let restart = self.restart(user, mechanism, uses);
+        let watch: Vec<Option<Value>> = mechanism
+            .watch
+            .iter()
+            .map(|watched| self.watched(user, watched, uses))
+            .collect();
+        Some(PlannedMechanism {
+            module: mechanism.module,
+            way: way.map(|(name, _)| name.name.clone()),
+            kind: description.kind.clone(),
+            settings: settings?,
+            ready: ready?,
+            restart: restart?,
+            watch: watch.into_iter().collect::<Option<_>>()?,
+            publishes: Vec::new(),
         })
+    }
+
+    /// A unit run inside another's container needs that container to be one
+    /// of its own.
+    fn check_inside(&mut self, kind: &UnitKind) {
+        if let UnitKind::Runs(Runs::InsideUnit(inner)) = kind
+            && let Some(index) = self.resolver.unit_index(&inner.name)
+            && !matches!(
+                self.resolver.kind(index),
+                Some(UnitKind::Runs(Runs::OwnContainer))
+            )
+        {
+            self.resolver.d.error(
+                inner.loc,
+                format!(
+                    "`in` names unit `{}`, which does not run in a container of its own",
+                    inner.name
+                ),
+            );
+        }
     }
 
     fn readiness(
         &mut self,
         user: User<'_>,
         mechanism: &Mechanism,
-        without_check: &'static str,
         uses: &mut Uses,
     ) -> Option<Readiness> {
         let Some(ready) = &mechanism.ready else {
-            return Some(Readiness::Default(without_check));
+            return Some(Readiness::WithoutCheck(
+                mechanism.description.ready_without_check,
+            ));
         };
         // tay makes `http` and `tcp` checks itself, from the host.
         let from_host = User {
@@ -187,33 +171,30 @@ impl<'s> Planner<'s> {
             readiness: true,
             ..user
         };
-        let (check, target): (&'static str, Vec<Option<Resolved>>) = match &ready.check {
-            Check::Http(url) => (
-                "http",
-                vec![self.use_value(from_host, url, Want::Text, READINESS, uses)],
-            ),
-            Check::Tcp(address) => (
-                "tcp",
-                vec![self.use_value(from_host, address, Want::Text, READINESS, uses)],
-            ),
-            Check::Log(line) => (
-                "log",
-                vec![self.use_value(user, line, Want::Text, READINESS, uses)],
-            ),
-            Check::Command(command) => (
-                "command",
-                command
-                    .iter()
-                    .map(|word| self.use_value(user, word, Want::Scalar, READINESS, uses))
-                    .collect(),
-            ),
+        let mut use_value = |user, expr: &Expr, want| {
+            self.use_value(user, expr, want, READINESS, uses)
+                .map(|resolved| resolved.value)
         };
-        let within = self.use_value(user, &ready.within, Want::Duration, READINESS, uses);
-        let target: Option<Vec<Resolved>> = target.into_iter().collect();
+        let check = match &ready.check {
+            Check::Http(url) => use_value(from_host, url, Want::Text).map(Check::Http),
+            Check::Tcp(address) => use_value(from_host, address, Want::Text).map(Check::Tcp),
+            Check::Log(line) => use_value(user, line, Want::Text).map(Check::Log),
+            Check::Command(command) => {
+                let words: Vec<Option<Value>> = command
+                    .iter()
+                    .map(|word| use_value(user, word, Want::Scalar))
+                    .collect();
+                words.into_iter().collect::<Option<_>>().map(Check::Command)
+            }
+        };
+        let within = use_value(user, &ready.within, Want::Duration).map(|within| {
+            let text = within.exact_text();
+            Duration::parse(text.as_deref().unwrap_or_default())
+                .expect("a value `Want::Duration` passes is a duration")
+        });
         Some(Readiness::Check {
-            check,
-            target: target?.iter().map(Shown::of).collect(),
-            within: Shown::of(&within?),
+            check: check?,
+            within: within?,
         })
     }
 
@@ -221,56 +202,50 @@ impl<'s> Planner<'s> {
         &mut self,
         user: User<'_>,
         mechanism: &Mechanism,
-        default: RestartDefault,
         uses: &mut Uses,
-    ) -> Option<RestartPolicy> {
-        const RESTART: Destination = Destination::Readable("a restart policy");
+    ) -> Option<Restart> {
         let written = mechanism.restart.as_ref();
-        let mut on = Shown::word(default.word());
-        if let Some(expr) = written.and_then(|r| r.on.as_ref()) {
-            let want = Want::OneOf(RESTART_ON);
-            on = Shown::of(&self.use_value(user, expr, want, RESTART, uses)?);
-        }
-        let attempts = match written.and_then(|r| r.attempts.as_ref()) {
-            Some(expr) => Some(Shown::of(&self.use_value(
-                user,
-                expr,
-                Want::Number,
-                RESTART,
-                uses,
-            )?)),
-            None if on.text == RestartDefault::Never.word() => None,
-            None => Some(Shown::number(RESTART_ATTEMPTS)),
+        let on = match written.and_then(|r| r.on.as_ref()) {
+            Some(expr) => self
+                .use_value(user, expr, Want::OneOf(RestartOn::WORDS), RESTART, uses)
+                .map(|on| {
+                    let word = on.value.exact_text();
+                    RestartOn::of_word(word.as_deref().unwrap_or_default())
+                        .expect("a value `Want::OneOf` passes is one of its words")
+                }),
+            None => Some(mechanism.description.restart_by_default),
         };
-        Some(RestartPolicy { on, attempts })
+        let attempts = match written.and_then(|r| r.attempts.as_ref()) {
+            Some(expr) => self
+                .use_value(user, expr, Want::Count, RESTART, uses)
+                .map(|attempts| match attempts.value {
+                    Value::Number(n) => {
+                        Some(u64::try_from(n).expect("a value `Want::Count` passes is above 0"))
+                    }
+                    _ => unreachable!("a value `Want::Count` passes is a number"),
+                }),
+            None => Some(None),
+        };
+        let on = on?;
+        let attempts = attempts?.or((on != RestartOn::Never).then_some(RESTART_ATTEMPTS));
+        Some(Restart { on, attempts })
     }
 
-    fn watch(
-        &mut self,
-        user: User<'_>,
-        mechanism: &Mechanism,
-        uses: &mut Uses,
-    ) -> Vec<Option<Shown>> {
-        mechanism
-            .watch
-            .iter()
-            .map(|watched| {
-                let want = Want::Path(PathUse::Named);
-                let value = self.use_value(user, watched, want, WATCHED, uses)?;
-                // A production profile refuses any watch, so where it points does not matter there.
-                if !self.production
-                    && let Some(path) = value.value.exact_text()
-                    && !std::path::Path::new(&path).exists()
-                {
-                    self.resolver.d.error(
-                        watched.loc,
-                        format!("`{path}`, which this unit watches, does not exist"),
-                    );
-                    return None;
-                }
-                Some(Shown::of(&value))
-            })
-            .collect()
+    fn watched(&mut self, user: User<'_>, watched: &Expr, uses: &mut Uses) -> Option<Value> {
+        let want = Want::Path(PathUse::Named);
+        let value = self.use_value(user, watched, want, WATCHED, uses)?.value;
+        // A production profile refuses any watch, so where it points does not matter there.
+        if !self.production
+            && let Some(path) = value.exact_text()
+            && !std::path::Path::new(&path).exists()
+        {
+            self.resolver.d.error(
+                watched.loc,
+                format!("`{path}`, which this unit watches, does not exist"),
+            );
+            return None;
+        }
+        Some(value)
     }
 
     /// The needs as written, then the container a command runs inside, then

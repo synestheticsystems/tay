@@ -151,16 +151,21 @@ pub struct Endpoint {
 
 #[derive(Clone, Debug)]
 pub struct Ready {
-    pub check: Check,
+    pub check: Check<Expr>,
     pub within: Expr,
 }
 
+/// One readiness check, each value as written or once resolved.
 #[derive(Clone, Debug)]
-pub enum Check {
-    Http(Expr),
-    Tcp(Expr),
-    Command(Vec<Expr>),
-    Log(Expr),
+pub enum Check<V> {
+    /// Any 2xx answer to a GET of this URL, made from the host.
+    Http(V),
+    /// A connection to this address opens, from the host.
+    Tcp(V),
+    /// This command exits 0.
+    Command(Vec<V>),
+    /// A line the unit writes contains this text.
+    Log(V),
 }
 
 #[derive(Clone, Debug)]

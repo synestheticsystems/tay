@@ -6,7 +6,9 @@ use crate::syntax::names::NameAt;
 use crate::syntax::yaml::Node;
 use crate::value::Value;
 
-use crate::module::description::{Description, ModuleGive, ModuleValue, RestartDefault, UnitKind};
+use crate::module::description::{
+    Description, ModuleGive, ModuleValue, ReadyWithoutCheck, RestartOn, UnitKind,
+};
 use crate::module::settings::{Destination, Settings, Slot, WrittenSettings, maybe};
 use crate::module::want::Want;
 use crate::module::{Cx, Module};
@@ -103,8 +105,8 @@ impl Module for Secret {
             ..Description::new(
                 UnitKind::Made,
                 Box::new(settings),
-                "when it has been generated",
-                RestartDefault::Never,
+                ReadyWithoutCheck::Generated,
+                RestartOn::Never,
             )
         })
     }

@@ -6,10 +6,9 @@ use serde_json::{Value, json};
 use crate::definition::read::THIS_TAY;
 use crate::diagnostic::Diagnostic;
 use crate::diagnostic::source::{Loc, Source, Sources};
-use crate::plan::{
-    Because, Exact, GivenLine, Mechanism, OpenedBy, Plan, PlannedUnit, PublishedPort, Readiness,
-    Running, Seen, Shown,
-};
+use crate::module::{Runs, UnitKind};
+use crate::plan::{Because, Given, OpenedBy, Plan, PlannedUnit, PublishedPort, Readiness, Seen};
+use crate::value::Exact;
 
 pub const SCHEMA: u32 = 1;
 
@@ -66,34 +65,23 @@ fn at(loc: Loc, sources: &Sources) -> Value {
 }
 
 fn unit(unit: &PlannedUnit) -> Value {
-    let (module, way, made, runs, runs_inside) = match &unit.mechanism {
-        Mechanism::Group => (None, None, false, None, None),
-        Mechanism::Module {
-            module, way, runs, ..
-        } => {
-            let (runs, inside) = match runs {
-                None => (None, None),
-                Some(Running::OnHost) => (Some("host"), None),
-                Some(Running::OwnContainer) => (Some("own_container"), None),
-                Some(Running::InsideUnit(other)) => (Some("inside_unit"), Some(other.as_str())),
-                Some(Running::OneOffContainer) => (Some("one_off_container"), None),
-            };
-            (
-                Some(module.name()),
-                way.as_deref(),
-                runs.is_none(),
-                runs,
-                inside,
-            )
+    let mechanism = unit.mechanism.as_ref();
+    let (runs, runs_inside) = match mechanism.map(|mechanism| &mechanism.kind) {
+        None | Some(UnitKind::Made) => (None, None),
+        Some(UnitKind::Runs(Runs::OnHost)) => (Some("host"), None),
+        Some(UnitKind::Runs(Runs::OwnContainer)) => (Some("own_container"), None),
+        Some(UnitKind::Runs(Runs::InsideUnit(other))) => {
+            (Some("inside_unit"), Some(other.name.as_str()))
         }
+        Some(UnitKind::Runs(Runs::OneOffContainer)) => (Some("one_off_container"), None),
     };
     json!({
         "name": unit.name,
         "doc": unit.doc,
-        "group": matches!(unit.mechanism, Mechanism::Group),
-        "module": module,
-        "way": way,
-        "made": made,
+        "group": mechanism.is_none(),
+        "module": mechanism.map(|mechanism| mechanism.module.name()),
+        "way": mechanism.and_then(|mechanism| mechanism.way.as_deref()),
+        "made": mechanism.is_some_and(|mechanism| matches!(mechanism.kind, UnitKind::Made)),
         "runs": runs,
         "runs_inside": runs_inside,
         "needs": unit.needs.iter().map(|need| match &need.because {
@@ -103,21 +91,29 @@ fn unit(unit: &PlannedUnit) -> Value {
             Because::UsesMade(value) => json!({ "unit": need.unit, "because": "uses_made_value", "value": value }),
         }).collect::<Vec<_>>(),
         "after": unit.after.iter().map(|after| json!({ "unit": after.unit, "comes_up": after.comes_up })).collect::<Vec<_>>(),
-        "ready": match &unit.ready {
-            Readiness::Group => Value::Null,
-            Readiness::Default(how) => json!({ "check": Value::Null, "without_check": how }),
-            Readiness::Check { check, target, within } => json!({
-                "check": check,
-                "target": target.iter().map(shown).collect::<Vec<_>>(),
-                "within": shown(within),
+        "ready": mechanism.map(|mechanism| match &mechanism.ready {
+            Readiness::WithoutCheck(ready) => json!({
+                "check": Value::Null,
+                "without_check": super::ready_without_check(*ready),
             }),
-        },
-        "restart": unit.restart.as_ref().map(|restart| json!({
-            "on": shown(&restart.on),
-            "attempts": restart.attempts.as_ref().map(shown),
+            Readiness::Check { check, within } => {
+                let (kind, target) = super::check(check);
+                json!({
+                    "check": kind,
+                    "target": target.into_iter().map(shown).collect::<Vec<_>>(),
+                    "within": word(&within.to_string()),
+                })
+            }
+        }),
+        "restart": mechanism.map(|mechanism| json!({
+            "on": word(mechanism.restart.on.word()),
+            "attempts": mechanism.restart.attempts.map(|attempts| json!({
+                "text": attempts.to_string(),
+                "value": attempts,
+            })),
         })),
-        "watch": unit.watch.iter().map(shown).collect::<Vec<_>>(),
-        "publishes": unit.publishes.iter().map(published).collect::<Vec<_>>(),
+        "watch": mechanism.map_or(Vec::new(), |mechanism| mechanism.watch.iter().map(shown).collect()),
+        "publishes": mechanism.map_or(Vec::new(), |mechanism| mechanism.publishes.iter().map(published).collect()),
         "gives": unit.gives.iter().map(given).collect::<Vec<_>>(),
     })
 }
@@ -143,7 +139,7 @@ fn published(published: &PublishedPort) -> Value {
     })
 }
 
-fn given(given: &GivenLine) -> Value {
+fn given(given: &Given) -> Value {
     let seen = |seen: &Seen| match seen {
         Seen::Value(value) => shown(value),
         Seen::Unreachable(why) => json!({ "unreachable": why }),
@@ -159,15 +155,21 @@ fn given(given: &GivenLine) -> Value {
     })
 }
 
-/// A value: its text with holes shown, and its exact value or `null`.
-fn shown(value: &Shown) -> Value {
+/// A value: its text with holes shown, and its exact value, `null` when it
+/// has a hole.
+fn shown(value: &crate::value::Value) -> Value {
     json!({
-        "text": value.text,
-        "value": match &value.exact {
+        "text": value.shown(),
+        "value": match value.exact() {
             Some(Exact::Text(text)) => json!(text),
             Some(Exact::Number(n)) => json!(n),
             Some(Exact::Bool(b)) => json!(b),
             None => Value::Null,
         },
     })
+}
+
+/// A word that is its own value, such as `restart.on`.
+fn word(word: &str) -> Value {
+    json!({ "text": word, "value": word })
 }

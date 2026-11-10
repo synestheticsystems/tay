@@ -8,7 +8,7 @@ use crate::syntax::yaml::Node;
 use crate::value::Value;
 
 use crate::module::description::{
-    Claim, Description, ModuleGive, ModuleValue, RestartDefault, UnitKind,
+    Claim, Description, ModuleGive, ModuleValue, ReadyWithoutCheck, RestartOn, UnitKind,
 };
 use crate::module::settings::{Destination, Settings, Slot, WrittenSettings, maybe};
 use crate::module::want::{PathUse, Want};
@@ -128,8 +128,8 @@ impl Module for File {
             ..Description::new(
                 UnitKind::Made,
                 Box::new(settings),
-                "when it has been written",
-                RestartDefault::Never,
+                ReadyWithoutCheck::Written,
+                RestartOn::Never,
             )
         })
     }

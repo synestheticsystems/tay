@@ -7,7 +7,7 @@ mod given;
 use std::collections::{HashMap, HashSet};
 
 use crate::definition::{Profile, Stack};
-use crate::module::{Runs, UnitKind};
+use crate::module::UnitKind;
 
 use super::Planner;
 use super::model::{After, Need, OpenedPort, Plan, PublishedPort};
@@ -84,9 +84,9 @@ impl Planner<'_> {
             let mut unit_plan = visit.planned?;
             unit_plan.gives = gives?;
             if let Some(mechanism) = mechanism
-                && let UnitKind::Runs(Runs::OwnContainer { published }) =
-                    &mechanism.description.kind
+                && let Some(planned) = &mut unit_plan.mechanism
             {
+                let published = &mechanism.description.published;
                 for (entry, used) in published.iter().zip(visit.published) {
                     let opened = match used {
                         None => None,
@@ -104,7 +104,7 @@ impl Planner<'_> {
                             })
                         }
                     };
-                    unit_plan.publishes.push(PublishedPort {
+                    planned.publishes.push(PublishedPort {
                         container_port: entry.container_port,
                         opened,
                     });

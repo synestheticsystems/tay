@@ -1,7 +1,7 @@
 //! A container's published ports, as the plan says it: opened or not, and
 //! what opens each.
 
-use super::Shown;
+use crate::value::Value;
 
 /// A container port in `publish`, and whether it is opened on the host.
 #[derive(Debug)]
@@ -13,8 +13,8 @@ pub struct PublishedPort {
 
 #[derive(Debug)]
 pub struct OpenedPort {
-    pub address: Shown,
-    pub host_port: Shown,
+    pub address: Value,
+    pub host_port: Value,
     /// Opened with no use, by `always: true`.
     pub always: bool,
     /// What in the plan uses it from the host.

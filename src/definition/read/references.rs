@@ -58,11 +58,9 @@ fn exprs(mechanism: &Mechanism) -> Vec<&Expr> {
             .into_iter()
             .map(|slot| &slot.expr),
     );
-    if let UnitKind::Runs(Runs::OwnContainer { published }) = &mechanism.description.kind {
-        for entry in published {
-            all.push(&entry.host_port.expr);
-            all.extend(entry.address.iter().map(|slot| &slot.expr));
-        }
+    for entry in &mechanism.description.published {
+        all.push(&entry.host_port.expr);
+        all.extend(entry.address.iter().map(|slot| &slot.expr));
     }
     for give in &mechanism.gives {
         match &give.value {

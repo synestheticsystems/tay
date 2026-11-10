@@ -1,14 +1,18 @@
-//! The plan as `tay plan` prints it, in text or JSON.
+//! The plan: each unit that comes up, with its mechanism and that
+//! mechanism's settings resolved, what it needs and why, how it is known to
+//! be ready, and what it gives. Printing it is a view over this.
 
 mod needs;
 mod published;
 mod values;
 
-use crate::module::{Module, Settings};
+use crate::definition::Check;
+use crate::module::{Duration, Module, ReadyWithoutCheck, RestartOn, Settings, UnitKind};
+use crate::value::Value;
 
 pub use needs::{After, Because, Need};
 pub use published::{OpenedBy, OpenedPort, Opener, PublishedPort};
-pub use values::{GivenLine, Seen, Shown};
+pub use values::{Given, Seen};
 
 #[derive(Debug)]
 pub struct Plan {
@@ -24,61 +28,54 @@ pub struct Plan {
 pub struct PlannedUnit {
     pub name: String,
     pub doc: Option<String>,
-    pub mechanism: Mechanism,
+    /// What the unit runs by; `None` for a group, which only brings up what
+    /// it needs.
+    pub mechanism: Option<PlannedMechanism>,
     pub needs: Vec<Need>,
     pub after: Vec<After>,
+    pub gives: Vec<Given>,
+}
+
+/// The module a unit uses, under the way chosen for it, with its settings
+/// and the fields that go with it, every value resolved.
+#[derive(Debug)]
+pub struct PlannedMechanism {
+    pub module: &'static dyn Module,
+    /// The way chosen, for a unit with ways.
+    pub way: Option<String>,
+    pub kind: UnitKind,
+    /// The module's own settings: what the unit is brought up from.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the engine, which is not built yet, brings each unit up from its settings"
+        )
+    )]
+    pub settings: Box<dyn Settings>,
     pub ready: Readiness,
-    pub restart: Option<RestartPolicy>,
-    pub watch: Vec<Shown>,
+    pub restart: Restart,
+    pub watch: Vec<Value>,
+    /// The ports a unit in a container of its own publishes, each opened or
+    /// not.
     pub publishes: Vec<PublishedPort>,
-    pub gives: Vec<GivenLine>,
-}
-
-#[derive(Debug)]
-pub enum Mechanism {
-    /// A unit that only brings up what it needs.
-    Group,
-    Module {
-        module: &'static dyn Module,
-        way: Option<String>,
-        /// Where the unit runs; `None` for a unit that is made, which runs
-        /// nowhere.
-        runs: Option<Running>,
-        /// The module's own settings, every value resolved: what the unit
-        /// is brought up from.
-        #[cfg_attr(
-            not(test),
-            expect(
-                dead_code,
-                reason = "the engine, which is not built yet, brings each unit up from its settings"
-            )
-        )]
-        settings: Box<dyn Settings>,
-    },
-}
-
-#[derive(Debug)]
-pub enum Running {
-    OnHost,
-    OwnContainer,
-    InsideUnit(String),
-    OneOffContainer,
 }
 
 #[derive(Debug)]
 pub enum Readiness {
+    /// The check `ready` writes, and the time it allows.
     Check {
-        check: &'static str,
-        target: Vec<Shown>,
-        within: Shown,
+        check: Check<Value>,
+        within: Duration,
     },
-    /// No `ready` is written; how the unit's module knows it is ready.
-    Default(&'static str),
-    Group,
+    /// No `ready` is written: how the unit's module knows it is ready.
+    WithoutCheck(ReadyWithoutCheck),
 }
 
 #[derive(Debug)]
-pub struct RestartPolicy {
-    pub on: Shown,
-    pub attempts: Option<Shown>,
+pub struct Restart {
+    pub on: RestartOn,
+    /// The attempts in a row that may fail to reach ready; `None` for a
+    /// unit that never restarts and writes none.
+    pub attempts: Option<u64>,
 }

@@ -8,7 +8,7 @@ use crate::diagnostic::source::Loc;
 use crate::syntax::expr::{Expr, ExprKind, Part, Reference, Target, UnitRef};
 
 use crate::plan::Planner;
-use crate::plan::model::{GivenLine, Seen, Shown};
+use crate::plan::model::{Given, Seen};
 use crate::plan::resolve::value::Resolved;
 use crate::plan::resolve::{Asker, Fail, Scope, ViewProblem};
 
@@ -23,7 +23,7 @@ impl Planner<'_> {
         unit: usize,
         mechanism: &Mechanism,
         opened: &HashSet<(String, i64)>,
-    ) -> Vec<Option<GivenLine>> {
+    ) -> Vec<Option<Given>> {
         let unit_name = &self.resolver.stack.units[unit].name.name;
         let mut lines = Vec::new();
         for give in &mechanism.gives {
@@ -70,7 +70,7 @@ impl Planner<'_> {
         target: Target,
         endpoint: bool,
         opened: &HashSet<(String, i64)>,
-    ) -> Option<GivenLine> {
+    ) -> Option<Given> {
         let reference = Expr {
             loc,
             kind: ExprKind::Ref(Reference {
@@ -95,7 +95,7 @@ impl Planner<'_> {
                         ))
                         .collect();
                     return Some(match closed.is_empty() {
-                        true => (Seen::Value(Shown::of(&value)), Some(value)),
+                        true => (Seen::Value(value.value.clone()), Some(value)),
                         false => (Seen::Unreachable(closed.join("; ")), None),
                     });
                 }
@@ -124,7 +124,7 @@ impl Planner<'_> {
         let (from_host, host_value) = seen(Asker::Host)?;
         let (from_containers, container_value) = seen(Asker::Container)?;
         let value = host_value.or(container_value);
-        Some(GivenLine {
+        Some(Given {
             name,
             endpoint,
             producers: value

@@ -8,7 +8,9 @@ use crate::syntax::yaml::{Kind, Node, Scalar};
 use crate::value::Value;
 
 use super::common::{Mount, Variables, argv, mounts, variables};
-use crate::module::description::{Concern, Description, Published, RestartDefault, Runs, UnitKind};
+use crate::module::description::{
+    Concern, Description, Published, ReadyWithoutCheck, RestartOn, Runs, UnitKind,
+};
 use crate::module::settings::{
     Destination, Settings, Slot, WrittenSettings, each, each_named, maybe,
 };
@@ -209,14 +211,15 @@ impl Module for Container {
         let mut production: Vec<Concern> = built_at.map(Concern::BuildsImage).into_iter().collect();
         production.extend(settings.mounts.iter().filter_map(Mount::concern));
         Some(Description {
+            published,
             volumes,
             volume_mounts,
             production,
             ..Description::new(
-                UnitKind::Runs(Runs::OwnContainer { published }),
+                UnitKind::Runs(Runs::OwnContainer),
                 Box::new(settings),
-                "when its image's own health check passes, or when it has started if the image has none",
-                RestartDefault::OnFailure,
+                ReadyWithoutCheck::Healthy,
+                RestartOn::Failure,
             )
         })
     }
@@ -534,11 +537,13 @@ mod tests {
                 .iter()
                 .all(|slot| slot.want != Want::PortNumber)
         );
-        let UnitKind::Runs(Runs::OwnContainer { published }) = description.kind else {
-            panic!("a container runs in its own container");
-        };
+        assert!(matches!(
+            description.kind,
+            UnitKind::Runs(Runs::OwnContainer)
+        ));
         assert_eq!(
-            published
+            description
+                .published
                 .iter()
                 .map(|p| (p.container_port, p.address.is_some(), p.always))
                 .collect::<Vec<_>>(),

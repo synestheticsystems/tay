@@ -1,5 +1,7 @@
 //! What a value must be where it is used, checked against what is known of it.
 
+use std::fmt;
+
 use crate::syntax::expr::{Expr, ExprKind, Type};
 use crate::value::Value;
 
@@ -98,7 +100,8 @@ impl Form {
 impl Want {
     /// What is wrong with a value of this form here, if anything. A value
     /// produced by running passes every check that its type would decide,
-    /// since its type is not known before start.
+    /// since its type is not known before start, and none that its exact
+    /// form would.
     pub fn problem(&self, form: &Form) -> Option<String> {
         let wrong = |wanted: &str| Some(format!("must be {wanted}; this is {}", form.describe()));
         match (self, form) {
@@ -106,6 +109,10 @@ impl Want {
                 "must be known before start, because tay reads the file then; this is produced by running"
                     .to_string(),
             ),
+            (want, Form::Unknown) if want.checks_exact_form() => Some(format!(
+                "must be known before start ({}); this is produced by running",
+                want.expects()
+            )),
             (_, Form::Unknown) | (Want::Scalar, _) => None,
             (Want::Path(PathUse::Named | PathUse::Mounted), Form::Text(_)) => None,
             (Want::Text, Form::Text(_)) | (Want::Bool, Form::Bool) => None,
@@ -123,7 +130,11 @@ impl Want {
             (Want::Count, Form::Number(Some(n))) if *n < 1 => {
                 Some(format!("must be a whole number above 0; this is {n}"))
             }
-            (Want::Count, Form::Number(_)) => None,
+            (Want::Count, Form::Number(Some(_))) => None,
+            (Want::Count, Form::Number(None)) => Some(format!(
+                "must be written out in full ({}); this holds a value not known until start",
+                self.expects()
+            )),
             (Want::Count, _) => wrong("a whole number"),
             (_, Form::Number(_) | Form::Bool) => wrong("text"),
             (want, Form::Text(None)) => Some(format!(
@@ -135,10 +146,19 @@ impl Want {
         }
     }
 
+    /// Whether the value must be known exactly to be checked, rather than
+    /// only its type.
+    fn checks_exact_form(&self) -> bool {
+        matches!(
+            self,
+            Want::Count | Want::OneOf(_) | Want::Duration | Want::FileMode | Want::FileName
+        )
+    }
+
     fn accepts(&self, text: &str) -> bool {
         match self {
             Want::OneOf(choices) => choices.contains(&text),
-            Want::Duration => is_duration(text),
+            Want::Duration => Duration::parse(text).is_some(),
             Want::FileMode => {
                 (3..=4).contains(&text.len()) && text.chars().all(|c| ('0'..='7').contains(&c))
             }
@@ -163,19 +183,54 @@ impl Want {
             Want::FileMode => "permissions in octal, such as `\"0600\"`".to_string(),
             Want::FileName => "a file name with no folder in it".to_string(),
             Want::Path(_) => "the path of a file".to_string(),
+            Want::Count => "a whole number above 0".to_string(),
             _ => "text".to_string(),
         }
     }
 }
 
-/// Seconds in a duration written as a whole number and `s`, `m` or `h`.
-fn is_duration(text: &str) -> bool {
-    let Some(number) = text.strip_suffix(['s', 'm', 'h']) else {
-        return false;
-    };
-    !number.is_empty()
-        && number.chars().all(|c| c.is_ascii_digit())
-        && number.parse::<u64>().is_ok_and(|n| n > 0)
+/// A length of time as a definition writes it: a whole number above 0, and
+/// `s`, `m` or `h`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Duration {
+    pub count: u64,
+    pub unit: TimeUnit,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TimeUnit {
+    Seconds,
+    Minutes,
+    Hours,
+}
+
+impl Duration {
+    pub fn parse(text: &str) -> Option<Duration> {
+        let unit = match text.chars().last()? {
+            's' => TimeUnit::Seconds,
+            'm' => TimeUnit::Minutes,
+            'h' => TimeUnit::Hours,
+            _ => return None,
+        };
+        let number = &text[..text.len() - 1];
+        if number.is_empty() || !number.chars().all(|c| c.is_ascii_digit()) {
+            return None;
+        }
+        let count = number.parse::<u64>().ok().filter(|n| *n > 0)?;
+        Some(Duration { count, unit })
+    }
+}
+
+/// As it is written: `2m`.
+impl fmt::Display for Duration {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let unit = match self.unit {
+            TimeUnit::Seconds => 's',
+            TimeUnit::Minutes => 'm',
+            TimeUnit::Hours => 'h',
+        };
+        write!(f, "{}{unit}", self.count)
+    }
 }
 
 #[cfg(test)]
@@ -187,12 +242,19 @@ mod tests {
     }
 
     #[test]
-    fn durations() {
-        for good in ["2m", "30s", "1h"] {
-            assert!(is_duration(good), "{good}");
+    fn durations_are_read_and_written_as_a_number_and_a_unit() {
+        for good in ["2m", "30s", "1h", "120s"] {
+            assert_eq!(Duration::parse(good).unwrap().to_string(), good);
         }
-        for bad in ["2", "m", "1.5m", "0s", "2d", "-1s"] {
-            assert!(!is_duration(bad), "{bad}");
+        assert_eq!(
+            Duration::parse("90s"),
+            Some(Duration {
+                count: 90,
+                unit: TimeUnit::Seconds
+            })
+        );
+        for bad in ["2", "m", "1.5m", "0s", "2d", "-1s", "", "2é"] {
+            assert_eq!(Duration::parse(bad), None, "{bad}");
         }
     }
 
@@ -210,6 +272,7 @@ mod tests {
         assert_eq!(Want::PortNumber.problem(&Form::Number(None)), None);
         assert!(Want::Count.problem(&Form::Number(Some(0))).is_some());
         assert_eq!(Want::Count.problem(&Form::Number(Some(16))), None);
+        assert!(Want::Count.problem(&Form::Number(None)).is_some());
         assert!(Want::OneOf(&["a", "b"]).problem(&text("c")).is_some());
         assert!(Want::Duration.problem(&Form::Text(None)).is_some());
         assert!(Want::FileMode.problem(&text("0600")).is_none());
@@ -218,12 +281,28 @@ mod tests {
     }
 
     #[test]
-    fn a_produced_value_passes_type_checks_but_not_a_file_read_before_start() {
+    fn a_produced_value_passes_type_checks_but_not_one_of_its_exact_form() {
         assert_eq!(Want::Number.problem(&Form::Unknown), None);
+        assert_eq!(Want::Text.problem(&Form::Unknown), None);
         assert!(
             Want::Path(PathUse::Read(Destination::FileContent))
                 .problem(&Form::Unknown)
                 .is_some()
         );
+        for want in [
+            Want::Count,
+            Want::Duration,
+            Want::OneOf(&["a"]),
+            Want::FileMode,
+            Want::FileName,
+        ] {
+            assert_eq!(
+                want.problem(&Form::Unknown),
+                Some(format!(
+                    "must be known before start ({}); this is produced by running",
+                    want.expects()
+                ))
+            );
+        }
     }
 }
