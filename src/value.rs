@@ -1,8 +1,8 @@
 //! A value as far as it is known before start: text, a number or true or
-//! false, with a hole wherever something is filled in later or is not shown.
-//! Each hole says what fills it, so that whoever starts a unit can fill
-//! `"${a.value}:${b.value}"` from what it has allocated, generated, been
-//! asked with or seen produced.
+//! false, with a placeholder wherever something is filled in later or is not
+//! shown. Each placeholder says what fills it, so that whoever starts a unit
+//! can fill `"${a.value}:${b.value}"` from what it has allocated, generated,
+//! been asked with or seen produced.
 
 use std::fmt;
 
@@ -10,23 +10,24 @@ use crate::syntax::expr::{Literal, Type};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Value {
-    /// Text, perhaps with holes in it. It is text whatever fills them.
+    /// Text, perhaps with placeholders in it. It is text whatever fills them.
     Text(Vec<Bit>),
     Number(i64),
     Bool(bool),
-    /// A whole value that a hole stands for. It has the hole's type.
-    Hole(Hole),
+    /// A whole value that a placeholder stands for. It has the
+    /// placeholder's type.
+    Placeholder(Placeholder),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Bit {
     Text(String),
-    Hole(Hole),
+    Placeholder(Placeholder),
 }
 
 /// A part of a value that is not known before start, or is not shown.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Hole {
+pub enum Placeholder {
     /// The number of a host port the unit holds for this environment, given
     /// when it is allocated.
     Port { unit: String },
@@ -68,37 +69,38 @@ impl fmt::Debug for Kept {
     }
 }
 
-impl Hole {
-    /// The type of what fills the hole; `None` when it is not known.
+impl Placeholder {
+    /// The type of what fills the placeholder; `None` when it is not known.
     pub fn ty(&self) -> Option<Type> {
         match self {
-            Hole::Port { .. } => Some(Type::Number),
-            Hole::Generated { .. }
-            | Hole::HostListen
-            | Hole::EnvironmentId
-            | Hole::EnvironmentNetwork => Some(Type::Text),
-            Hole::Produced { .. } => None,
-            Hole::Arg { ty, .. } => *ty,
-            Hole::SecretSetting { value, .. } => Some(value.0.ty()),
+            Placeholder::Port { .. } => Some(Type::Number),
+            Placeholder::Generated { .. }
+            | Placeholder::HostListen
+            | Placeholder::EnvironmentId
+            | Placeholder::EnvironmentNetwork => Some(Type::Text),
+            Placeholder::Produced { .. } => None,
+            Placeholder::Arg { ty, .. } => *ty,
+            Placeholder::SecretSetting { value, .. } => Some(value.0.ty()),
         }
     }
 
-    /// Whether what fills the hole is secret.
+    /// Whether what fills the placeholder is secret.
     pub fn is_secret(&self) -> bool {
         matches!(
             self,
-            Hole::SecretSetting { .. }
-                | Hole::Generated { secret: true, .. }
-                | Hole::Produced { secret: true, .. }
+            Placeholder::SecretSetting { .. }
+                | Placeholder::Generated { secret: true, .. }
+                | Placeholder::Produced { secret: true, .. }
         )
     }
 
-    /// The secret that fills the hole, as a reference names it; `None`
+    /// The secret that fills the placeholder, as a reference names it; `None`
     /// when what fills it is not secret.
     pub fn secret(&self) -> Option<String> {
         match self {
-            Hole::SecretSetting { name, .. } => Some(format!("settings.{name}")),
-            Hole::Generated { unit, name, .. } | Hole::Produced { unit, name, .. }
+            Placeholder::SecretSetting { name, .. } => Some(format!("settings.{name}")),
+            Placeholder::Generated { unit, name, .. }
+            | Placeholder::Produced { unit, name, .. }
                 if self.is_secret() =>
             {
                 Some(format!("{unit}.{name}"))
@@ -107,20 +109,20 @@ impl Hole {
         }
     }
 
-    /// The hole as `tay plan` prints it: a secret as `<secret>`, whatever
-    /// fills it.
+    /// The placeholder as `tay plan` prints it: a secret as `<secret>`,
+    /// whatever fills it.
     pub fn shown(&self) -> String {
         match self {
-            Hole::SecretSetting { .. }
-            | Hole::Generated { secret: true, .. }
-            | Hole::Produced { secret: true, .. } => "<secret>".to_string(),
-            Hole::Port { unit } => format!("<port: {unit}>"),
-            Hole::Generated { unit, name, .. } => format!("<generated: {unit}.{name}>"),
-            Hole::Produced { unit, name, .. } => format!("<produced: {unit}.{name}>"),
-            Hole::Arg { name, .. } => format!("<arg: {name}>"),
-            Hole::HostListen => "<host.listen>".to_string(),
-            Hole::EnvironmentId => "<environment.id>".to_string(),
-            Hole::EnvironmentNetwork => "<environment.network>".to_string(),
+            Placeholder::SecretSetting { .. }
+            | Placeholder::Generated { secret: true, .. }
+            | Placeholder::Produced { secret: true, .. } => "<secret>".to_string(),
+            Placeholder::Port { unit } => format!("<port: {unit}>"),
+            Placeholder::Generated { unit, name, .. } => format!("<generated: {unit}.{name}>"),
+            Placeholder::Produced { unit, name, .. } => format!("<produced: {unit}.{name}>"),
+            Placeholder::Arg { name, .. } => format!("<arg: {name}>"),
+            Placeholder::HostListen => "<host.listen>".to_string(),
+            Placeholder::EnvironmentId => "<environment.id>".to_string(),
+            Placeholder::EnvironmentNetwork => "<environment.network>".to_string(),
         }
     }
 }
@@ -158,20 +160,20 @@ impl Value {
             Value::Text(bits) => bits.clone(),
             Value::Number(n) => vec![Bit::Text(n.to_string())],
             Value::Bool(b) => vec![Bit::Text(b.to_string())],
-            Value::Hole(hole) => vec![Bit::Hole(hole.clone())],
+            Value::Placeholder(placeholder) => vec![Bit::Placeholder(placeholder.clone())],
         }
     }
 
-    pub fn holes(&self) -> Vec<&Hole> {
+    pub fn placeholders(&self) -> Vec<&Placeholder> {
         match self {
             Value::Text(bits) => bits
                 .iter()
                 .filter_map(|bit| match bit {
-                    Bit::Hole(hole) => Some(hole),
+                    Bit::Placeholder(placeholder) => Some(placeholder),
                     Bit::Text(_) => None,
                 })
                 .collect(),
-            Value::Hole(hole) => vec![hole],
+            Value::Placeholder(placeholder) => vec![placeholder],
             Value::Number(_) | Value::Bool(_) => Vec::new(),
         }
     }
@@ -179,61 +181,67 @@ impl Value {
     /// The secrets the value is built from, as references name them, each
     /// once, sorted.
     pub fn secrets(&self) -> Vec<String> {
-        let mut secrets: Vec<String> = self.holes().iter().filter_map(|h| h.secret()).collect();
+        let mut secrets: Vec<String> = self
+            .placeholders()
+            .iter()
+            .filter_map(|h| h.secret())
+            .collect();
         secrets.sort();
         secrets.dedup();
         secrets
     }
 
     pub fn is_secret(&self) -> bool {
-        self.holes().iter().any(|hole| hole.is_secret())
+        self.placeholders()
+            .iter()
+            .any(|placeholder| placeholder.is_secret())
     }
 
-    /// The text up to the first hole.
+    /// The text up to the first placeholder.
     pub fn leading_text(&self) -> String {
         match self {
             Value::Text(bits) => bits
                 .iter()
                 .map_while(|bit| match bit {
                     Bit::Text(text) => Some(text.as_str()),
-                    Bit::Hole(_) => None,
+                    Bit::Placeholder(_) => None,
                 })
                 .collect(),
             _ => String::new(),
         }
     }
 
-    /// The text, when it has no hole.
+    /// The text, when it has no placeholder.
     pub fn exact_text(&self) -> Option<String> {
         match self {
             Value::Text(bits) => bits
                 .iter()
                 .map(|bit| match bit {
                     Bit::Text(text) => Some(text.as_str()),
-                    Bit::Hole(_) => None,
+                    Bit::Placeholder(_) => None,
                 })
                 .collect(),
             _ => None,
         }
     }
 
-    /// The value exactly, when it has no hole.
+    /// The value exactly, when it has no placeholder.
     pub fn exact(&self) -> Option<Exact> {
         match self {
             Value::Text(_) => self.exact_text().map(Exact::Text),
             Value::Number(n) => Some(Exact::Number(*n)),
             Value::Bool(b) => Some(Exact::Bool(*b)),
-            Value::Hole(_) => None,
+            Value::Placeholder(_) => None,
         }
     }
 
-    /// The value as `tay plan` prints it: each hole in angle brackets.
+    /// The value as `tay plan` prints it: each placeholder in angle brackets.
     pub fn shown(&self) -> String {
         self.bits()
             .iter()
             .map(|bit| match bit {
                 Bit::Text(text) => text.clone(),
-                Bit::Hole(hole) => hole.shown(),
+                Bit::Placeholder(placeholder) => placeholder.shown(),
             })
             .collect()
     }
@@ -243,18 +251,18 @@ impl Value {
 mod tests {
     use super::*;
 
-    fn secret_setting(name: &str, value: &str) -> Hole {
-        Hole::SecretSetting {
+    fn secret_setting(name: &str, value: &str) -> Placeholder {
+        Placeholder::SecretSetting {
             name: name.to_string(),
             value: Kept(Literal::Text(value.to_string())),
         }
     }
 
     #[test]
-    fn a_value_with_a_hole_is_shown_with_it_and_has_no_exact_form() {
+    fn a_value_with_a_placeholder_is_shown_with_it_and_has_no_exact_form() {
         let value = Value::Text(vec![
             Bit::Text("http://127.0.0.1:".into()),
-            Bit::Hole(Hole::Port {
+            Bit::Placeholder(Placeholder::Port {
                 unit: "web-port".into(),
             }),
         ]);
@@ -268,42 +276,42 @@ mod tests {
 
     #[test]
     fn text_side_by_side_is_joined() {
-        let port = Hole::Port {
+        let port = Placeholder::Port {
             unit: "web-port".into(),
         };
         assert_eq!(
             Value::from_bits([
                 Bit::Text("http".into()),
                 Bit::Text("://".into()),
-                Bit::Hole(port.clone()),
+                Bit::Placeholder(port.clone()),
                 Bit::Text("/".into()),
             ]),
             Value::Text(vec![
                 Bit::Text("http://".into()),
-                Bit::Hole(port),
+                Bit::Placeholder(port),
                 Bit::Text("/".into())
             ])
         );
     }
 
     #[test]
-    fn each_secret_hole_names_its_secret_and_shows_as_secret() {
-        let password = Hole::Generated {
+    fn each_secret_placeholder_names_its_secret_and_shows_as_secret() {
+        let password = Placeholder::Generated {
             unit: "db-password".into(),
             name: "value".into(),
             secret: true,
         };
-        let public = Hole::Generated {
+        let public = Placeholder::Generated {
             unit: "signing".into(),
             name: "public".into(),
             secret: false,
         };
         let value = Value::Text(vec![
-            Bit::Hole(secret_setting("key", "hunter2")),
+            Bit::Placeholder(secret_setting("key", "hunter2")),
             Bit::Text(":".into()),
-            Bit::Hole(password.clone()),
-            Bit::Hole(public),
-            Bit::Hole(password),
+            Bit::Placeholder(password.clone()),
+            Bit::Placeholder(public),
+            Bit::Placeholder(password),
         ]);
         assert_eq!(value.secrets(), ["db-password.value", "settings.key"]);
         assert_eq!(
@@ -314,12 +322,12 @@ mod tests {
 
     #[test]
     fn a_secret_settings_value_is_kept_and_not_shown_even_by_debug() {
-        let hole = secret_setting("key", "hunter2");
-        let Hole::SecretSetting { value, .. } = &hole else {
-            unreachable!("the hole was made a secret setting");
+        let placeholder = secret_setting("key", "hunter2");
+        let Placeholder::SecretSetting { value, .. } = &placeholder else {
+            unreachable!("the placeholder was made a secret setting");
         };
         assert_eq!(value.0, Literal::Text("hunter2".into()));
-        assert!(!format!("{:?}", Value::Hole(hole.clone())).contains("hunter2"));
-        assert_eq!(hole.ty(), Some(Type::Text));
+        assert!(!format!("{:?}", Value::Placeholder(placeholder.clone())).contains("hunter2"));
+        assert_eq!(placeholder.ty(), Some(Type::Text));
     }
 }

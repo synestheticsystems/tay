@@ -181,17 +181,17 @@ mod tests {
     fn the_plan_holds_each_units_settings_with_every_value_resolved_where_it_runs() {
         let plan = planned("shop", &[]);
         let web = settings(&plan, "web");
-        // The command's words, the port a hole that names its unit.
+        // The command's words, the port a placeholder that names its unit.
         assert!(
             web.contains(
-                r#"command: [Text([Text("serve")]), Text([Text("--port")]), Hole(Port { unit: "web-port" })]"#
+                r#"command: [Text([Text("serve")]), Text([Text("--port")]), Placeholder(Port { unit: "web-port" })]"#
             ),
             "{web}"
         );
         // The API's address as the host, where `web` runs, sees it.
         assert!(
             web.contains(
-                r#"("API_URL", Text([Text("http://127.0.0.1:"), Hole(Port { unit: "api-port" })]))"#
+                r#"("API_URL", Text([Text("http://127.0.0.1:"), Placeholder(Port { unit: "api-port" })]))"#
             ),
             "{web}"
         );
@@ -199,7 +199,7 @@ mod tests {
         let database = settings(&plan, "database");
         assert!(
             database.contains(
-                r#"secret_env: [("DB_PASSWORD", Hole(Generated { unit: "db-password", name: "value", secret: true }))]"#
+                r#"secret_env: [("DB_PASSWORD", Placeholder(Generated { unit: "db-password", name: "value", secret: true }))]"#
             ),
             "{database}"
         );
@@ -227,7 +227,7 @@ mod tests {
         let database = settings(&planned("secrets-allowed", &[]), "database");
         assert!(
             database.contains(
-                r#"("LICENCE", Hole(SecretSetting { name: "licence_key", value: Kept(..) }))"#
+                r#"("LICENCE", Placeholder(SecretSetting { name: "licence_key", value: Kept(..) }))"#
             ),
             "{database}"
         );

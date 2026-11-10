@@ -5,7 +5,7 @@ use crate::definition::{SettingValue, reference_errors};
 use crate::diagnostic::Diagnostic;
 use crate::plan::resolve::resolved::Resolved;
 use crate::syntax::expr::{Literal, Reference};
-use crate::value::{Hole, Kept, Value};
+use crate::value::{Kept, Placeholder, Value};
 
 use super::{Fail, Res, Resolver};
 
@@ -47,8 +47,8 @@ impl Resolver<'_> {
         // A value of the wrong type was reported where it is written.
         let literal = written.typed(decl.ty).ok_or(Fail::Reported)?;
         let value = match literal {
-            // A secret's value is kept, in a hole that is never shown.
-            literal if decl.secret => Value::Hole(Hole::SecretSetting {
+            // A secret's value is kept, in a placeholder that is never shown.
+            literal if decl.secret => Value::Placeholder(Placeholder::SecretSetting {
                 name: name.to_string(),
                 value: Kept(literal),
             }),

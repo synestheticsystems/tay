@@ -5,7 +5,7 @@ use std::fmt;
 use crate::diagnostic::{Diagnostics, quoted_list};
 use crate::syntax::expr::{self, Expr, ExprKind, Type};
 use crate::syntax::yaml::Node;
-use crate::value::{Hole, Value};
+use crate::value::{Placeholder, Value};
 
 use super::settings::Destination;
 
@@ -76,15 +76,15 @@ impl Form {
         }
     }
 
-    /// The form of a resolved value. A hole's exact form is not known, even
-    /// when the hole is a secret whose value is.
+    /// The form of a resolved value. A placeholder's exact form is not known,
+    /// even when the placeholder is a secret whose value is.
     pub fn of(value: &Value) -> Form {
         match value {
             Value::Text(_) => Form::Text(value.exact_text()),
             Value::Number(n) => Form::Number(Some(*n)),
             Value::Bool(_) => Form::Bool,
-            Value::Hole(Hole::Arg { ty: None, .. }) => Form::Asked,
-            Value::Hole(hole) => match hole.ty() {
+            Value::Placeholder(Placeholder::Arg { ty: None, .. }) => Form::Asked,
+            Value::Placeholder(placeholder) => match placeholder.ty() {
                 Some(Type::Text) => Form::Text(None),
                 Some(Type::Number) => Form::Number(None),
                 Some(Type::Bool) => Form::Bool,

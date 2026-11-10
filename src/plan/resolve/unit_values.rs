@@ -4,7 +4,7 @@ use crate::definition::{GiveValue, reference_errors};
 use crate::module::{ModuleValue, UnitKind};
 use crate::plan::resolve::resolved::Resolved;
 use crate::syntax::expr::{Part, Reference, UnitRef};
-use crate::value::{Hole, Value};
+use crate::value::{Placeholder, Value};
 
 use super::{Asker, Chosen, Fail, Key, Res, Resolver, Scope};
 
@@ -87,18 +87,20 @@ impl Resolver<'_> {
                     this.endpoint(owner, endpoint, part, asker, reference)
                 })
             }
-            GiveValue::Module(ModuleValue::Port) => Ok(Resolved::known(Value::Hole(Hole::Port {
-                unit: unit.name.name.clone(),
-            }))),
-            GiveValue::Module(ModuleValue::Generated { secret }) => {
-                Ok(Resolved::known(Value::Hole(Hole::Generated {
+            GiveValue::Module(ModuleValue::Port) => {
+                Ok(Resolved::known(Value::Placeholder(Placeholder::Port {
+                    unit: unit.name.name.clone(),
+                })))
+            }
+            GiveValue::Module(ModuleValue::Generated { secret }) => Ok(Resolved::known(
+                Value::Placeholder(Placeholder::Generated {
                     unit: unit.name.name.clone(),
                     name: name.to_string(),
                     secret: *secret,
-                })))
-            }
+                }),
+            )),
             GiveValue::Module(ModuleValue::Produced { secret }) => {
-                let mut value = Resolved::known(Value::Hole(Hole::Produced {
+                let mut value = Resolved::known(Value::Placeholder(Placeholder::Produced {
                     unit: unit.name.name.clone(),
                     name: name.to_string(),
                     secret: *secret,

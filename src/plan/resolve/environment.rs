@@ -8,7 +8,7 @@ use crate::diagnostic::{Diagnostic, Diagnostics};
 use crate::plan::choices::Layered;
 use crate::plan::resolve::resolved::Resolved;
 use crate::syntax::expr::{EnvField, Reference};
-use crate::value::{Hole, Value};
+use crate::value::{Placeholder, Value};
 
 use super::{Res, Resolver};
 
@@ -131,8 +131,10 @@ impl Resolver<'_> {
                     ));
                 }
             },
-            EnvField::Id => Resolved::known(Value::Hole(Hole::EnvironmentId)),
-            EnvField::Network => Resolved::known(Value::Hole(Hole::EnvironmentNetwork)),
+            EnvField::Id => Resolved::known(Value::Placeholder(Placeholder::EnvironmentId)),
+            EnvField::Network => {
+                Resolved::known(Value::Placeholder(Placeholder::EnvironmentNetwork))
+            }
             EnvField::Profile => match &environment.profile {
                 Some(profile) => Resolved::text(profile),
                 None => {

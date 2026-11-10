@@ -8,7 +8,7 @@ use crate::diagnostic::source::Loc;
 use crate::module::{Concern, Runs, UnitKind};
 use crate::syntax::expr::Expr;
 use crate::syntax::names::NameAt;
-use crate::value::Hole;
+use crate::value::Placeholder;
 
 use super::Planner;
 use super::reach::Reached;
@@ -79,14 +79,14 @@ impl Planner<'_> {
         // The source is also one of the unit's slots, so a failure to resolve
         // it has been reported where the unit's values were used.
         let value = self.resolver.resolve(from, scope).ok()?;
-        // What fills these holes can be any text, `..` included.
-        for hole in value.value.holes() {
-            match hole {
-                Hole::Produced { .. } => return Some(
+        // What fills these placeholders can be any text, `..` included.
+        for placeholder in value.value.placeholders() {
+            match placeholder {
+                Placeholder::Produced { .. } => return Some(
                     "it mounts a source that continues with a value produced by running, so where it leads is not known before anything starts"
                         .to_string(),
                 ),
-                Hole::Arg { .. } => return Some(
+                Placeholder::Arg { .. } => return Some(
                     "it mounts a source that continues with an action's argument, so where it leads is not known until the action is asked for"
                         .to_string(),
                 ),

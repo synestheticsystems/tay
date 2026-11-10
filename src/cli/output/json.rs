@@ -155,8 +155,8 @@ fn given(given: &Given) -> Value {
     })
 }
 
-/// A value: its text with holes shown, and its exact value, `null` when it
-/// has a hole.
+/// A value: its text with placeholders shown, and its exact value, `null`
+/// when it has a placeholder.
 fn shown(value: &crate::value::Value) -> Value {
     json!({
         "text": value.shown(),

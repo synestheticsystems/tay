@@ -26,7 +26,7 @@ use crate::syntax::expr::{Expr, ExprKind, Part, Piece, Reference, Target, View};
 use crate::syntax::names::NameAt;
 
 use super::choices::{self, Layered};
-use crate::value::{Bit, Hole, Value};
+use crate::value::{Bit, Placeholder, Value};
 use resolved::Resolved;
 
 /// Who uses a value, which decides the view of an address.
@@ -278,7 +278,7 @@ impl<'s> Resolver<'s> {
         match &reference.target {
             Target::Setting(name) => self.setting(name, reference),
             Target::Environment(field) => self.environment_field(*field, reference),
-            Target::HostListen => Ok(Resolved::known(Value::Hole(Hole::HostListen))),
+            Target::HostListen => Ok(Resolved::known(Value::Placeholder(Placeholder::HostListen))),
             Target::Arg(name) => {
                 // An action's arguments were checked against its declaration
                 // while reading, in the unit the reference is written in.
@@ -287,7 +287,7 @@ impl<'s> Resolver<'s> {
                     .and_then(|unit| self.stack.units[unit].action.as_ref())
                     .and_then(|action| action.args.iter().find(|arg| arg.name.name == *name))
                     .and_then(|arg| arg.ty);
-                Ok(Resolved::known(Value::Hole(Hole::Arg {
+                Ok(Resolved::known(Value::Placeholder(Placeholder::Arg {
                     name: name.clone(),
                     ty,
                 })))
