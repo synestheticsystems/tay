@@ -6,7 +6,7 @@ tay brings a whole stack up from one command and then keeps telling the truth ab
 
 ## Status
 
-This is the placeholder era. The name is taken and the work has begun; there is nothing to install yet. Version 0.0.0 is a binary that says so and exits with a failure code.
+tay reads a stack's definitions and plans it: `tay plan` checks the definitions strictly, works out every value known before anything starts, and prints the units that would come up in an order they could start in. Nothing starts anything yet; every other command says it is not built. The definitions are written as [docs/definition-format.md](docs/definition-format.md) describes.
 
 ## Licence
 
