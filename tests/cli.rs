@@ -25,7 +25,7 @@ fn version_and_help_succeed() {
     assert_eq!(run.code, 0);
     assert!(
         run.stdout
-            .contains("tay plan [--root DIR] [--profile NAME] [--set KEY=VALUE]... [--json]")
+            .contains("tay plan [--root FOLDER] [--profile NAME] [--set PLACE=VALUE]... [--json]")
     );
 }
 

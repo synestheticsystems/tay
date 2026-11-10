@@ -25,23 +25,24 @@ containers up in dependency order and reports their state. This version reads
 a stack's definitions and plans; it starts nothing.
 
 Usage:
-  tay plan [--root DIR] [--profile NAME] [--set KEY=VALUE]... [--json]
+  tay plan [--root FOLDER] [--profile NAME] [--set PLACE=VALUE]... [--json]
   tay --version
   tay --help
 
 tay plan reads the stack whose tay.yaml is in the current folder or the
 nearest folder above it, applies the choices, and prints each unit that would
 come up, in an order it could start in: the module it uses and where it runs,
-what it needs and why, how it is known to be ready, and the values it gives.
-It reads the environment's .tay/ folder and writes nothing.
+what it needs and why, how it is known to be ready, the host ports it opens
+and what opens each, and the values it gives. Of the environment's .tay/
+folder it reads choices.yaml and nothing else, and it writes nothing.
 
 Options of tay plan:
-  --root DIR        look for tay.yaml from DIR instead of the current folder
-  --profile NAME    use this profile instead of the stack's default one
-  --set KEY=VALUE   make one choice, after every other place. KEY is up,
-                    up_add, up_remove (lists written with commas),
-                    run.default, run.units.UNIT or settings.NAME
-  --json            print the plan as JSON, schema 1, for programs
+  --root FOLDER       look for tay.yaml from FOLDER instead of the current one
+  --profile NAME      use this profile instead of the stack's default one
+  --set PLACE=VALUE   make one choice, after every other place. PLACE is up,
+                      up_add, up_remove, run.default (lists written with
+                      commas), run.units.UNIT, settings.NAME or label
+  --json              print the plan as JSON, schema 1, for programs
 
 Exit codes: 0 the plan is sound; 2 the definitions or the command line have
 errors; 3 this tay is too old for the definitions.
