@@ -1,6 +1,6 @@
 //! The plan as it is printed, assembled once every unit that comes up has
 //! been visited: the units in an order they could start in, the ports they
-//! open, and the values they give.
+//! open, the values they give, and the units that run that each needs.
 
 mod given;
 
@@ -77,7 +77,7 @@ impl Planner<'_> {
             let planned = self.assemble(unit, visit, &in_plan, &opened, &mut openers);
             assembled.insert(unit, planned);
         }
-        let units = order?
+        let mut units: Vec<PlannedUnit> = order?
             .into_iter()
             .map(|unit| {
                 assembled
@@ -85,6 +85,7 @@ impl Planner<'_> {
                     .expect("every unit in the order was visited")
             })
             .collect::<Option<_>>()?;
+        give_needs_that_run(&mut units);
         Some(Plan {
             stack: stack_name.to_string(),
             root: self.resolver.environment.root.clone(),
@@ -167,5 +168,96 @@ impl Planner<'_> {
             })
             .collect();
         Some(planned)
+    }
+}
+
+/// Gives the mechanism of each of `units`, which are in the order units
+/// start in, the units that run that it needs, a group standing for those
+/// it needs in turn, in that order.
+fn give_needs_that_run(units: &mut [PlannedUnit]) {
+    let by_name: HashMap<&str, &PlannedUnit> = (units.iter())
+        .map(|planned| (planned.name.as_str(), planned))
+        .collect();
+    let needs_that_run: Vec<Vec<String>> = (units.iter())
+        .map(|planned| {
+            let mut reached: HashSet<&str> = HashSet::new();
+            let mut through = vec![planned];
+            while let Some(needing) = through.pop() {
+                for need in &needing.needs {
+                    let Some(&needed) = by_name.get(need.unit.as_str()) else {
+                        continue;
+                    };
+                    if reached.insert(needed.name.as_str()) && needed.mechanism.is_none() {
+                        through.push(needed);
+                    }
+                }
+            }
+            (units.iter())
+                .filter(|unit| reached.contains(unit.name.as_str()))
+                .filter(|unit| {
+                    (unit.mechanism.as_ref())
+                        .is_some_and(|mechanism| matches!(mechanism.kind, UnitKind::Runs(_)))
+                })
+                .map(|unit| unit.name.clone())
+                .collect()
+        })
+        .collect();
+    for (planned, needs) in units.iter_mut().zip(needs_that_run) {
+        if let Some(mechanism) = &mut planned.mechanism {
+            mechanism.needs_that_run = needs;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::diagnostic::Diagnostics;
+    use crate::diagnostic::source::Sources;
+    use crate::plan::{self, Options, Outcome};
+
+    #[test]
+    fn a_unit_needs_what_runs_that_it_needs_a_group_standing_for_its_own_needs() {
+        let root = tempfile::tempdir().unwrap();
+        let stack = r#"format: 1
+stack: needing
+up: [undoer]
+units:
+  box: { uses: container, with: { image: alpine } }
+  service: { uses: process, with: { command: [sleep, "1"] } }
+  inner: { uses: process, with: { command: [sleep, "1"] } }
+  core: { needs: [inner, port] }
+  port: { uses: port }
+  password: { uses: secret, with: { kind: password } }
+  undoer:
+    uses: command
+    needs: [service, core]
+    with: { in: box, run: ["true"], secret_env: { PASSWORD: "${password.value}" } }
+"#;
+        std::fs::write(root.path().join("tay.yaml"), stack).unwrap();
+        let options = Options {
+            asked: crate::disk::Asked::default(),
+            home: None,
+            shared_folders: None,
+            action: None,
+        };
+        let (mut sources, mut d) = (Sources::default(), Diagnostics::default());
+        let Outcome::Plan(plan) = plan::plan(root.path(), &options, &mut sources, &mut d) else {
+            panic!("the stack plans: {:?}", d.into_sorted());
+        };
+        let needs_that_run = |unit: &str| {
+            let planned = plan.units.iter().find(|planned| planned.name == unit);
+            let mechanism = planned.unwrap().mechanism.as_ref().unwrap();
+            mechanism.needs_that_run.clone()
+        };
+        // The container it runs in, what it needs, and what the group it
+        // needs needs, but not the port, the group, or the secret, in the
+        // order units start in.
+        let wanted = ["box", "service", "inner"];
+        let in_order: Vec<&str> = (plan.units.iter())
+            .map(|planned| planned.name.as_str())
+            .filter(|unit| wanted.contains(unit))
+            .collect();
+        assert_eq!(needs_that_run("undoer"), in_order);
+        assert!(needs_that_run("service").is_empty());
     }
 }

@@ -10,12 +10,11 @@ use crate::syntax::names::NameAt;
 use crate::syntax::yaml::Node;
 use crate::value::{Filled, Placeholder, Unfilled, Value};
 
-use crate::module::description::OpenedPort;
 use crate::module::description::{
     Description, ModuleGive, ModuleValue, ReadyWithoutCheck, RestartOn, UnitKind,
 };
 use crate::module::operations::{Keeping, Operations, PartlyRemoved, Removing, UnitPlace};
-use crate::module::settings::{Destination, Keeps, MapValues, Operate, Slot};
+use crate::module::settings::{Destination, FromPlan, Keeps, MapValues, Operate, Slot};
 use crate::module::want::Want;
 use crate::module::{Cx, Module};
 
@@ -52,9 +51,11 @@ impl<V> MapValues for PortSettings<V> {
     }
 }
 
-/// A unit that is made publishes nothing, so no port is opened for it.
+/// A unit that is made takes nothing more from the plan: it publishes
+/// nothing, so no port is opened for it, and it runs nothing that would
+/// wait for what it needs.
 impl Operate for PortSettings<Filled> {
-    fn operate(self, _: Vec<OpenedPort<Filled>>) -> Operations {
+    fn operate(self, _: FromPlan) -> Operations {
         Operations::Made(Box::new(self))
     }
 }

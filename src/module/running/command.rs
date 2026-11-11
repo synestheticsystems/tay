@@ -20,11 +20,11 @@ use super::command_line::{RunForm, run_form};
 use super::mounts::{self, mounts};
 use super::variables::variables;
 use crate::module::description::{
-    Description, ModuleGive, ModuleValue, OpenedPort, Output, ReadyWithoutCheck, RestartOn, Runs,
-    UnitKind, VolumeMount,
+    Description, ModuleGive, ModuleValue, Output, ReadyWithoutCheck, RestartOn, Runs, UnitKind,
+    VolumeMount,
 };
 use crate::module::operations::Operations;
-use crate::module::settings::{Destination, MapValues, Operate, Slot, each_named, maybe};
+use crate::module::settings::{Destination, FromPlan, MapValues, Operate, Slot, each_named, maybe};
 use crate::module::want::{PathUse, Want};
 use crate::module::{Cx, Module};
 
@@ -74,6 +74,10 @@ struct CommandSettings<V> {
     keeps: bool,
     /// The files the command builds, by name.
     outputs: Vec<(NameAt, V)>,
+    /// The units that run that the unit needs, which the plan gives once
+    /// its settings are filled, and none before: what its `undo` waits for
+    /// once the unit has left the plan.
+    needs_that_run: Vec<String>,
 }
 
 /// What a command's leaving the plan does.
@@ -107,14 +111,20 @@ impl<V> MapValues for CommandSettings<V> {
             produces: self.produces.clone(),
             keeps: self.keeps,
             outputs: outputs?,
+            needs_that_run: self.needs_that_run.clone(),
         })
     }
 }
 
-/// A command publishes nothing, so no port is opened for it.
+/// A command takes from the plan the units that run that it needs, which
+/// it keeps with its `undo`. It publishes nothing, so no port is opened
+/// for it.
 impl Operate for CommandSettings<Filled> {
-    fn operate(self, _: Vec<OpenedPort<Filled>>) -> Operations {
-        Operations::Running(Arc::new(self))
+    fn operate(self, from_plan: FromPlan) -> Operations {
+        Operations::Running(Arc::new(CommandSettings {
+            needs_that_run: from_plan.needs_that_run,
+            ..self
+        }))
     }
 }
 
@@ -290,6 +300,7 @@ fn read(
         produces,
         keeps: !cx.is_action,
         outputs,
+        needs_that_run: Vec::new(),
     };
     Some((settings, runs, volume_mounts))
 }

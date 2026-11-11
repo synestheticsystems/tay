@@ -10,7 +10,9 @@
 //! already would be started from now is compared with what it was started
 //! from; if they differ it is started again, saying what changed, and
 //! otherwise joined as it is. A bring-up that leaves what is up as it is
-//! joins it unasked.
+//! joins it unasked. A bring-up for `tay up` has what the plan no longer
+//! has leave first, as [`Leaving`] says: until it has, only the units it
+//! waits for start, and nothing is decided.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
@@ -19,6 +21,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 use tokio::task::JoinSet;
 
+use super::leaving::{Leaving, Step};
 use super::settled::{Settled, Standing};
 use super::started_from;
 use super::state::{State, UnitState};
@@ -58,24 +61,34 @@ pub enum Outdated {
     Join,
 }
 
+/// What a bring-up tells the change that made it, as it goes.
+pub enum Telling {
+    /// What it came to, once that is decided.
+    Decided(Decision),
+    /// Something a person should know of it, said once.
+    Notice(String),
+}
+
 /// Brings up `units`, in their order, until each has settled or `cancel`
 /// says to stop, doing with a unit that runs from other settings what
-/// `outdated` says. `asked` are the units the decision is judged by, which
-/// goes to `decided` once it is made. Gives the decision; `None` when it
-/// was stopped before it was made.
+/// `outdated` says, and first, with `leaving`, what it says. `asked` are
+/// the units the decision is judged by, which `told` is told once it is
+/// made, as it is each notice. Gives the decision; `None` when it was
+/// stopped before it was made.
 pub async fn bring_up(
     supervisor: &Arc<Supervisor>,
     units: &[Arc<PlannedUnit>],
     asked: &[String],
     outdated: Outdated,
-    decided: &mut (dyn FnMut(Decision) + Send),
-    noticed: &mut (dyn FnMut(String) + Send),
+    leaving: Option<Leaving>,
+    told: &mut (dyn FnMut(Telling) + Send),
     mut cancel: watch::Receiver<bool>,
 ) -> Option<Decision> {
     let mut bringing = Bringing {
         supervisor,
         units,
         outdated,
+        leaving,
         started: vec![false; units.len()],
         settled: Settled::default(),
         running: HashSet::new(),
@@ -89,6 +102,8 @@ pub async fn bring_up(
     // started again if that changed.
     let mut comparing = JoinSet::new();
     let mut comparing_of = HashMap::new();
+    // The step of leaving under way, one at a time.
+    let mut leaving_step = JoinSet::new();
     let mut changes = supervisor.changes();
     let mut decision = None;
     // A change can be cancelled before it begins, while it is planned.
@@ -101,6 +116,12 @@ pub async fn bring_up(
         while moved {
             moved = bringing.settle_running();
             if !cancelled {
+                if leaving_step.is_empty()
+                    && let Some(step) = bringing.leave()
+                {
+                    leaving_step.spawn(step);
+                    moved = true;
+                }
                 let started = bringing.start();
                 for (index, made, in_use) in started.made {
                     moved = true;
@@ -129,12 +150,13 @@ pub async fn bring_up(
         if decision.is_none() && !cancelled {
             decision = bringing.decided(asked);
             if let Some(decision) = &decision {
-                decided(decision.clone());
+                told(Telling::Decided(decision.clone()));
             }
         }
         // What runs goes on under the supervisor whatever happens here.
         let waits_on_running = !bringing.running.is_empty() && !cancelled;
-        if making.is_empty() && comparing.is_empty() && !waits_on_running {
+        let idle = making.is_empty() && comparing.is_empty() && leaving_step.is_empty();
+        if idle && !waits_on_running {
             break;
         }
         tokio::select! {
@@ -160,13 +182,21 @@ pub async fn bring_up(
                 };
                 if let Some(index) = comparing_of.remove(&task) {
                     if let Compared::Unknown(why) = &compared {
-                        noticed(format!(
+                        told(Telling::Notice(format!(
                             "whether `{}` would be started from what it was started from cannot be told, so it is left as it runs: {why}",
                             units[index].name
-                        ));
+                        )));
                     }
                     bringing.compared(index, compared);
                 }
+            }
+            Some(joined) = leaving_step.join_next() => {
+                // A step that panicked is a fault in tay, which is said
+                // rather than left to hold up the rest.
+                if let Err(error) = joined {
+                    told(Telling::Notice(format!("tay failed while undoing or stopping what the plan no longer has: {error}")));
+                }
+                bringing.left();
             }
             changed = changes.changed(), if waits_on_running => if changed.is_err() {
                 break;
@@ -242,6 +272,8 @@ struct Bringing<'a> {
     supervisor: &'a Arc<Supervisor>,
     units: &'a [Arc<PlannedUnit>],
     outdated: Outdated,
+    /// What is done first with what the plan no longer has, for `tay up`.
+    leaving: Option<Leaving>,
     started: Vec<bool>,
     settled: Settled,
     /// The units that run, handed to the supervisor, not yet ready or
@@ -276,7 +308,9 @@ impl Bringing<'_> {
         while moved {
             moved = false;
             for index in 0..self.units.len() {
-                if self.started[index] {
+                let held = (self.leaving.as_ref())
+                    .is_some_and(|leaving| leaving.holds(&self.units[index].name));
+                if self.started[index] || held {
                     continue;
                 }
                 let planned = Arc::clone(&self.units[index]);
@@ -334,6 +368,20 @@ impl Bringing<'_> {
             }
         }
         started
+    }
+
+    /// The next step of leaving, as the units stand, once the one before it
+    /// has ended; `None` while none can begin, and for a bring-up that has
+    /// nothing leave.
+    fn leave(&mut self) -> Option<Step> {
+        self.leaving.as_mut()?.next(self.supervisor, &self.settled)
+    }
+
+    /// The step of leaving under way has ended.
+    fn left(&mut self) {
+        if let Some(leaving) = &mut self.leaving {
+            leaving.ended();
+        }
     }
 
     /// Joins the unit at `index`, which runs already, as it is: nothing
@@ -453,8 +501,12 @@ impl Bringing<'_> {
         self.supervisor.record(unit, state, None);
     }
 
-    /// The decision, once it can be made.
+    /// The decision, once it can be made: once what the plan no longer has
+    /// has left, too.
     fn decided(&self, asked: &[String]) -> Option<Decision> {
+        if (self.leaving.as_ref()).is_some_and(|leaving| !leaving.is_over()) {
+            return None;
+        }
         if asked.iter().all(|unit| self.settled.is_ready(unit)) {
             return Some(Decision::Ready);
         }

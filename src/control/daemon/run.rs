@@ -89,6 +89,7 @@ impl Daemon {
                 &units,
                 std::slice::from_ref(&action),
                 Outdated::Join,
+                None,
                 &mut |decision| came_to = Some(self.ran(&action, decision)),
             )
             .await;

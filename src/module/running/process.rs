@@ -12,10 +12,11 @@ use crate::value::{Filled, Placeholder, Unfilled, Value};
 use super::command_line::{COMMAND_LINE, argv, argv_list};
 use super::variables::{Variables, variables};
 use super::{RECORD, remove_record};
-use crate::module::description::OpenedPort;
 use crate::module::description::{Description, ReadyWithoutCheck, RestartOn, Runs, UnitKind};
 use crate::module::operations::{Keeping, Operations, PartlyRemoved, Removing, UnitPlace};
-use crate::module::settings::{Destination, Keeps, MapValues, Operate, Slot, each, maybe};
+use crate::module::settings::{
+    Destination, FromPlan, Keeps, MapValues, Operate, Slot, each, maybe,
+};
 use crate::module::want::{PathUse, Want};
 use crate::module::{Cx, Module};
 
@@ -68,10 +69,11 @@ impl<V> MapValues for ProcessSettings<V> {
     }
 }
 
-/// A process runs on the host and publishes nothing, so no port is opened
-/// for it.
+/// A process takes nothing more from the plan: it runs on the host and
+/// publishes nothing, so no port is opened for it, and nothing of it runs
+/// once it has left the plan that would wait for what it needs.
 impl Operate for ProcessSettings<Filled> {
-    fn operate(self, _: Vec<OpenedPort<Filled>>) -> Operations {
+    fn operate(self, _: FromPlan) -> Operations {
         Operations::Running(Arc::new(self))
     }
 }

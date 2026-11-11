@@ -76,21 +76,12 @@ impl Settled {
     /// How `planned` stands: on the units it needs, and on the units it
     /// waits for with `after` that come up, which need only have settled.
     pub fn standing(&self, planned: &PlannedUnit) -> Standing {
-        let mut failed = BTreeSet::new();
-        let mut waiting = Vec::new();
-        for need in &planned.needs {
-            match self.units.get(&need.unit) {
-                Some(Settles::Ready) => {}
-                Some(Settles::Failed) => {
-                    failed.insert(need.unit.clone());
-                }
-                Some(Settles::Blocked(by)) => failed.extend(by.iter().cloned()),
-                None => waiting.push(need.unit.clone()),
-            }
-        }
-        if !failed.is_empty() {
-            return Standing::Blocked(failed);
-        }
+        let needs = planned.needs.iter().map(|need| need.unit.as_str());
+        let mut waiting = match self.standing_on(needs) {
+            Standing::Clear => Vec::new(),
+            Standing::Waiting(waiting) => waiting,
+            blocked @ Standing::Blocked(_) => return blocked,
+        };
         for after in planned.after.iter().filter(|after| after.comes_up) {
             if !self.units.contains_key(&after.unit) {
                 waiting.push(after.unit.clone());
@@ -99,6 +90,27 @@ impl Settled {
         match waiting.is_empty() {
             true => Standing::Clear,
             false => Standing::Waiting(waiting),
+        }
+    }
+
+    /// How whatever needs `needs` stands on them.
+    pub fn standing_on<'a>(&self, needs: impl IntoIterator<Item = &'a str>) -> Standing {
+        let mut failed = BTreeSet::new();
+        let mut waiting = Vec::new();
+        for need in needs {
+            match self.units.get(need) {
+                Some(Settles::Ready) => {}
+                Some(Settles::Failed) => {
+                    failed.insert(need.to_string());
+                }
+                Some(Settles::Blocked(by)) => failed.extend(by.iter().cloned()),
+                None => waiting.push(need.to_string()),
+            }
+        }
+        match (failed.is_empty(), waiting.is_empty()) {
+            (false, _) => Standing::Blocked(failed),
+            (true, true) => Standing::Clear,
+            (true, false) => Standing::Waiting(waiting),
         }
     }
 }
@@ -113,16 +125,18 @@ impl Standing {
                 State::Waiting,
                 format!("for {}", quoted_list(units)),
             )),
-            Standing::Blocked(failed) => {
-                let failed: Vec<&String> = failed.iter().collect();
-                let verb = if failed.len() == 1 { "has" } else { "have" };
-                Some(UnitState::new(
-                    State::Waiting,
-                    format!("blocked: {} {verb} failed", quoted_list(failed)),
-                ))
-            }
+            Standing::Blocked(failed) => Some(UnitState::new(
+                State::Waiting,
+                format!("blocked: {}", have_failed(failed)),
+            )),
         }
     }
+}
+
+/// That `failed` have failed, as a person reads it.
+pub fn have_failed(failed: &BTreeSet<String>) -> String {
+    let verb = if failed.len() == 1 { "has" } else { "have" };
+    format!("{} {verb} failed", quoted_list(failed))
 }
 
 #[cfg(test)]

@@ -6,11 +6,12 @@ settings:
 units:
   token: { uses: secret, with: { kind: password } }
   holder:
-    doc: Runs until it is stopped, and says which process it is, so that an undo can tell whether it still runs.
+    doc: Runs until it is stopped, and says which process it is, so that an undo can tell whether it still runs; it is ready once it has said so.
     uses: process
     with:
-      command: [sh, -c, "echo $$ > \"$STATE/holder.pid\"; trap 'exit 0' TERM; sleep 3600 & wait"]
+      command: [sh, -c, "echo $$ > \"$STATE/holder.pid\"; echo holding; trap 'exit 0' TERM; sleep 3600 & wait"]
       env: { STATE: "${environment.state}" }
+    ready: { log: holding, within: 2m }
   made:
     doc: Makes a file beside the stack, and removes it once it leaves the plan.
     uses: command

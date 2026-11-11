@@ -26,10 +26,10 @@ use crate::value::Filled;
 use super::mounts::{self, Mount, Source};
 use super::variables::Variables;
 use crate::module::description::{
-    Concern, Description, OpenedPort, ReadyWithoutCheck, RestartOn, Runs, UnitKind,
+    Concern, Description, ReadyWithoutCheck, RestartOn, Runs, UnitKind,
 };
 use crate::module::operations::{self, Failure, Operations, UnitPlace};
-use crate::module::settings::{MapValues, Operate, each, each_named, maybe};
+use crate::module::settings::{FromPlan, MapValues, Operate, each, each_named, maybe};
 use crate::module::{Cx, Module};
 use unit::ContainerUnit;
 
@@ -244,11 +244,13 @@ impl<V> MapValues for ContainerSettings<V> {
     }
 }
 
+/// A container takes from the plan the ports it opens for it. Nothing of it
+/// runs once it has left the plan that would wait for what it needs.
 impl Operate for ContainerSettings<Filled> {
-    fn operate(self, opened: Vec<OpenedPort<Filled>>) -> Operations {
+    fn operate(self, from_plan: FromPlan) -> Operations {
         Operations::Running(Arc::new(ContainerUnit {
             settings: self,
-            opened,
+            opened: from_plan.opened,
         }))
     }
 }

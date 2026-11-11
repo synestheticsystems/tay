@@ -1,11 +1,12 @@
 //! What a command with `when_removed: undo` keeps once it is done, so that
 //! its `undo` can run when the unit is no longer in the plan, with what the
-//! unit last ran with: the `undo`, where it runs, and its environment. A
-//! variable that holds a secret is kept with the secrets, readable by this
-//! account only; the rest in the unit's own folder. It is found and run by
-//! the unit's place alone, whatever the plan holds, so that whatever comes
-//! to run it, a plan that no longer has the unit or anything else, finds
-//! it.
+//! unit last ran with: the `undo`, where it runs, its environment, and the
+//! names of the units that run that the unit needed, which the `undo` waits
+//! for. A variable that holds a secret is kept with the secrets, readable
+//! by this account only; the rest in the unit's own folder. It is found and
+//! run by the unit's place alone, whatever the plan holds, so that whatever
+//! comes to run it, a plan that no longer has the unit or anything else,
+//! finds it.
 
 use std::collections::BTreeMap;
 use std::io;
@@ -53,6 +54,12 @@ struct Kept {
     env: Vec<(String, String)>,
     /// The names of the variables that hold a secret.
     secret_env: Vec<String>,
+    /// The units that run that the unit needed, which the `undo` waits
+    /// for. An `undo` kept by a tay that kept none is read as needing
+    /// none, and so runs at once, as that tay would have run it: it is
+    /// not refused for what it could not have kept.
+    #[serde(default)]
+    needs: Vec<String>,
 }
 
 /// Where an `undo` runs.
@@ -73,11 +80,12 @@ enum RunsIn {
 type Secrets = BTreeMap<String, String>;
 
 impl Kept {
-    /// What `undo` needs, run as `steps` say, and the values of the
-    /// variables that hold a secret.
+    /// What `undo` needs, run as `steps` say once `needs` are up, and the
+    /// values of the variables that hold a secret.
     fn of(
         undo: &RunForm<Filled>,
         steps: &StepSettings<Filled>,
+        needs: &[String],
     ) -> Result<(Kept, Secrets), Failure> {
         let runs = match steps.where_it_runs() {
             Where::Host => RunsIn::Host,
@@ -106,6 +114,7 @@ impl Kept {
                 .transpose()?,
             env,
             secret_env: secrets.keys().cloned().collect(),
+            needs: needs.to_vec(),
         };
         Ok((kept, secrets))
     }
@@ -149,14 +158,16 @@ impl Kept {
     }
 }
 
-/// Keeps what `undo` needs, run as `steps` say, for the unit at `place`, as
-/// it is filled now, in place of what was kept before.
+/// Keeps what `undo` needs, run as `steps` say once `needs`, the units that
+/// run that the unit needed, are up, for the unit at `place`, as it is
+/// filled now, in place of what was kept before.
 pub fn keep(
     place: &UnitPlace,
     undo: &RunForm<Filled>,
     steps: &StepSettings<Filled>,
+    needs: &[String],
 ) -> Result<(), Failure> {
-    let (kept, secrets) = Kept::of(undo, steps)?;
+    let (kept, secrets) = Kept::of(undo, steps, needs)?;
     // The secrets go first, so that what is kept never names one that is
     // not.
     let secrets_path = secrets_path(place);
@@ -204,6 +215,13 @@ pub fn units(environment: &Environment) -> Result<Vec<String>, Failure> {
     }
     kept.sort();
     Ok(kept.into_iter().rev().map(|(_, unit)| unit).collect())
+}
+
+/// The units that run that the unit at `place` needed when its `undo` was
+/// kept, which the `undo` waits for.
+pub fn needs(place: &UnitPlace) -> Result<Vec<String>, Failure> {
+    let kept: Kept = read(&kept_path(place))?.ok_or(KeptUndoError::NotKept)?;
+    Ok(kept.needs)
 }
 
 /// Runs the `undo` kept for the unit at `place`, where it ran and with what
@@ -290,19 +308,21 @@ mod tests {
     fn what_an_undo_needs_is_had_again_as_it_was_kept_and_its_secrets_apart() {
         let undo = RunForm::Shell(Filled::text("rm -rf /data/*"));
         let steps = own();
-        let (kept, secrets) = Kept::of(&undo, &steps).unwrap();
+        let needs = ["db".to_string()];
+        let (kept, secrets) = Kept::of(&undo, &steps, &needs).unwrap();
         let written = json(&kept);
         assert!(!written.contains("hunter2"), "{written}");
         assert_eq!(secrets["TOKEN"], "hunter2");
         let read: Kept = serde_json::from_str(&written).unwrap();
         assert_eq!(read, kept);
+        assert_eq!(read.needs, needs);
         let (again, filled) = read.filled(&secrets).unwrap();
         assert_eq!(
             filled_run_form(&again, "`undo`").unwrap(),
             ["/bin/sh", "-c", "rm -rf /data/*"]
         );
         // What it is had again as runs where it ran, with what it ran with.
-        assert_eq!(Kept::of(&again, &filled).unwrap(), (kept, secrets));
+        assert_eq!(Kept::of(&again, &filled, &needs).unwrap(), (kept, secrets));
         assert!(
             matches!(filled.where_it_runs(), Where::Own(image) if image.reveal() == "alpine:3")
         );
@@ -311,8 +331,17 @@ mod tests {
     }
 
     #[test]
+    fn an_undo_kept_without_what_it_needed_is_read_as_needing_nothing() {
+        let (kept, _) = Kept::of(&RunForm::Argv(vec![Filled::text("true")]), &own(), &[]).unwrap();
+        let mut written: serde_json::Value = serde_json::from_str(&json(&kept)).unwrap();
+        written.as_object_mut().unwrap().remove("needs").unwrap();
+        let read: Kept = serde_json::from_value(written).unwrap();
+        assert_eq!(read, kept);
+    }
+
+    #[test]
     fn a_secret_that_is_not_kept_is_said_by_name() {
-        let (kept, _) = Kept::of(&RunForm::Argv(vec![Filled::text("true")]), &own()).unwrap();
+        let (kept, _) = Kept::of(&RunForm::Argv(vec![Filled::text("true")]), &own(), &[]).unwrap();
         let missing = kept.filled(&Secrets::new()).unwrap_err().to_string();
         assert_eq!(
             missing,

@@ -5,12 +5,6 @@
 //! something left where units run that its plan does not list, as it does
 //! when the definitions changed while no daemon ran. A container of such a
 //! unit that has ended is left too, and goes the same way.
-//!
-//! A unit that keeps an `undo` to run, as a command done with
-//! `when_removed: undo` does, has it run at a `tay up` whose plan no longer
-//! has it, before anything else the plan no longer has is stopped, so that
-//! what it needs is still up; then it is forgotten. One whose `undo` fails
-//! is said so, and its `undo` is kept and run again at the next `tay up`.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -20,8 +14,7 @@ use tokio::task::JoinSet;
 use super::check::CheckedState;
 use super::state::{State, UnitState};
 use super::supervisor::Supervisor;
-use crate::module::{self, Runs};
-use crate::plan::PlannedUnit;
+use crate::module::Runs;
 
 /// What a unit the plan does not have is while something of it is left: it
 /// cannot become ready, and the change that ends it is the next `tay up`.
@@ -35,58 +28,6 @@ pub async fn find_unplanned(supervisor: &Supervisor) -> Result<(), String> {
         supervisor.take_in_unplanned(&unit, runs, UnitState::new(State::Failed, STILL_LEFT));
     }
     Ok(())
-}
-
-/// The units that keep an `undo` to run and that `plan`, the units of the
-/// plan, does not have: the last kept first.
-pub fn undos_owed(
-    supervisor: &Supervisor,
-    plan: &[Arc<PlannedUnit>],
-) -> Result<Vec<String>, String> {
-    let kept = module::units_keeping_an_undo(&supervisor.environment)
-        .map_err(|failure| failure.to_string())?;
-    Ok(kept
-        .into_iter()
-        .filter(|unit| !plan.iter().any(|planned| planned.name == *unit))
-        .collect())
-}
-
-/// Runs the `undo` each of `owed` keeps, one after another in their order,
-/// each saying what came of it: once it has run the unit is forgotten,
-/// and one that fails stays kept for the next `tay up`. What of a unit
-/// still runs, as of a command that was running when it left the plan, is
-/// stopped before its `undo` runs, so that nothing of it goes on after its
-/// work is undone.
-pub async fn undo_unplanned(supervisor: &Arc<Supervisor>, owed: &[String]) {
-    let again = "the next `tay up` runs it again";
-    for unit in owed {
-        let running = supervisor
-            .snapshot()
-            .unplanned(unit)
-            .map(|unplanned| unplanned.runs.clone());
-        if let Some(runs) = running
-            && let Err(why) = supervisor.stop(unit, &runs).await
-        {
-            let reason = format!(
-                "it is not in the plan any more, and could not be stopped for its `undo` to run: {why}; {again}"
-            );
-            supervisor.say(unit, UnitState::new(State::Failed, reason));
-            continue;
-        }
-        let undoing = "it is not in the plan any more, so its `undo` runs";
-        supervisor.say(unit, UnitState::new(State::Starting, undoing));
-        let state = match module::run_kept_undo(&supervisor.place(unit)).await {
-            Ok(()) => UnitState::new(
-                State::Stopped,
-                "it is not in the plan any more, and its `undo` has run",
-            ),
-            Err(why) => UnitState::new(
-                State::Failed,
-                format!("it is not in the plan any more, and {why}: {again}"),
-            ),
-        };
-        supervisor.say(unit, state);
-    }
 }
 
 /// Stops every unit the plan does not have of which something is left, each

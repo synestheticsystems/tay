@@ -8,7 +8,8 @@ mod values;
 
 use crate::definition::Check;
 use crate::module::{
-    Duration, Module, OpenedPort, Operations, ReadyWithoutCheck, RestartOn, Settings, UnitKind,
+    Duration, FromPlan, Module, OpenedPort, Operations, ReadyWithoutCheck, RestartOn, Settings,
+    UnitKind,
 };
 use crate::value::{Filled, Placeholder, Unfilled, Value};
 
@@ -105,6 +106,10 @@ pub struct PlannedMechanism {
     /// The files tay knows of that its settings use: what it is started
     /// from beside them.
     pub files: Vec<UsedFile>,
+    /// The units that run that it needs, a group standing for those it
+    /// needs in turn, in the order units start in. What a unit that is made
+    /// gives it is in its values already.
+    pub needs_that_run: Vec<String>,
 }
 
 /// A file a unit uses that tay knows of: one a unit that is made writes,
@@ -118,9 +123,9 @@ pub struct UsedFile {
 }
 
 impl PlannedMechanism {
-    /// The unit's operations, from its settings and the ports the plan opens
-    /// for it, every placeholder filled by `fill`; why a value could not be
-    /// filled, when one cannot.
+    /// The unit's operations, from its settings, the ports the plan opens
+    /// for it and the units that run that it needs, every placeholder
+    /// filled by `fill`; why a value could not be filled, when one cannot.
     pub fn operations(
         &self,
         fill: &mut dyn FnMut(&Placeholder) -> Result<Filled, Unfilled>,
@@ -135,7 +140,11 @@ impl PlannedMechanism {
                 });
             }
         }
-        self.settings.fill(opened, fill)
+        let from_plan = FromPlan {
+            opened,
+            needs_that_run: self.needs_that_run.clone(),
+        };
+        self.settings.fill(from_plan, fill)
     }
 }
 

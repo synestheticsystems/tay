@@ -366,13 +366,14 @@ impl CommandSettings<Filled> {
         })
     }
 
-    /// Keeps what its `undo` needs, as it ran now, when the `undo` is to
-    /// run once the unit leaves the plan; forgets what was kept for an
-    /// earlier one otherwise, as when `when_removed` was changed to `keep`.
+    /// Keeps what its `undo` needs, as it ran now and with the units that
+    /// run that it needed, when the `undo` is to run once the unit leaves
+    /// the plan; forgets what was kept for an earlier one otherwise, as
+    /// when `when_removed` was changed to `keep`.
     fn keep_undo(&self, place: &UnitPlace) -> Result<(), Failure> {
         match (&self.undo, self.when_removed) {
             (Some(undo), WhenRemoved::Undo) if self.keeps => {
-                kept_undo::keep(place, undo, &self.steps)
+                kept_undo::keep(place, undo, &self.steps, &self.needs_that_run)
             }
             _ => kept_undo::forget(place),
         }

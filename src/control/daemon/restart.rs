@@ -78,6 +78,7 @@ impl Daemon {
                 &restarting.with_needs,
                 &named,
                 Outdated::Replace,
+                None,
                 &mut |decision| conclude(&change, Event::Decided(decision)),
             )
             .await;

@@ -134,6 +134,7 @@ impl<'s> Planner<'s> {
                 .map(|mounted| mounted.unit.name.clone())
                 .collect(),
             files: files.into_values().collect(),
+            needs_that_run: Vec::new(),
         })
     }
 

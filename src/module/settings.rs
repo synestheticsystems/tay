@@ -49,21 +49,32 @@ pub trait Keeps {
 /// plan holds for the unit without knowing its module.
 pub trait Settings: Keeps + fmt::Debug + Send + Sync {
     /// The unit's operations, from these settings with every placeholder
-    /// filled by `fill`, and the ports the plan opens for it, filled
-    /// already; why a value could not be filled, when one cannot.
+    /// filled by `fill`, and what the plan gives the unit beside them,
+    /// filled already; why a value could not be filled, when one cannot.
     fn fill(
         &self,
-        opened: Vec<OpenedPort<Filled>>,
+        from_plan: FromPlan,
         fill: &mut dyn FnMut(&Placeholder) -> Result<Filled, Unfilled>,
     ) -> Result<Operations, Unfilled>;
+}
+
+/// What the plan gives a unit beside its module's own settings.
+pub struct FromPlan {
+    /// The ports the plan opens for it, which only a unit in a container of
+    /// its own has.
+    pub opened: Vec<OpenedPort<Filled>>,
+    /// The units that run that it needs, a group standing for those it
+    /// needs in turn: what must be up for it to run, beside the values it
+    /// is given.
+    pub needs_that_run: Vec<String>,
 }
 
 /// A module's own settings for one unit with every value filled, made into
 /// the unit's operations.
 pub trait Operate {
-    /// The unit's operations, with the ports the plan opens for it, which
-    /// only a unit in a container of its own has.
-    fn operate(self, opened: Vec<OpenedPort<Filled>>) -> Operations;
+    /// The unit's operations, with what the plan gives it beside its
+    /// settings.
+    fn operate(self, from_plan: FromPlan) -> Operations;
 }
 
 /// A module's settings, of any stage, which can be rebuilt with each value
@@ -113,10 +124,10 @@ where
 {
     fn fill(
         &self,
-        opened: Vec<OpenedPort<Filled>>,
+        from_plan: FromPlan,
         fill: &mut dyn FnMut(&Placeholder) -> Result<Filled, Unfilled>,
     ) -> Result<Operations, Unfilled> {
-        Ok(filled(self, fill)?.operate(opened))
+        Ok(filled(self, fill)?.operate(from_plan))
     }
 }
 

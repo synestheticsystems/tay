@@ -119,6 +119,12 @@ pub fn units_keeping_an_undo(environment: &Environment) -> Result<Vec<String>, F
     command::kept_undo::units(environment)
 }
 
+/// The units that run that the unit at `place` needed when it kept its
+/// `undo`, which the `undo` waits for.
+pub fn kept_undo_needs(place: &UnitPlace) -> Result<Vec<String>, Failure> {
+    command::kept_undo::needs(place)
+}
+
 /// Runs the `undo` the unit at `place` keeps, where it ran and with what it
 /// last ran with; once it has run, the unit is forgotten.
 pub async fn run_kept_undo(place: &UnitPlace) -> Result<(), Failure> {

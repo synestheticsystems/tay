@@ -6,7 +6,7 @@ use super::change::Change;
 use super::{Daemon, log, options, planned};
 use crate::control::protocol::{Event, UpRequest};
 use crate::disk::{Asked, Intent};
-use crate::engine::{self, Decision, Outdated};
+use crate::engine::{self, Decision, Leaving, Outdated, Telling};
 use crate::module::Occasion;
 use crate::plan::{Options, Plan, PlannedUnit};
 
@@ -39,11 +39,11 @@ impl Daemon {
         }
     }
 
-    /// Brings `plan` up as `tay up` does: what a unit the plan no longer
-    /// has keeps to undo is undone first, then what runs and the plan no
-    /// longer has is stopped, and then every unit of the plan is brought
-    /// up, telling `change`'s followers each change of state and the
-    /// decision; then the change is over.
+    /// Brings `plan` up as `tay up` does: what the plan no longer has
+    /// leaves first, its `undo`s run once what they wait for is ready and
+    /// what runs of it stopped, and every unit of the plan is brought up,
+    /// telling `change`'s followers each change of state and the decision;
+    /// then the change is over.
     pub(super) async fn bring_up_plan(&self, change: &Arc<Change>, plan: Plan) {
         let asked = plan.up.clone();
         let production = plan.production;
@@ -70,18 +70,12 @@ impl Daemon {
         let mut said: Vec<String> = units.iter().map(|unit| unit.name.clone()).collect();
         let snapshot = self.supervisor.snapshot();
         let unplanned = snapshot.each_unplanned().map(|unplanned| &unplanned.name);
-        for unit in unplanned.chain(&owed) {
+        for unit in unplanned.chain(owed.iter().map(|owed| &owed.unit)) {
             if !said.contains(unit) {
                 said.push(unit.clone());
             }
         }
         change.say(Event::Units { units: said });
-        // What a unit the plan no longer has undoes is undone while what it
-        // needs is still up; then what runs and the plan no longer has is
-        // stopped, so that nothing it holds is in the way of what the plan
-        // brings up.
-        engine::undo_unplanned(&self.supervisor, &owed).await;
-        engine::stop_unplanned(&self.supervisor).await;
         // A production profile refuses a unit with `watch`, and nothing on
         // a server is watched in any case.
         if !production {
@@ -89,10 +83,16 @@ impl Daemon {
                 change.say(Event::Notice { notice });
             }
         }
+        let leaving = Leaving::new(&self.supervisor, &units, owed);
         let settled = self
-            .settle(change, &units, &asked, Outdated::Replace, &mut |decision| {
-                conclude(change, Event::Decided(decision));
-            })
+            .settle(
+                change,
+                &units,
+                &asked,
+                Outdated::Replace,
+                Some(leaving),
+                &mut |decision| conclude(change, Event::Decided(decision)),
+            )
             .await;
         self.end(change, settled);
     }
@@ -157,30 +157,33 @@ impl Daemon {
 
     /// Brings up `units`, in their order, until each has settled, doing
     /// with a unit that runs from other settings what `outdated` says, and
-    /// telling `change`'s followers each change of state; once it is
-    /// decided whether everything in `asked` is ready, the decision goes to
-    /// `decided`. Why the change came to no decision though nothing
-    /// cancelled it, when it did not.
+    /// first, with `leaving`, what it says, telling `change`'s followers
+    /// each change of state; once it is decided whether everything in
+    /// `asked` is ready, the decision goes to `decided`. Why the change
+    /// came to no decision though nothing cancelled it, when it did not.
     pub(super) async fn settle(
         &self,
         change: &Arc<Change>,
         units: &[Arc<PlannedUnit>],
         asked: &[String],
         outdated: Outdated,
+        leaving: Option<Leaving>,
         decided: &mut (dyn FnMut(Decision) + Send),
     ) -> Result<(), String> {
-        let mut logged = |decision: Decision| {
-            log(&format!("{}: {}", change.describe(), words(&decision)));
-            decided(decision);
+        let mut told = |telling: Telling| match telling {
+            Telling::Decided(decision) => {
+                log(&format!("{}: {}", change.describe(), words(&decision)));
+                decided(decision);
+            }
+            Telling::Notice(notice) => change.say(Event::Notice { notice }),
         };
-        let mut noticed = |notice: String| change.say(Event::Notice { notice });
         let decided = engine::bring_up(
             &self.supervisor,
             units,
             asked,
             outdated,
-            &mut logged,
-            &mut noticed,
+            leaving,
+            &mut told,
             change.cancelled(),
         )
         .await;
