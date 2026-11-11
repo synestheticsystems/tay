@@ -362,7 +362,7 @@ ready: { log: "listening on", within: 1m }
 ```
 
 - One check per unit: `http` (any 2xx answer), `tcp` (a connection opens), `command` (exits 0), or `log` (a line matches). `within` is the time allowed, as a number with `s`, `m` or `h`, and is required.
-- `http` and `tcp` checks are made by tay from the host, so the endpoint they use is seen from the host. For a `container`, a `command` check runs inside the container.
+- `http` and `tcp` checks are made by tay from the host, so the endpoint they use is seen from the host. For a `container`, a `command` check runs inside the container. *An `http` check of an `https` address is not built yet: it is an error where the address is known when the stack is read, and fails the unit as it starts where it is known only then.*
 - With no `ready`: a `command` is ready when it exits 0; a `port`, `file` or `secret` is ready when it exists; a `container` is ready when its image's own health check passes, or when it has started if the image has none; a `process` is ready when it has started.
 - `restart` is `{ on: failure | always | never, attempts: N }`. Default: `failure` for `process` and `container`, `never` for everything else. `attempts` defaults to 5.
 
