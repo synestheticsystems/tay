@@ -161,6 +161,13 @@ units:
       command: [sh, -c, "echo owner $(stat -c %u /data); trap 'exit 0' TERM; sleep 3600 & wait"]
       volumes: { data: { to: /data, owner: 4321 } }
 
+  unowned:
+    doc: Owns a volume for user 4321, and is built from an image with no `chown` to give it one.
+    uses: container
+    with:
+      build: { context: ./no-chown }
+      volumes: { data: { to: /data, owner: 4321 } }
+
   shaped:
     doc: Says how its container is shaped by the settings Docker is given.
     uses: container

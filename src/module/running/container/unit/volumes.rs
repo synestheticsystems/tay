@@ -6,6 +6,8 @@
 //!
 //! A volume is given to its owner by a container made for that alone from
 //! the unit's own image, which runs `chown` on it as root and is removed.
+//! An image with no `chown` cannot give it, and a command unit of the stack
+//! must: tay brings no image of its own to do it.
 
 use bollard::models::{ContainerCreateBody, HostConfig, Mount, MountType};
 
@@ -17,6 +19,10 @@ use crate::value::Filled;
 
 /// Where a volume is mounted in the container that gives it to its owner.
 const OWNED_AT: &str = "/tay-volume";
+
+/// What Docker says, as it starts a container, of a program the container's
+/// image does not have: Docker's own command line tells that case by it.
+const NO_SUCH_PROGRAM: &str = "executable file not found";
 
 #[derive(Debug, thiserror::Error)]
 enum VolumeError {
@@ -32,6 +38,10 @@ enum VolumeError {
         owner: i64,
         how: String,
     },
+    #[error(
+        "its image has no `chown`, so tay cannot give its volume `{volume}` to its owner {owner}: a `command` unit of the stack must do that instead"
+    )]
+    NoChown { volume: String, owner: i64 },
 }
 
 /// Makes the volumes `settings` owns that are missing, each given to its
@@ -63,11 +73,17 @@ pub async fn make(
         // it again.
         if let Err(failure) = give(docker, &owner, place, image, &name, user).await {
             docker.remove_volume(id, &name).await?;
+            let volume = volume.name.name.clone();
             return Err(match failure {
                 Given::Ended(how) => VolumeError::NotOwned {
-                    volume: volume.name.name.clone(),
+                    volume,
                     owner: user,
                     how,
+                }
+                .into(),
+                Given::NoChown => VolumeError::NoChown {
+                    volume,
+                    owner: user,
                 }
                 .into(),
                 Given::Docker(error) => error.into(),
@@ -94,6 +110,8 @@ pub async fn make(
 enum Given {
     /// What gives it ended so.
     Ended(String),
+    /// The unit's image has no `chown`.
+    NoChown,
     Docker(DockerError),
 }
 
@@ -142,7 +160,10 @@ async fn give(
         Ok(()) => docker.wait(&giving).await,
         Err(DockerError::Refused { why, .. }) => {
             docker.remove(giving).await?;
-            return Err(Given::Ended(format!("could not be started: {why}")));
+            return Err(match why.contains(NO_SUCH_PROGRAM) {
+                true => Given::NoChown,
+                false => Given::Ended(format!("could not be started: {why}")),
+            });
         }
         Err(error) => Err(error),
     };

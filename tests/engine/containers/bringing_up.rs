@@ -167,3 +167,18 @@ fn a_volume_is_made_and_given_to_its_owner() {
     // What gave it to its owner is gone.
     assert!(crate::docker::inspect(&format!("tay-{id}-owned.owner")).is_none());
 }
+
+#[test]
+fn a_volume_whose_unit_has_an_image_with_no_chown_is_not_given_and_says_so() {
+    let machine = Machine::with_docker();
+    let root = machine.stack("containers");
+    let up = machine.at(&root, "up", &["unowned"]);
+    assert_eq!(up.code, 1, "{}{}", up.stdout, up.stderr);
+    assert_eq!(
+        up.last_change("unowned"),
+        "failed its image has no `chown`, so tay cannot give its volume `data` to its owner 4321: a `command` unit of the stack must do that instead"
+    );
+    // The volume it made for it holds nothing, and is gone again.
+    let id = machine.id(&root);
+    assert!(crate::docker::inspect(&format!("tay-{id}-unowned.data")).is_none());
+}
