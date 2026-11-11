@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use crate::diagnostic::source::Loc;
 use crate::syntax::names::NameAt;
 
-pub use choices::{Choices, Places, Profile};
+pub use choices::{Choices, EnvironmentFile, Places, Profile};
 pub use setting::{SettingDecl, SettingValue, Written};
 pub use unit::{
     Action, Arg, Body, Check, Endpoint, Give, GiveValue, Mechanism, Ready, Restart, Unit, Way,

@@ -6,15 +6,15 @@ pub mod discover;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::definition::{Choices, Profile, Unit};
+use crate::definition::{Profile, Unit};
 use crate::diagnostic::Diagnostics;
 use crate::diagnostic::source::{Loc, Sources};
 use crate::syntax::fields::{self, Fields};
 use crate::syntax::names::{self, NameAt};
 use crate::syntax::yaml::{self, Node};
 
+use super::choices;
 use super::unit::{self, template};
-use super::{choices, choices_file};
 
 pub struct Reader<'a> {
     root: &'a Path,
@@ -226,12 +226,16 @@ impl<'a> Reader<'a> {
         profiles
     }
 
-    /// The choices file at `path`, if there is one.
-    pub fn choices_file(&mut self, path: &Path) -> Option<Choices> {
+    /// The file at `path` read by `read`, if there is one.
+    pub fn optional<T>(
+        &mut self,
+        path: &Path,
+        read: fn(&Node, &mut Diagnostics) -> Option<T>,
+    ) -> Option<T> {
         if !path.is_file() {
             return None;
         }
         let node = self.parse(path)?;
-        choices_file(&node, self.d)
+        read(&node, self.d)
     }
 }

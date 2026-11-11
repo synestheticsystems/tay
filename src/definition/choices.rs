@@ -33,6 +33,14 @@ pub struct Choices {
     pub label: Option<String>,
 }
 
+/// This environment's own file, `.tay/choices.yaml`: its choices, and the
+/// profile it names, which no other file may.
+#[derive(Debug)]
+pub struct EnvironmentFile {
+    pub profile: Option<NameAt>,
+    pub choices: Choices,
+}
+
 /// Every place choices are written, in the order they are layered, later
 /// ones winning.
 #[derive(Debug)]

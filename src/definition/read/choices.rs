@@ -2,16 +2,19 @@
 //! `tay.yaml`, a profile, this person's own file, the environment's
 //! `.tay/choices.yaml`, and `--set`.
 
-use crate::definition::{Choices, Profile, SettingValue, Written};
+use crate::definition::{Choices, EnvironmentFile, Profile, SettingValue, Written};
 use crate::diagnostic::Diagnostics;
 use crate::diagnostic::source::{Loc, Sources};
 use crate::syntax::fields::{self, Fields};
 use crate::syntax::names::{self, NameAt};
 use crate::syntax::yaml::Node;
 
-const PROFILE: &[&str] = &[
+/// What a profile, this person's own file and the environment's file may
+/// say, each but for what another alone may.
+const FIELDS: &[&str] = &[
     "production",
     "require",
+    "profile",
     "up",
     "up_add",
     "up_remove",
@@ -20,11 +23,43 @@ const PROFILE: &[&str] = &[
     "label",
 ];
 
+/// Fields that only one place of choices may write, and that place.
+struct OnlyIn {
+    place: &'static str,
+    fields: &'static [&'static str],
+}
+
 /// What only a profile may say.
-const PROFILE_ONLY: &[&str] = &["production", "require"];
+const PROFILE_ONLY: OnlyIn = OnlyIn {
+    place: "a profile",
+    fields: &["production", "require"],
+};
+
+/// What only the environment's file may say: which profile is used. That
+/// file is kept when everything else the environment keeps is wiped, and a
+/// person's own file cannot choose a profile that decides whether it is
+/// read.
+const ENVIRONMENT_ONLY: OnlyIn = OnlyIn {
+    place: "the environment's file, `.tay/choices.yaml`",
+    fields: &["profile"],
+};
+
+impl OnlyIn {
+    /// An error at each of these fields that `file`, of another place,
+    /// writes.
+    fn refuse(&self, file: &Fields<'_>, d: &mut Diagnostics) {
+        for (field, key) in file.present() {
+            if self.fields.contains(&field) {
+                let message = format!("`{field}` may be written only in {}", self.place);
+                d.error(key.loc, message);
+            }
+        }
+    }
+}
 
 pub fn profile(name: NameAt, node: &Node, d: &mut Diagnostics) -> Option<Profile> {
-    let file = Fields::of(node, "a profile", PROFILE, d)?;
+    let file = Fields::of(node, "a profile", FIELDS, d)?;
+    ENVIRONMENT_ONLY.refuse(&file, d);
     let production = file
         .get("production")
         .and_then(|node| fields::boolean(node, "`production`", d)?.then_some(node.loc));
@@ -40,20 +75,25 @@ pub fn profile(name: NameAt, node: &Node, d: &mut Diagnostics) -> Option<Profile
     })
 }
 
-/// This person's own file or the environment's file. They have a profile's
-/// shape, but only a profile says whether it is a production one and what
-/// it requires.
-pub fn choices_file(node: &Node, d: &mut Diagnostics) -> Option<Choices> {
-    let file = Fields::of(node, "a choices file", PROFILE, d)?;
-    for (field, key) in file.present() {
-        if PROFILE_ONLY.contains(&field) {
-            d.error(
-                key.loc,
-                format!("`{field}` may be written only in a profile"),
-            );
-        }
-    }
+/// This person's own file. It has a profile's shape, but only a profile
+/// says whether it is a production one and what it requires, and only the
+/// environment's file which profile is used.
+pub fn personal_file(node: &Node, d: &mut Diagnostics) -> Option<Choices> {
+    let file = Fields::of(node, "a choices file", FIELDS, d)?;
+    PROFILE_ONLY.refuse(&file, d);
+    ENVIRONMENT_ONLY.refuse(&file, d);
     Some(choices(&file, d))
+}
+
+/// The environment's file, `.tay/choices.yaml`: a profile's shape but for
+/// what only a profile says, and which profile is used.
+pub fn environment_file(node: &Node, d: &mut Diagnostics) -> Option<EnvironmentFile> {
+    let file = Fields::of(node, "a choices file", FIELDS, d)?;
+    PROFILE_ONLY.refuse(&file, d);
+    Some(EnvironmentFile {
+        profile: (file.get("profile")).and_then(|node| fields::name(node, "`profile`", d)),
+        choices: choices(&file, d),
+    })
 }
 
 /// The stack's own defaults: `up` and `run` in `tay.yaml`.

@@ -11,7 +11,7 @@ mod version;
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::definition::{Places, Profile, Stack, Unit};
+use crate::definition::{Choices, EnvironmentFile, Places, Profile, Stack, Unit};
 use crate::diagnostic::source::{Loc, Sources};
 use crate::diagnostic::{Diagnostic, Diagnostics, quoted_list};
 use crate::disk::{Asked, Layout};
@@ -20,7 +20,6 @@ use crate::syntax::names::{self, NameAt, RESERVED_UNIT_NAMES};
 
 use files::Reader;
 
-pub use choices::choices_file;
 use choices::{assignment, named_units};
 pub use files::discover::{STACK_FILE, find_root};
 pub use version::{THIS_TAY, parse_version};
@@ -106,15 +105,31 @@ pub fn read(root: &Path, sources: &mut Sources, d: &mut Diagnostics) -> Outcome 
     }
 }
 
-/// Reads every place choices are written for the stack under `profile`, in
-/// the order they are layered: this person's own file in `home`, unless the
-/// profile is a production one, the environment's file, each `--set` that
-/// is asked, what the environment remembers first, and the units named.
-/// Gives whether every file in them parsed.
+/// Reads the environment's own file, `.tay/choices.yaml`, if there is one.
+/// It is read before every other place of choices, since it may say which
+/// profile is used, and so whether this person's own file is read. Gives
+/// whether it parsed.
+pub fn environment_file(
+    stack: &Stack,
+    sources: &mut Sources,
+    d: &mut Diagnostics,
+) -> (Option<EnvironmentFile>, bool) {
+    let mut reader = Reader::new(&stack.root, sources, d);
+    let path = Layout::of(&stack.root).choices();
+    let file = reader.optional(&path, choices::environment_file);
+    (file, reader.every_file_parsed)
+}
+
+/// Every place choices are written for the stack under `profile`, in the
+/// order they are layered: this person's own file in `home`, read unless
+/// the profile is a production one, the environment's choices, each `--set`
+/// that is asked, what the environment remembers first, and the units
+/// named. Gives whether every file read parsed.
 pub fn places<'s>(
     stack: &'s Stack,
     profile: Option<&'s Profile>,
     home: Option<&Path>,
+    environment: Option<Choices>,
     asked: &Asked,
     sources: &mut Sources,
     d: &mut Diagnostics,
@@ -125,11 +140,10 @@ pub fn places<'s>(
     let personal = match (home, &stack.name) {
         (Some(home), Some(name)) if !production => {
             let path = home.join(".config/tay").join(format!("{}.yaml", name.name));
-            reader.choices_file(&path)
+            reader.optional(&path, choices::personal_file)
         }
         _ => None,
     };
-    let environment = reader.choices_file(&Layout::of(&stack.root).choices());
     let every_file_parsed = reader.every_file_parsed;
     let sets = asked
         .sets

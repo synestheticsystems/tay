@@ -1,5 +1,6 @@
 //! What an environment was asked for stays asked: the profile, each `--set`
-//! and the units named on `tay up` are remembered, so that a later plain
+//! and the units named on `tay up` are remembered, the profile winning over
+//! the one the environment's own file names, so that a later plain
 //! `tay up`, a `tay status`, a `tay plan` and a daemon started afresh all
 //! see the same stack. A `tay up` hands the daemon only what it adds, which
 //! the daemon joins with what is remembered when it takes the change, so a
@@ -71,6 +72,41 @@ fn the_profile_and_each_set_are_remembered_by_every_later_command_and_daemon() {
     // `--profile` replaces the remembered profile.
     machine.at(&root, "up", &["--profile", "quiet"]);
     assert_eq!(greeting(&root), "hello, again\n");
+}
+
+#[test]
+fn the_profile_the_environments_file_names_outlives_a_wipe_and_the_command_line_wins() {
+    let machine = Machine::new();
+    let root = machine.stack("remembered");
+    fs::create_dir(root.join(".tay")).unwrap();
+    fs::write(root.join(".tay/choices.yaml"), "profile: loud\n").unwrap();
+    let up = machine.at(&root, "up", &[]);
+    assert_eq!(up.code, 0, "{}{}", up.stdout, up.stderr);
+    assert_eq!(greeting(&root), "HELLO, world\n");
+    // Everything else the environment keeps goes; its file stays, and with
+    // it the profile.
+    let wipe = machine.at(&root, "wipe", &["--all", "--yes"]);
+    assert_eq!(wipe.code, 0, "{}{}", wipe.stdout, wipe.stderr);
+    let up = machine.at(&root, "up", &[]);
+    assert_eq!(up.code, 0, "{}{}", up.stdout, up.stderr);
+    assert_eq!(greeting(&root), "HELLO, world\n");
+    let plan = machine.at(&root, "plan", &["--json"]).json();
+    assert_eq!(plan["plan"]["profile"], "loud");
+    // The command line wins, and is remembered.
+    let quiet = machine.at(&root, "up", &["--profile", "quiet"]);
+    assert_eq!(quiet.code, 0, "{}{}", quiet.stdout, quiet.stderr);
+    assert_eq!(greeting(&root), "hello, world\n");
+    let again = machine.at(&root, "up", &[]);
+    assert_eq!(again.code, 0, "{}{}", again.stdout, again.stderr);
+    assert_eq!(greeting(&root), "hello, world\n");
+    let status = machine.at(&root, "status", &[]);
+    assert!(
+        status
+            .stdout
+            .contains("  remembered: tay up --profile quiet\n"),
+        "{}",
+        status.stdout
+    );
 }
 
 #[test]

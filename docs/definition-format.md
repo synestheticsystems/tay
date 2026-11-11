@@ -396,7 +396,7 @@ What comes up, which way each unit runs, and the values of settings are choices.
 3. this person's own file (`~/.config/tay/<stack>.yaml`), read only when the profile is not a production one;
 4. this environment's file (`.tay/choices.yaml`), then what the environment remembers being asked for by earlier `tay up`s, and then each `--set` on the command line, in the order written.
 
-Which profile is used is itself chosen: by `--profile` on the command line, now or remembered from an earlier `tay up`; otherwise by `profile: <name>` in this environment's file; otherwise by the stack's `default_profile`. The environment's file is the one place a person writes it, because that file is kept when everything else the environment keeps is wiped: a server whose profile was only remembered would plan the default profile after `tay wipe --all`. Written in a profile or in a person's own file, `profile` is an error. *`profile` in the environment's file is not built yet.*
+Which profile is used is itself chosen: by `--profile` on the command line, now or remembered from an earlier `tay up`; otherwise by `profile: <name>` in this environment's file; otherwise by the stack's `default_profile`. The environment's file is the one place a person writes it, because that file is kept when everything else the environment keeps is wiped: a server whose profile was only remembered would plan the default profile after `tay wipe --all`. Written in a profile or in a person's own file, `profile` is an error.
 
 ```yaml
 # stack/profiles/dev.yaml

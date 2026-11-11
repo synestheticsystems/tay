@@ -1,0 +1,6 @@
+format: 1
+stack: misplaced
+default_profile: dev
+up: [app]
+units:
+  app: { uses: port }

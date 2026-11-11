@@ -1,6 +1,6 @@
 //! Choices layered across the stack, the profile, this person's own file, the
-//! environment's file and `--set`, later ones winning; and what a choice
-//! must give.
+//! environment's file and `--set`, later ones winning; what a choice must
+//! give; and the profile, which the environment's file alone may name.
 
 use crate::support::{fixture, given, plan_json, plan_with_home, unit, unit_names};
 
@@ -164,6 +164,37 @@ fn production_and_require_may_be_written_only_in_a_profile() {
             .find(|line| line.contains(&format!("`{field}` may be written only in a profile")));
         assert!(line.is_some(), "{errors:?}");
     }
+}
+
+#[test]
+fn the_environments_file_may_name_the_profile_and_the_command_line_wins() {
+    assert_eq!(plan_json("profile-written", &[])["profile"], "deploy");
+    let asked = plan_json("profile-written", &["--profile", "dev"]);
+    assert_eq!(asked["profile"], "dev");
+}
+
+#[test]
+fn a_profile_is_named_only_in_the_environments_file_and_must_exist() {
+    let run = plan_with_home(
+        "profile-misplaced",
+        &fixture("homes/profile-misplaced"),
+        &[],
+    );
+    assert_eq!(run.code, 2);
+    let errors = run.errors();
+    assert!(
+        errors.contains(&".tay/choices.yaml:1:10: there is no profile `staging`; the profiles are `deploy`, `dev`"),
+        "{errors:?}"
+    );
+    assert!(
+        errors.contains(&"stack/profiles/dev.yaml:2:1: `profile` may be written only in the environment's file, `.tay/choices.yaml`"),
+        "{errors:?}"
+    );
+    // This person's own file, which is not under the stack's root.
+    let personal = errors.iter().filter(|line| {
+        line.ends_with("misplaced.yaml:1:1: `profile` may be written only in the environment's file, `.tay/choices.yaml`")
+    });
+    assert_eq!(personal.count(), 1, "{errors:?}");
 }
 
 #[test]

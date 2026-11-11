@@ -78,11 +78,25 @@ pub fn plan(root: &Path, options: &Options, sources: &mut Sources, d: &mut Diagn
         read::Outcome::TooOld(reasons) => return Outcome::TooOld(reasons),
         read::Outcome::Unreadable => return Outcome::Errors,
     };
-    let profile = choose_profile(&stack, options.asked.profile.as_deref(), sources, d);
+    let (environment_file, environment_parsed) = read::environment_file(&stack, sources, d);
+    let (written_profile, environment_choices) = match environment_file {
+        Some(file) => (file.profile, Some(file.choices)),
+        None => (None, None),
+    };
+    let asked_profile = options.asked.profile.as_deref();
+    let profile = choose_profile(&stack, asked_profile, written_profile.as_ref(), sources, d);
     let production = profile.and_then(|profile| profile.production);
     let home = options.home.as_deref();
-    let (places, places_parsed) = read::places(&stack, profile, home, &options.asked, sources, d);
-    let every_file_parsed = every_file_parsed && places_parsed;
+    let (places, places_parsed) = read::places(
+        &stack,
+        profile,
+        home,
+        environment_choices,
+        &options.asked,
+        sources,
+        d,
+    );
+    let every_file_parsed = every_file_parsed && environment_parsed && places_parsed;
     let layered = choices::layer(places.in_order());
     // With a file that did not parse, the set of units is not known, and
     // every reference to a unit in it would be reported as missing; nor is
@@ -90,7 +104,8 @@ pub fn plan(root: &Path, options: &Options, sources: &mut Sources, d: &mut Diagn
     // A profile that is named and missing, or that must be named and is
     // not, has been reported, and what it would have said is not known.
     let profile_missing = profile.is_none()
-        && (options.asked.profile.is_some()
+        && (asked_profile.is_some()
+            || written_profile.is_some()
             || stack.default_profile.is_some()
             || stack.profiles.len() > 1);
     let action = match &options.action {
@@ -210,31 +225,43 @@ impl Planning<'_> {
     }
 }
 
-/// `--profile`, or the stack's default profile, or its only one.
+/// `--profile`, now or remembered, or the profile this environment's file
+/// names, or the stack's default profile, or its only one.
 fn choose_profile<'s>(
     stack: &'s Stack,
     asked: Option<&str>,
+    written: Option<&NameAt>,
     sources: &mut Sources,
     d: &mut Diagnostics,
 ) -> Option<&'s Profile> {
     let find = |name: &str| stack.profiles.iter().find(|p| p.name.name == name);
-    match (asked, &stack.default_profile) {
-        (Some(asked), _) => {
+    let none_called = |name: &str| {
+        format!(
+            "there is no profile `{name}`; the profiles are {}",
+            read::profile_list(&stack.profiles)
+        )
+    };
+    // The environment's file names a profile that exists, whether or not
+    // `--profile` overrules it.
+    let written = written.map(|name| {
+        let profile = find(&name.name);
+        if profile.is_none() {
+            d.error(name.loc, none_called(&name.name));
+        }
+        profile
+    });
+    match (asked, written, &stack.default_profile) {
+        (Some(asked), _, _) => {
             let profile = find(asked);
             if profile.is_none() {
                 let loc = Loc::new(sources.add_argument(&format!("--profile {asked}")), 1, 1);
-                d.error(
-                    loc,
-                    format!(
-                        "there is no profile `{asked}`; the profiles are {}",
-                        read::profile_list(&stack.profiles)
-                    ),
-                );
+                d.error(loc, none_called(asked));
             }
             profile
         }
-        (None, Some(default)) => find(&default.name),
-        (None, None) => match stack.profiles.as_slice() {
+        (None, Some(written), _) => written,
+        (None, None, Some(default)) => find(&default.name),
+        (None, None, None) => match stack.profiles.as_slice() {
             [only] => Some(only),
             _ => None,
         },

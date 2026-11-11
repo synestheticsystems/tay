@@ -153,7 +153,8 @@ command works through it as always.
 Options:
   --root FOLDER       look for tay.yaml from FOLDER instead of the current one
   --profile NAME      of plan and up: use this profile instead of the one
-                      remembered or the stack's default one
+                      remembered, the one .tay/choices.yaml names, or the
+                      stack's default one
   --set PLACE=VALUE   of plan and up: make one choice, after every other
                       place. PLACE is up, up_add, up_remove, run.default,
                       run.units.UNIT, settings.NAME or label; a list is
