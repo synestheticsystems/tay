@@ -60,7 +60,7 @@ fn commands_in_a_container_check_then_run_hand_on_their_values_and_leave_no_cont
     assert!(check < run, "{stamped}");
     // Its secret reached it through its environment, and what it gave of
     // it is kept as a secret.
-    let kept = std::fs::read_to_string(root.join(".tay/state/secrets/stamped")).unwrap();
+    let kept = std::fs::read_to_string(root.join(".tay/state/secrets/stamped.produced")).unwrap();
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(&kept).unwrap()["proof"],
         "32"

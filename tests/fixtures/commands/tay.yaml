@@ -49,3 +49,11 @@ units:
     with:
       run: ["${environment.root}/services/issue-once.sh", "${environment.state}/issued-once"]
       produces: [id]
+  minter:
+    doc: Mints a secret token once, which its check then finds done with no values written; its undo makes it not done.
+    uses: command
+    with:
+      check: ["${environment.root}/services/exists.sh", "${environment.state}/minted"]
+      run: { shell: "printf '{\"token\": \"minted\"}' > \"$TAY_VALUES\" && touch '${environment.state}/minted'" }
+      undo: [rm, -f, "${environment.state}/minted"]
+      produces: { token: { secret: true } }

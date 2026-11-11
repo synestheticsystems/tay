@@ -34,7 +34,7 @@ fn no_secret_appears_in_any_output_log_record_or_argument_list() {
     let up = machine.at(&root, "up", &[]);
     assert_eq!(up.code, 0, "{}{}", up.stdout, up.stderr);
     let password = kept(&root, "db-password", "value");
-    let token = kept(&root, "issuer", "token");
+    let token = kept(&root, "issuer.produced", "token");
     // Each reached the program, through its environment.
     let log = crate::harness::log(&root, "server");
     assert!(

@@ -248,7 +248,7 @@ fn not_one_of(setting: &'static str, found: &str, wanted: &[&str]) -> SecretErro
 
 /// The file the unit's secret is kept in.
 pub(super) fn path(place: &UnitPlace) -> PathBuf {
-    place.environment.layout.secrets().join(&place.unit)
+    place.environment.layout.generated_secret(&place.unit)
 }
 
 /// The secret stored at `path`; `None` when none is. One stored in a form

@@ -106,7 +106,7 @@ It keeps two facts about intent on disk: whether the environment is meant to be 
     intent                up or down
     asked                 the profile, the `--set`s and the units last asked for
     ports.json            the port numbers this environment keeps
-    secrets/              one file per secret, and the secrets of each kept undo; readable by this account only
+    secrets/              a file for each secret unit's value, for the secrets a command produced, and for those of a kept undo; readable by this account only
     files/<folder>/<name> what `file` units write
     units/<unit>/         one folder per unit that runs: its lock, its record, the values it produced,
                           a fingerprint of what it was started from, the undo it keeps,

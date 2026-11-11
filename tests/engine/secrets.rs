@@ -164,6 +164,41 @@ fn a_secret_whose_settings_change_is_kept_saying_so_and_wiping_it_makes_a_new_on
     assert_eq!(kept(&root, "notes-password"), made);
 }
 
+/// Brings up `token` of the stack `secret-ways` under the way `generated`,
+/// then under `command`, a way that is a command giving a value of the
+/// same name, then under `generated` again, and gives the secret kept at
+/// the start and at the end.
+fn kept_through(command: &str) -> (serde_json::Value, serde_json::Value) {
+    let machine = Machine::new();
+    let root = machine.stack("secret-ways");
+    let up = machine.at(&root, "up", &[]);
+    assert_eq!(up.last_change("token"), "ready generated");
+    let generated = kept(&root, "token");
+    let way = format!("run.default={command}");
+    let up = machine.at(&root, "up", &["--set", &way]);
+    assert_eq!(up.code, 0, "{}{}", up.stdout, up.stderr);
+    assert_eq!(
+        up.last_change("token"),
+        "ready done: it ran and exited with 0"
+    );
+    let up = machine.at(&root, "up", &["--set", "run.default=generated"]);
+    assert_eq!(up.code, 0, "{}{}", up.stdout, up.stderr);
+    assert_eq!(up.last_change("token"), "ready kept");
+    (generated, kept(&root, "token"))
+}
+
+#[test]
+fn a_secret_is_kept_through_its_units_way_changing_to_a_command_that_produces_one_and_back() {
+    let (start, end) = kept_through("minted");
+    assert_eq!(start, end);
+}
+
+#[test]
+fn a_secret_is_kept_through_its_units_way_changing_to_a_command_that_produces_none_and_back() {
+    let (start, end) = kept_through("issued");
+    assert_eq!(start, end);
+}
+
 #[test]
 fn a_secret_kept_in_a_form_tay_cannot_read_is_kept_and_fails_its_unit() {
     let machine = Machine::new();

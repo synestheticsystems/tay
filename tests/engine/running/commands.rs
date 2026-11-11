@@ -134,7 +134,7 @@ fn the_values_a_command_writes_are_kept_and_given_and_a_secret_one_with_the_secr
         kept.contains("\"id\": 42") && !kept.contains("tok-"),
         "{kept}"
     );
-    let secrets = root.join(".tay/state/secrets/issuer");
+    let secrets = root.join(".tay/state/secrets/issuer.produced");
     assert!(
         fs::read_to_string(&secrets)
             .unwrap()
@@ -185,5 +185,35 @@ fn a_run_that_writes_no_values_gives_none_though_an_earlier_one_did() {
     assert_eq!(
         second.last_change("once-values"),
         "failed done: it ran and exited with 0, but it gave no value for `id`, which it lists under `produces`"
+    );
+}
+
+#[test]
+fn a_command_found_done_whose_secret_values_are_not_kept_fails_and_wiping_it_runs_it_again() {
+    let machine = Machine::new();
+    let root = machine.stack("commands");
+    assert_eq!(machine.at(&root, "up", &["minter"]).code, 0);
+    let again = machine.at(&root, "up", &["minter"]);
+    assert_eq!(
+        again.last_change("minter"),
+        "ready done: its check exited with 0"
+    );
+    // Its secret value kept where an older tay kept it, which is not read.
+    let secrets = root.join(".tay/state/secrets");
+    fs::rename(secrets.join("minter.produced"), secrets.join("minter")).unwrap();
+    let up = machine.at(&root, "up", &["minter"]);
+    assert_eq!(up.code, 1, "{}", up.stdout);
+    assert_eq!(
+        up.last_change("minter"),
+        "failed done: its check exited with 0, but no value for `token` is kept from when it last ran: `tay wipe minter --yes` runs it again"
+    );
+    let wipe = machine.at(&root, "wipe", &["minter", "--yes"]);
+    assert_eq!(wipe.code, 0, "{}{}", wipe.stdout, wipe.stderr);
+    let up = machine.at(&root, "up", &["minter"]);
+    assert_eq!(up.code, 0, "{}{}", up.stdout, up.stderr);
+    assert!(
+        fs::read_to_string(secrets.join("minter.produced"))
+            .unwrap()
+            .contains("minted")
     );
 }

@@ -31,10 +31,6 @@ const KEPT: &str = "undo.json";
 /// The file that says why it last did not run, in the unit's own folder.
 const WAITS: &str = "undo-waits.txt";
 
-/// What the file of its secrets is named, after the unit's name, in the
-/// secrets folder: a unit's name has no dot, so it is no unit's own.
-const SECRETS: &str = "undo";
-
 #[derive(Debug, thiserror::Error)]
 enum KeptUndoError {
     #[error("nothing is kept of what its `undo` needs")]
@@ -270,11 +266,7 @@ fn waits_path(place: &UnitPlace) -> PathBuf {
 }
 
 fn secrets_path(place: &UnitPlace) -> PathBuf {
-    place
-        .environment
-        .layout
-        .secrets()
-        .join(format!("{}.{SECRETS}", place.unit))
+    place.environment.layout.undo_secrets(&place.unit)
 }
 
 fn json(value: &impl Serialize) -> String {

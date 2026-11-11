@@ -1,0 +1,19 @@
+format: 1
+stack: secret-ways
+up: [token]
+run: { default: generated }
+units:
+  token:
+    doc: A token generated and kept, or one a command gives, as a secret or not, by the way chosen.
+    run:
+      generated: { uses: secret, with: { kind: password } }
+      minted:
+        uses: command
+        with:
+          run: { shell: "printf '{\"value\": \"minted\"}' > \"$TAY_VALUES\"" }
+          produces: { value: { secret: true } }
+      issued:
+        uses: command
+        with:
+          run: { shell: "printf '{\"value\": \"issued\"}' > \"$TAY_VALUES\"" }
+          produces: [value]

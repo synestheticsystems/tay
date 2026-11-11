@@ -78,10 +78,32 @@ impl Layout {
         std::fs::create_dir_all(&state).map_err(DiskError::io(&state, "made"))
     }
 
-    /// `state/secrets/`: what the environment keeps that is secret, a file
-    /// for each unit that keeps any, readable by this account only.
-    pub fn secrets(&self) -> PathBuf {
+    /// `state/secrets/`: what the environment keeps that is secret,
+    /// readable by this account only: a `secret` unit's value, the values a
+    /// command produced that are secret, and the secrets of the `undo` a
+    /// command keeps, each in a file named after its unit. The three names
+    /// are given here alone, so that no two of them can come to be one
+    /// file: a unit's name has no dot, so a name with one is no `secret`
+    /// unit's own.
+    fn secrets(&self) -> PathBuf {
         self.state().join("secrets")
+    }
+
+    /// `state/secrets/<unit>`: the value a `secret` unit generated.
+    pub fn generated_secret(&self, unit: &str) -> PathBuf {
+        self.secrets().join(unit)
+    }
+
+    /// `state/secrets/<unit>.produced`: the values a command produced that
+    /// it declares secret.
+    pub fn produced_secrets(&self, unit: &str) -> PathBuf {
+        self.secrets().join(format!("{unit}.produced"))
+    }
+
+    /// `state/secrets/<unit>.undo`: the secrets the `undo` a command keeps
+    /// runs with.
+    pub fn undo_secrets(&self, unit: &str) -> PathBuf {
+        self.secrets().join(format!("{unit}.undo"))
     }
 
     /// `state/intent`: whether the environment is meant to be up.
