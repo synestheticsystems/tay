@@ -178,6 +178,8 @@ A daemon started while the definitions have errors cannot plan. It still finds w
 2. `run` runs, with `stdin` if given.
 3. The values it wrote to the file named by `TAY_VALUES` are kept; one declared secret goes with the secrets. Every file under `outputs` must exist afterwards.
 
+Each step runs under its keeper with only the environment the definition gives it and the names under `inherit`, which are taken from the environment of the command that started the daemon.
+
 A command killed part-way, or whose daemon was killed during it, is simply not done: the next `tay up` checks again and runs it again. A command with no `check` runs at every `tay up`.
 
 ### `process`
