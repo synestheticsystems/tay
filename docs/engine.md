@@ -25,6 +25,7 @@ Four rules run through all of it.
 | `tay run ACTION [NAME=VALUE...]` | Runs an action, with its arguments | yes |
 | `tay set PLACE=VALUE...`, `tay unset PLACE...` | Changes what the environment remembers being asked for | yes |
 | `tay wipe UNIT... --yes`, `tay wipe --all --yes` | Removes what the units keep, or everything the environment keeps | yes |
+| `tay serve` | Is the environment's daemon in the foreground, for a service manager to start, restart and stop | no |
 
 Every command takes `--root FOLDER`, and `--json` where it prints something a program would read. No command ever reads from the terminal. Without a terminal there is no colour, and nothing follows for ever unless asked to.
 
@@ -34,7 +35,7 @@ Every command takes `--root FOLDER`, and `--json` where it prints something a pr
 2. Starts this environment's daemon if none is running, and hands it what was asked for. The daemon plans again from the same definitions, so no secret and no module's settings travel between the two.
 3. Prints each change of state as it happens, one line per change.
 4. Returns when every unit asked for is `ready`, or when one of them can no longer become ready. In the second case the daemon goes on bringing up whatever can still come up; `tay status` shows where that ends.
-5. Ends by saying how long it took and which units took longest, so that a slow bring-up shows where its time went: each unit this `tay up` started that took a second or more, from the start of its first attempt until it was `ready` or had failed, the longest first, five at most. The time a unit spent waiting for what it needs is not its own and is not counted. With `--json` the closing line carries `seconds`, and under `took` every unit this `tay up` started with its seconds.
+5. Ends by saying how long it took and which units took longest, so that a slow bring-up shows where its time went: each unit this `tay up` started that took a second or more, from the start of its first attempt until it was `ready` or had failed, the longest first, five at most. The time a unit spent waiting for what it needs is not its own and is not counted. With `--json` the closing line carries `seconds`, and under `took` every unit this `tay up` started with its seconds. The whole is counted from when the daemon takes the change until it is decided, so a `tay up` that joins another says the same. A unit still under way when `tay up` returns, as one can be when another has failed, is counted until then and named as still under way; under `took` each unit also carries the state it came to. A unit started again because what it was started from changed is counted from when that was found, stopping it included.
 
 With no unit named it brings up what the choices list under `up`. With units named it brings up those and what they need, and leaves everything else as it is.
 
@@ -220,7 +221,7 @@ Docker is a container's parent: it keeps the exit code, says whether the contain
 
 Each of these is one change, taken by the daemon in turn like any other.
 
-**`tay restart UNIT...`** stops each unit named and starts it again, with a new first attempt, bringing up what the unit needs as `tay up UNIT` would. Units that need it are left running: one that suffers shows it by its own check and follows its own `restart`. A command is run again from its `check`. A unit that is made, or a group, has nothing to restart, and naming one is an error (exit code 2). On an environment that is down there is nothing to restart either (exit code 4).
+**`tay restart UNIT...`** stops each unit named and starts it again, with a new first attempt, bringing up what the unit needs as `tay up UNIT` would. Units that need it are left running: one that suffers shows it by its own check and follows its own `restart`. A command is run again from its `check`. A unit that is made, or a group, has nothing to restart, and naming one is an error (exit code 2). On an environment that is down there is nothing to restart either (exit code 4). `tay restart`, and a `tay wipe` that brings the environment up again, end as `tay up` does, saying how long they took.
 
 **`tay run ACTION [NAME=VALUE...]`** runs a unit that has `action: true`, with its arguments, after bringing up what it needs. It works on an environment that is up, on one that is down and on one that was never brought up, and leaves the environment as it found it:
 
@@ -277,6 +278,40 @@ Production profiles refuse a unit with `watch`, so none of this happens on a ser
 
 **A command with `when_removed: undo`** keeps, once it has run, what its `undo` needs: the command, where it runs, its environment, the secrets with the secrets, and the names of the units it needed. At a `tay up` whose plan no longer has the unit, tay runs that `undo` once the units it needed that are still in the plan are ready, and before it stops anything else the plan no longer has, so that what it needed and is still up stays up for it; then it forgets the unit. A unit it needed that is neither up nor in the plan any more is not waited for, because nothing would bring it up: the `undo` runs without it, and tay says which units it ran without. This is what lets an app be taken off the list while the environment is down. If the `undo` fails, or a unit it needed that the plan still has has failed, `tay up` says so, exits with code 1, keeps the `undo` and tries again at the next `tay up`; `tay status` lists every unit whose `undo` is still waiting, with why it last did not run. Several undos run one at a time, the last kept first. `tay wipe --all` runs none of them. An action cannot have `when_removed: undo`: it is never part of what `tay up` brings up, so it never leaves.
 
-## Not in this document yet
+## Running on a server under a service manager
 
-Running on a server under a service manager. Written when it is built.
+*Not built yet.*
+
+A server has to bring its stack back after a reboot with no one logged in, restart the daemon if it dies, and stop the stack in order when the machine shuts down. Every service manager does those three things for a program that stays in the foreground, so tay has one command that is this environment's daemon in the foreground: `tay serve`.
+
+**`tay serve`** becomes the environment's daemon without detaching, brings up what the environment remembers being asked for, and stays until it is told to stop.
+
+- **Being started is being asked to be up.** `tay serve` brings the environment up whatever was last recorded of whether it is meant to be up. The service manager's own switch (enabled or not, started or not) is the record that counts on a server.
+- **It prints each change of state**, for as long as it runs, one line per change as `tay up` does, so the service manager's log holds the stack's history. Units' own output stays in their logs.
+- **Told to stop** (the signal a service manager sends, `SIGTERM`), it takes the environment down in order, as `tay down` does, and exits with 0.
+- **`tay down`** by a person does the same through the socket: the stack stops, `tay serve` exits with 0, and a service manager told to restart only on failure leaves it stopped until it is started again. So down means down, on a server too.
+- **If it dies**, nothing in the stack stops. The service manager starts it again, and it adopts what is running, as any new daemon does. It exits with a status other than 0 only when it could not be the daemon or could not go on.
+- **If a daemon already runs** for the environment, started by a plain `tay up` in someone's session, `tay serve` asks it to exit, which leaves the stack running, and takes its place.
+- **Every other command works as always**, through the socket: `tay status`, `tay up` (which joins and returns when the stack is ready, so an install script can wait on it), `tay restart`, `tay logs`. Who may use them is decided by the socket's permissions: the account `tay serve` runs as.
+- **A newer tay.** A command newer than a daemon that is being served does not start a daemon of its own in the person's session. It asks the old one to exit, waits for the service manager to start the new one from the same path, and says so if that does not happen (exit code 5).
+
+With systemd, the whole of it is:
+
+```
+[Unit]
+Description=<stack> (tay)
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+User=<account in the docker group>
+ExecStart=/usr/local/bin/tay serve --root /srv/<stack>
+Restart=on-failure
+TimeoutStopSec=5min
+KillMode=mixed
+
+[Install]
+WantedBy=multi-user.target
+```
+
+`KillMode=mixed` sends the stop signal to `tay serve` alone, which stops the stack itself. A production profile runs nothing on the host, so nothing of the stack is in the service's own process group to be killed with it.
