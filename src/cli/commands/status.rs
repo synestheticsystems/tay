@@ -15,7 +15,9 @@ use crate::cli::Exit;
 use crate::cli::args::{Args, Takes, Words};
 use crate::cli::output::asked;
 use crate::cli::stack;
+use crate::clock;
 use crate::control::client::{Client, ClientError};
+use crate::control::protocol::Outage;
 use crate::definition::read::THIS_TAY;
 use crate::disk::{Asked, Environment, Identity, Intent, Layout};
 use crate::engine::{self, State};
@@ -53,6 +55,8 @@ struct Report {
     /// What the environment remembers being asked for, with the value of
     /// every secret setting a `--set` gives hidden.
     asked: Asked,
+    /// When Docker last stopped answering under the daemon, if it has.
+    outage: Option<Outage>,
     units: Vec<Line>,
 }
 
@@ -147,6 +151,7 @@ fn from_daemon(environment: &Environment, args: &Args) -> Result<Report, Exit> {
             standing: intent.word(),
             profile: None,
             asked: Asked::default(),
+            outage: status.outage,
             units: status
                 .units
                 .into_iter()
@@ -212,6 +217,7 @@ fn stopped(
         standing,
         profile: None,
         asked: Asked::default(),
+        outage: None,
         units,
     })
 }
@@ -271,6 +277,7 @@ fn print(report: &Report, json: bool) {
                     "sets": report.asked.sets,
                     "units": report.asked.units,
                 },
+                "outage": report.outage,
             },
             "units": report.units.iter().map(|line| json!({
                 "unit": line.unit,
@@ -293,6 +300,17 @@ fn print(report: &Report, json: bool) {
     }
     if !report.asked.is_empty() {
         text.push_str(&format!("  remembered: {}\n", remembered(&report.asked)));
+    }
+    if let Some(outage) = &report.outage {
+        let again = match outage.brought_up_again {
+            Some(again) => format!("was brought up again at {}", clock::utc(again)),
+            None => "has not been brought up again since".to_string(),
+        };
+        text.push_str(&format!(
+            "  {} stopped answering at {}; the environment {again}\n",
+            outage.of,
+            clock::utc(outage.stopped_answering)
+        ));
     }
     for line in &report.units {
         text.push_str(&format!(

@@ -10,6 +10,7 @@
 //! after any change that started them, and they end with the daemon, which
 //! leaves what they look after running.
 
+mod containers_stopped;
 mod restarts;
 mod tending;
 
@@ -57,10 +58,12 @@ pub struct Supervisor {
     told: Told,
 }
 
-/// A unit's task, whether it has ended, and how it is asked to stop.
+/// A unit's task, whether it has ended, how it is asked to stop, and how
+/// it is ended without stopping anything.
 struct UnitTask {
     ended: Arc<AtomicBool>,
     stop: mpsc::UnboundedSender<oneshot::Sender<Result<(), String>>>,
+    abort: AbortHandle,
 }
 
 impl UnitTask {
@@ -271,10 +274,14 @@ impl Supervisor {
         let ends = Arc::clone(&ended);
         let unit = planned.name.clone();
         let task = tokio::spawn(tended);
+        let abort = task.abort_handle();
         tokio::spawn(async move {
             // A task that panicked is a fault in tay, which fails its unit
-            // rather than leave it looked after by nothing.
-            if let Err(error) = task.await {
+            // rather than leave it looked after by nothing. One ended on
+            // purpose has had its unit's state said by whoever ended it.
+            if let Err(error) = task.await
+                && error.is_panic()
+            {
                 let reason = format!("tay failed while looking after it: {error}");
                 supervisor.record(&unit, UnitState::new(State::Failed, reason), None);
             }
@@ -283,7 +290,7 @@ impl Supervisor {
             ends.store(true, Ordering::SeqCst);
             supervisor.changes.send_modify(|count| *count += 1);
         });
-        tending.insert(planned.name.clone(), UnitTask { ended, stop });
+        tending.insert(planned.name.clone(), UnitTask { ended, stop, abort });
     }
 
     /// Watches the files each of `units` that has `watch` names, in place

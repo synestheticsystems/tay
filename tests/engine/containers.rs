@@ -3,8 +3,8 @@
 //! otherwise, bringing a container up from its settings and judging it
 //! ready, how it ended and what follows, finding it again, its logs,
 //! replacing it, taking it down, commands run in one, wiping what it keeps,
-//! the host and its containers reaching each other, and actions that use
-//! one.
+//! the host and its containers reaching each other, actions that use one,
+//! and Docker itself stopping under them.
 
 mod actions;
 mod bringing_up;
@@ -15,6 +15,7 @@ mod finding_again;
 mod reaching;
 mod readiness;
 mod secrets;
+mod when_docker_stops;
 mod wiping;
 
 use std::path::Path;

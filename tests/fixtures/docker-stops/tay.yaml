@@ -1,0 +1,31 @@
+format: 1
+stack: docker-stops
+up: [polite, stubborn, keeper, local]
+units:
+  polite:
+    doc: Ends at once, with 0, when it is told to stop.
+    uses: container
+    with:
+      image: busybox:1.36
+      command: [sh, -c, "trap 'exit 0' TERM; echo up; sleep 3600 & wait"]
+
+  stubborn:
+    doc: Does not end when it is told to stop, and is killed.
+    uses: container
+    with:
+      image: busybox:1.36
+      command: [sh, -c, "trap '' TERM; echo up; while :; do sleep 1; done"]
+
+  keeper:
+    doc: Keeps a count of its starts on its volume, and says it.
+    uses: container
+    with:
+      image: busybox:1.36
+      command: [sh, -c, "date >> /data/starts; echo start $(wc -l < /data/starts); trap 'exit 0' TERM; sleep 3600 & wait"]
+      volumes: { data: /data }
+
+  local:
+    doc: A process on the host, which Docker stopping does not touch.
+    uses: process
+    with:
+      command: [sh, -c, "echo up; trap 'exit 0' TERM; sleep 3600 & wait"]

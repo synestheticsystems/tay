@@ -229,7 +229,8 @@ fn down(daemon: &Arc<Daemon>) -> Response<Body> {
 /// Each unit the daemon knows, from a check made now, and after them each
 /// the plan does not have of which something runs, and each whose `undo`
 /// waits. A unit the check finds in the state recorded keeps the time it
-/// took it.
+/// took it. With them, when Docker last stopped answering under the
+/// daemon, if it has.
 async fn status(daemon: &Arc<Daemon>) -> Response<Body> {
     let units = daemon.supervisor.snapshot();
     let environment = Arc::clone(&daemon.environment);
@@ -274,7 +275,12 @@ async fn status(daemon: &Arc<Daemon>) -> Response<Body> {
             }
         })
         .collect();
-    json(StatusCode::OK, &Status { units })
+    let outage = daemon
+        .outage
+        .lock()
+        .expect("the outage is not poisoned")
+        .clone();
+    json(StatusCode::OK, &Status { units, outage })
 }
 
 /// The answer to a change asked for while `change` is under way.

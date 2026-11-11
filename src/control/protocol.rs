@@ -289,10 +289,26 @@ impl fmt::Display for Refused {
     }
 }
 
-/// Each unit's state, in the order units start in.
+/// Each unit's state, in the order units start in, and when what runs
+/// containers last stopped answering under the daemon, if it has.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Status {
     pub units: Vec<UnitStatus>,
+    pub outage: Option<Outage>,
+}
+
+/// What runs containers stopping under the environment, as Docker does
+/// when it is upgraded or restarted, and the environment being brought up
+/// again once it answered.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Outage {
+    /// What stopped answering, as a person names it.
+    pub of: String,
+    /// When it stopped answering, in seconds since 1970.
+    pub stopped_answering: u64,
+    /// When the environment was brought up again, once it answered; `None`
+    /// until then.
+    pub brought_up_again: Option<u64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

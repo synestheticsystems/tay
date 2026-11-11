@@ -99,6 +99,22 @@ pub struct SharedLeft {
     pub why: Failure,
 }
 
+/// What runs every container, as a person names it. When it stops, every
+/// container ends with it, which is no unit's doing.
+pub const CONTAINERS_RUN_BY: &str = "Docker";
+
+/// Waits until what runs containers stops answering, which it says the
+/// moment it stops, also when it is back before anyone could have asked
+/// it; why, as a person reads it.
+pub async fn until_containers_stop_answering() -> Failure {
+    container::until_docker_stops().await
+}
+
+/// Whether what runs containers answers now.
+pub async fn containers_answer() -> Result<(), Failure> {
+    container::docker_answers().await
+}
+
 /// What the environment keeps where its units run, beyond its folder, as a
 /// person reads each: its volumes, and the images built for it.
 pub async fn kept_by_environment(environment: &Environment) -> Result<Vec<String>, Failure> {

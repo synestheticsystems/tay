@@ -27,9 +27,10 @@ pub use operations::{
 pub use running::command_line::argv;
 pub use running::container::{HOST_IN_CONTAINERS, HOST_LISTEN_BEFORE_START, Occasion, host_listen};
 pub use running::{
-    anything_left, anything_left_of_environment, found_left, kept_by_environment, kept_undo_needs,
-    note_undo_waiting, remove_kept_by_environment, remove_shared, run_kept_undo, stop,
-    undo_waiting, units_keeping_an_undo,
+    CONTAINERS_RUN_BY, anything_left, anything_left_of_environment, containers_answer, found_left,
+    kept_by_environment, kept_undo_needs, note_undo_waiting, remove_kept_by_environment,
+    remove_shared, run_kept_undo, stop, undo_waiting, units_keeping_an_undo,
+    until_containers_stop_answering,
 };
 pub use settings::{Destination, FromPlan, Settings, Slot};
 pub use want::{Duration, Form, PathUse, Want};

@@ -4,7 +4,8 @@
 //! environment, listens on a Unix socket in a short folder named by the
 //! environment's id, whose path it writes in `.tay/daemon.socket` for
 //! commands to find it by, and lives for as long as it holds
-//! `.tay/daemon.lock`.
+//! `.tay/daemon.lock`. When Docker stops under it, it brings the
+//! environment up again once Docker answers.
 //!
 //! One started detached tells the command that started it whether it is
 //! ready by one line on its standard output, which that command reads
@@ -21,6 +22,7 @@ mod routes;
 mod run;
 mod served;
 mod up;
+mod when_docker_stops;
 mod wipe;
 
 use std::fmt;
@@ -72,6 +74,9 @@ pub struct Daemon {
     going: AtomicBool,
     /// What `tay serve` prints, for a daemon it runs.
     journal: Option<Journal>,
+    /// When Docker last stopped answering under it, and when the
+    /// environment was brought up again, if it has.
+    outage: Mutex<Option<protocol::Outage>>,
 }
 
 /// Why the daemon exits.
@@ -218,9 +223,11 @@ async fn start(
             exit: watch::Sender::new(None),
             going: AtomicBool::new(false),
             journal,
+            outage: Mutex::default(),
         }
     });
     found_again(&daemon.supervisor).await;
+    tokio::spawn(Arc::clone(&daemon).follow_docker());
     // The socket is made, and its path written, once the daemon can answer
     // on it: until then a command finds nothing listening, and waits for
     // the daemon's lock rather than for an answer that would not come in

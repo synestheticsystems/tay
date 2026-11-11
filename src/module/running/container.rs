@@ -31,6 +31,7 @@ use crate::module::description::{
 use crate::module::operations::{self, Failure, Operations, UnitPlace};
 use crate::module::settings::{FromPlan, MapValues, Operate, each, each_named, maybe};
 use crate::module::{Cx, Module};
+use docker::Docker;
 use unit::ContainerUnit;
 
 pub use host::{HOST_IN_CONTAINERS, HOST_LISTEN_BEFORE_START, Occasion, host_listen};
@@ -43,6 +44,21 @@ pub use step::{
 pub use unit::check_inside;
 
 pub struct Container;
+
+/// Follows Docker until it stops answering, which its own stream of events
+/// says the moment it stops; why, as a person reads it. Docker that cannot
+/// be reached has stopped already.
+pub async fn until_docker_stops() -> Failure {
+    match Docker::connect() {
+        Ok(docker) => docker.until_it_stops().await.into(),
+        Err(error) => error.into(),
+    }
+}
+
+/// Whether Docker answers now.
+pub async fn docker_answers() -> Result<(), Failure> {
+    Ok(Docker::connect()?.answers().await?)
+}
 
 /// The container of `unit` in the environment `place` is in:
 /// `tay-<id>-<unit>`, the name a container of a command made for one run
