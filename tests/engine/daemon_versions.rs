@@ -51,9 +51,7 @@ impl OtherDaemon {
             .open(root.join(".tay/daemon.lock"))
             .unwrap();
         flock(&lock, FlockOperation::NonBlockingLockExclusive).unwrap();
-        let socket = machine.socket(root);
-        let _ = std::fs::remove_file(&socket);
-        let listener = UnixListener::bind(&socket).unwrap();
+        let listener = machine.listen_as_daemon(root);
         let process = Command::new("sleep").arg("60").spawn().unwrap();
         let mut about = serde_json::json!({
             "tay": version,

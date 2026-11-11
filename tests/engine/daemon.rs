@@ -7,15 +7,17 @@ use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixStream;
+use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 
 use rustix::fs::{FlockOperation, flock};
 
 use crate::harness::{Machine, alive, eventually};
+use crate::support::Run;
 
 /// Whether another holds the lock on the file at `path`.
-fn locked(path: &std::path::Path) -> bool {
+fn locked(path: &Path) -> bool {
     let file = OpenOptions::new()
         .read(true)
         .write(true)
@@ -118,7 +120,7 @@ fn the_daemon_listens_on_a_socket_for_this_account_alone_speaking_http_with_json
         socket.parent().unwrap().file_name().unwrap().to_str(),
         Some(id.as_str())
     );
-    let mode = |path: &std::path::Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+    let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode(&socket), 0o600);
     assert_eq!(mode(socket.parent().unwrap()), 0o700);
     let ask = |request: &str| {
@@ -225,6 +227,101 @@ fn the_daemon_exits_when_its_socket_is_removed() {
         "{}",
         status.stdout
     );
+}
+
+/// `tay COMMAND --root ROOT ARGS` run as a service manager runs a service,
+/// with no `XDG_RUNTIME_DIR`, so that a daemon it starts listens in the
+/// temporary folder `tmp`, where a login session's commands would not look.
+fn as_a_service(machine: &Machine, tmp: &Path, root: &Path, command: &str, args: &[&str]) -> Run {
+    let mut all = vec![command, "--root", root.to_str().unwrap()];
+    all.extend(args);
+    let mut command = machine.command(root, &all);
+    command.env_remove("XDG_RUNTIME_DIR").env("TMPDIR", tmp);
+    machine.run(command)
+}
+
+/// What is written in `.tay/` at `root` of the socket the daemon listens
+/// on.
+fn written_socket(root: &Path) -> Option<String> {
+    fs::read_to_string(root.join(".tay/daemon.socket")).ok()
+}
+
+#[test]
+fn a_command_finds_the_daemon_by_the_socket_it_wrote_whatever_session_either_was_started_in() {
+    let machine = Machine::new();
+    let root = machine.stack("waiting");
+    let tmp = machine.path("tmp");
+    fs::create_dir(&tmp).unwrap();
+    let up = as_a_service(&machine, &tmp, &root, "up", &[]);
+    assert_eq!(up.code, 0, "{}{}", up.stdout, up.stderr);
+    let uid = rustix::process::getuid().as_raw();
+    let served_socket = tmp
+        .join(format!("tay-{uid}"))
+        .join(machine.id(&root))
+        .join("daemon.sock");
+    assert_eq!(
+        written_socket(&root),
+        Some(format!("{}\n", served_socket.display()))
+    );
+    let ls = as_a_service(&machine, &tmp, &root, "ls", &["--json"]);
+    let pid = ls.json()["environments"][0]["daemon"]["pid"].clone();
+    assert!(pid.is_number(), "{}", ls.stdout);
+    // Commands of a session whose runtime folder is another reach that
+    // daemon, and start none of their own.
+    let status = machine.at(&root, "status", &["--json"]);
+    assert_eq!(status.code, 0, "{}", status.stderr);
+    assert_eq!(Machine::state(&status.json(), "config"), "ready written");
+    let up = machine.at(&root, "up", &[]);
+    assert_eq!(up.code, 0, "{}{}", up.stdout, up.stderr);
+    let daemon = machine.daemon(&root).expect("a daemon answers");
+    assert_eq!(daemon["pid"], pid);
+    assert!(!machine.socket(&root).exists());
+    // And the other way about: a daemon started in the login session is
+    // reached by a command run as a service.
+    let down = as_a_service(&machine, &tmp, &root, "down", &[]);
+    assert_eq!(down.code, 0, "{}{}", down.stdout, down.stderr);
+    assert!(!alive(pid.as_i64().unwrap() as i32));
+    assert_eq!(written_socket(&root), None, "the daemon forgets it");
+    assert_eq!(machine.at(&root, "up", &[]).code, 0);
+    let status = as_a_service(&machine, &tmp, &root, "status", &[]);
+    assert_eq!(status.code, 0, "{}", status.stderr);
+    assert_eq!(
+        written_socket(&root),
+        Some(format!("{}\n", machine.socket(&root).display()))
+    );
+    assert!(!served_socket.exists());
+}
+
+#[test]
+fn a_socket_written_by_a_daemon_that_died_does_not_stop_the_next_command_starting_one() {
+    let machine = Machine::new();
+    let root = machine.stack("waiting");
+    let tmp = machine.path("tmp");
+    fs::create_dir(&tmp).unwrap();
+    assert_eq!(as_a_service(&machine, &tmp, &root, "up", &[]).code, 0);
+    let stale = written_socket(&root).unwrap();
+    // Killed, it leaves its socket and what it wrote of it.
+    machine.kill_daemon(&root);
+    assert_eq!(written_socket(&root).as_ref(), Some(&stale));
+    let status = machine.at(&root, "status", &[]);
+    assert_eq!(status.code, 0, "{}", status.stderr);
+    assert!(
+        status.stdout.contains("config       ready"),
+        "{}",
+        status.stdout
+    );
+    assert_eq!(
+        written_socket(&root),
+        Some(format!("{}\n", machine.socket(&root).display()))
+    );
+    // The runtime folder of its session may have gone with it, as a
+    // login's does when the person logs out.
+    machine.kill_daemon(&root);
+    fs::remove_dir_all(machine.path("run")).unwrap();
+    fs::create_dir(machine.path("run")).unwrap();
+    let up = as_a_service(&machine, &tmp, &root, "up", &[]);
+    assert_eq!(up.code, 0, "{}{}", up.stdout, up.stderr);
+    assert_eq!(written_socket(&root), Some(stale));
 }
 
 #[test]

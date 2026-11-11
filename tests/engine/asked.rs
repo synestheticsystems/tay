@@ -9,7 +9,6 @@
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::fs::PermissionsExt;
-use std::os::unix::net::UnixListener;
 use std::path::Path;
 use std::thread::JoinHandle;
 
@@ -246,9 +245,8 @@ fn stand_in(machine: &Machine, root: &Path) -> JoinHandle<Value> {
         .open(root.join(".tay/daemon.lock"))
         .unwrap();
     flock(&lock, FlockOperation::NonBlockingLockExclusive).unwrap();
+    let listener = machine.listen_as_daemon(root);
     let socket = machine.socket(root);
-    let _ = fs::remove_file(&socket);
-    let listener = UnixListener::bind(&socket).unwrap();
     let about = json!({
         "tay": env!("CARGO_PKG_VERSION"),
         "pid": std::process::id(),
@@ -290,7 +288,7 @@ fn stand_in(machine: &Machine, root: &Path) -> JoinHandle<Value> {
             )
             .unwrap();
             if change {
-                fs::remove_file(&socket).unwrap();
+                fs::remove_file(socket).unwrap();
                 drop(lock);
                 return serde_json::from_slice(&body).unwrap();
             }

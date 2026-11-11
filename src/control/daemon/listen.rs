@@ -11,7 +11,7 @@ use tokio::net::UnixListener;
 use tokio::task::JoinSet;
 
 use super::{Daemon, Exiting, Socket, log, routes};
-use crate::disk::Lock;
+use crate::disk::{Lock, daemon_socket};
 
 /// How often the daemon looks for its folder and its socket.
 const WATCH: Duration = Duration::from_millis(500);
@@ -21,8 +21,9 @@ const WATCH: Duration = Duration::from_millis(500);
 const FINISH: Duration = Duration::from_secs(5);
 
 /// Answers on `socket`, through `listener`, until the daemon is to exit,
-/// and then removes the socket, while the daemon's `lock` is still held, so
-/// that no other daemon has made one there yet. Gives why it exits.
+/// and then removes the socket and what it wrote of its path, while the
+/// daemon's `lock` is still held, so that no other daemon has made or
+/// written one yet. Gives why it exits.
 pub async fn listen(
     daemon: &Arc<Daemon>,
     listener: UnixListener,
@@ -83,6 +84,9 @@ pub async fn listen(
     }
     if socket.is_ours() {
         let _ = std::fs::remove_file(&socket.path);
+    }
+    if let Err(error) = daemon_socket::forget(&daemon.environment.layout, &socket.path) {
+        log(&format!("the path of its socket is left written: {error}"));
     }
     exiting
 }

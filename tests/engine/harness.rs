@@ -245,12 +245,28 @@ impl Machine {
             .to_string()
     }
 
-    /// The socket of the environment at `root`'s daemon.
+    /// The socket of the environment at `root`'s daemon, started by a
+    /// command of this machine's own session.
     pub fn socket(&self, root: &Path) -> PathBuf {
         self.path("run")
             .join("tay")
             .join(self.id(root))
             .join("daemon.sock")
+    }
+
+    /// Listens on the socket of the environment at `root`'s daemon, which
+    /// is stale, and writes its path in `.tay/` as a daemon does, for a
+    /// test that plays the daemon itself.
+    pub fn listen_as_daemon(&self, root: &Path) -> std::os::unix::net::UnixListener {
+        let socket = self.socket(root);
+        let _ = fs::remove_file(&socket);
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        fs::write(
+            root.join(".tay/daemon.socket"),
+            format!("{}\n", socket.display()),
+        )
+        .unwrap();
+        listener
     }
 
     /// Asks the daemon of the environment at `root` for `path` with the

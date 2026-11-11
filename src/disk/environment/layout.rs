@@ -54,6 +54,18 @@ impl Layout {
         self.folder().join("daemon.lock")
     }
 
+    /// `daemon.socket`: the path of the socket the daemon listens on,
+    /// which it writes once it listens.
+    pub fn daemon_socket(&self) -> PathBuf {
+        self.folder().join("daemon.socket")
+    }
+
+    /// `bootstrap.lock`: held by the command that starts the daemon, and by
+    /// `tay serve` as it takes the daemon's place, until the daemon answers.
+    pub fn bootstrap_lock(&self) -> PathBuf {
+        self.folder().join("bootstrap.lock")
+    }
+
     /// `state/`: what the environment keeps.
     pub fn state(&self) -> PathBuf {
         self.folder().join("state")

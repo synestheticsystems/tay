@@ -2,7 +2,9 @@
 //! first command that needs it as `tay daemon`, or run in the foreground by
 //! `tay serve` for a service manager. It owns the changes to the
 //! environment, listens on a Unix socket in a short folder named by the
-//! environment's id, and lives for as long as it holds `.tay/daemon.lock`.
+//! environment's id, whose path it writes in `.tay/daemon.socket` for
+//! commands to find it by, and lives for as long as it holds
+//! `.tay/daemon.lock`.
 //!
 //! One started detached tells the command that started it whether it is
 //! ready by one line on its standard output, which that command reads
@@ -38,6 +40,7 @@ use crate::diagnostic::Diagnostics;
 use crate::diagnostic::source::Sources;
 use crate::disk::{
     self, Asked, Counts, DiskError, Environment, Identity, Intent, Layout, Lock, Machine,
+    daemon_socket,
 };
 use crate::engine::{self, Left, Supervisor, Told, UnitState};
 use crate::module::Occasion;
@@ -218,10 +221,12 @@ async fn start(
         }
     });
     found_again(&daemon.supervisor).await;
-    // The socket is made once the daemon can answer on it: until then a
-    // command finds nothing listening, and waits for the daemon's lock
-    // rather than for an answer that would not come in time.
+    // The socket is made, and its path written, once the daemon can answer
+    // on it: until then a command finds nothing listening, and waits for
+    // the daemon's lock rather than for an answer that would not come in
+    // time.
     let (listener, socket) = listen_on(daemon.environment.socket())?;
+    daemon_socket::write(&daemon.environment.layout, &socket.path)?;
     Ok((daemon, listener, socket))
 }
 

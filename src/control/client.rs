@@ -3,9 +3,13 @@
 //! for its service manager to, making way for `tay serve`, and asking it for
 //! what each command does.
 //!
-//! A socket file alone proves nothing: only a daemon that answers on it as
-//! the daemon of this environment does. Whether a daemon runs is decided by
-//! its lock, never by a file holding its process's number.
+//! A command finds the daemon by the path of the socket the daemon wrote in
+//! `.tay/`, not by where its own session would put one, since the session
+//! the daemon was started in, as a service manager's, may put it elsewhere.
+//! What is written, and a socket file, prove nothing alone: only a daemon
+//! that answers on it as the daemon of this environment does. Whether a
+//! daemon runs is decided by its lock, never by a file holding its
+//! process's number.
 
 mod http;
 mod start;
@@ -21,7 +25,7 @@ use crate::control::protocol::{
     self, Event, Problem, Refused, Remember, Restart, RunRequest, Status, UpRequest, WipeRequest,
 };
 use crate::definition::read::{THIS_TAY, parse_version};
-use crate::disk::{DiskError, Environment, Lock, socket_fits};
+use crate::disk::{DiskError, Environment, Lock, daemon_socket};
 
 use http::NoAnswer;
 use start::{NotStarted, START, Started};
@@ -98,11 +102,9 @@ pub enum ClientError {
 impl Client {
     /// The daemon that answers for `environment`, if one does.
     pub async fn find(environment: &Environment) -> Result<Option<Client>, ClientError> {
-        let socket = environment.socket();
-        // Nothing can listen on a socket whose path is too long to have.
-        if !socket_fits(&socket) {
+        let Some(socket) = daemon_socket::read(&environment.layout)? else {
             return Ok(None);
-        }
+        };
         let (status, body) = match http::ask(
             &socket,
             Method::GET,
@@ -119,7 +121,12 @@ impl Client {
             Err(no_answer) => return Err(no_answer.into()),
         };
         let daemon: protocol::About = parse(status, &body)?;
-        if daemon.root != environment.layout.root() || daemon.id != environment.id.as_str() {
+        // A copied folder holds what the daemon of the folder it was copied
+        // from wrote, until a daemon of its own writes over it.
+        if daemon.id != environment.id.as_str() {
+            return Ok(None);
+        }
+        if daemon.root != environment.layout.root() {
             return Err(ClientError::Other {
                 socket,
                 root: daemon.root,
@@ -134,16 +141,14 @@ impl Client {
     /// manager runs it, the service manager starts the new one. A daemon of
     /// a newer tay is left alone.
     pub async fn ensure(environment: &Environment) -> Result<Client, ClientError> {
-        environment
-            .machine
-            .make_socket_folder(environment.id.as_str())?;
         if let Some(client) = Client::find(environment).await?
             && let Some(client) = client.of_this_tay(environment).await?
         {
             return Ok(client);
         }
-        // One command starts the daemon: the one that holds this lock.
-        let bootstrap = environment.bootstrap_lock();
+        // One command starts the daemon: the one that holds this lock,
+        // which is in `.tay/` so that commands of every session share it.
+        let bootstrap = environment.layout.bootstrap_lock();
         let _bootstrap = tokio::task::spawn_blocking(move || Lock::take(&bootstrap))
             .await
             .expect("waiting for a lock does not panic")?;
@@ -156,10 +161,10 @@ impl Client {
                 return Ok(client);
             }
             // Holding the daemon's lock proves that no daemon runs, so a
-            // socket left behind is stale. A daemon that holds it and does
-            // not answer is starting or ending, and is waited for.
+            // socket written by one that died is stale, and the daemon
+            // started writes its own over it. A daemon that holds the lock
+            // and does not answer is starting or ending, and is waited for.
             if !started && let Some(lock) = Lock::try_take(&environment.layout.daemon_lock())? {
-                let _ = std::fs::remove_file(environment.socket());
                 drop(lock);
                 let environment = environment.clone();
                 match tokio::task::spawn_blocking(move || start::start(&environment))
@@ -182,12 +187,9 @@ impl Client {
     /// which leaves the stack as it is. A daemon of a newer tay is left
     /// alone, and is an error.
     pub async fn take_daemons_place(environment: &Environment) -> Result<Place, ClientError> {
-        environment
-            .machine
-            .make_socket_folder(environment.id.as_str())?;
         // A command starts a daemon only while it holds this lock, so none
         // is started while this one takes the daemon's place.
-        let bootstrap = environment.bootstrap_lock();
+        let bootstrap = environment.layout.bootstrap_lock();
         let bootstrap = tokio::task::spawn_blocking(move || Lock::take(&bootstrap))
             .await
             .expect("waiting for a lock does not panic")?;

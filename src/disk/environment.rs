@@ -3,6 +3,7 @@
 
 mod asked;
 mod counts;
+pub mod daemon_socket;
 mod identity;
 mod intent;
 mod layout;
@@ -33,13 +34,12 @@ impl Environment {
         format!("tay-{}", self.id)
     }
 
-    /// The socket its daemon listens on.
+    /// The socket a daemon of it started in this session listens on, in
+    /// the short folder named by its id in this session's runtime folder.
+    /// A daemon started in another session, as one a service manager
+    /// starts, listens elsewhere: a command finds the daemon that runs by
+    /// the path it wrote.
     pub fn socket(&self) -> PathBuf {
         self.machine.socket(self.id.as_str())
-    }
-
-    /// The lock a command holds while it starts the daemon.
-    pub fn bootstrap_lock(&self) -> PathBuf {
-        self.machine.bootstrap_lock(self.id.as_str())
     }
 }

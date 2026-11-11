@@ -66,8 +66,7 @@ impl Machine {
     }
 
     /// Makes the short folder named by the environment's id, which holds
-    /// its daemon's socket and the lock a command takes to start the
-    /// daemon, for this account alone.
+    /// its daemon's socket, for this account alone.
     pub fn make_socket_folder(&self, id: &str) -> Result<(), DiskError> {
         let socket = self.socket(id);
         if !socket_fits(&socket) {
@@ -77,15 +76,10 @@ impl Machine {
         own_folder(&self.runtime.join(id))
     }
 
-    /// The socket of the daemon of the environment whose id is `id`.
+    /// The socket a daemon of the environment whose id is `id`, started in
+    /// this session, listens on.
     pub fn socket(&self, id: &str) -> PathBuf {
         self.runtime.join(id).join("daemon.sock")
-    }
-
-    /// The lock a command holds while it starts the daemon of the
-    /// environment whose id is `id`, so that one daemon is started.
-    pub fn bootstrap_lock(&self, id: &str) -> PathBuf {
-        self.runtime.join(id).join("bootstrap.lock")
     }
 }
 
