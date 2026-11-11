@@ -250,7 +250,7 @@ The file is written inside the environment's state folder, at `files/<folder>/<n
 | `kind` | `password`, `bytes` or `keypair` |
 | `length` | For `password`: how many characters, default 32. For `bytes`: how many bytes, default 32. At most 65536 |
 | `encoding` | For `bytes`: `hex` (the default), `base64` (padded) or `base64url` (not padded) |
-| `algorithm` | For `keypair`, and required there: `ed25519` or `rsa-2048` |
+| `algorithm` | For `keypair`, and required there: `ed25519` or `rsa-2048`. *`ed25519` is not built yet: a unit that names it is an error.* |
 
 A `password` is letters and digits only, so it is safe inside a URL, a JSON string or a shell word. Gives `value` (for `password` and `bytes`), or `public` and `private` (for `keypair`, as PEM text). Everything a `secret` unit gives is secret, except a key pair's `public`.
 

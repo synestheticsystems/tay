@@ -4,7 +4,7 @@ settings:
   licence_key: { secret: true }
 units:
   db-password: { uses: secret, with: { kind: password } }
-  signing: { uses: secret, with: { kind: keypair, algorithm: ed25519 } }
+  signing: { uses: secret, with: { kind: keypair, algorithm: rsa-2048 } }
   issuer:
     uses: command
     with: { run: [issue], produces: { token: { secret: true }, id: {} } }

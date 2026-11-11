@@ -1,6 +1,7 @@
 format: 1
-stack: keypairs
-up: [rsa-key, edwards-key]
+stack: secrets-refused
+up: [rsa-key, edwards-key, long-password]
 units:
   rsa-key: { uses: secret, with: { kind: keypair, algorithm: rsa-2048 } }
   edwards-key: { uses: secret, with: { kind: keypair, algorithm: ed25519 } }
+  long-password: { uses: secret, with: { kind: password, length: 70000 } }

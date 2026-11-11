@@ -18,11 +18,7 @@ use crate::value::Filled;
 
 /// How long a password is, in characters, and how many bytes `bytes`
 /// makes, when `length` does not say.
-const LENGTH: i64 = 32;
-
-/// The longest `length` tay generates. The format sets no limit; this one
-/// keeps a mistyped length from making tay fill the machine's memory.
-const LONGEST: i64 = 65536;
+const LENGTH: usize = 32;
 
 /// The letters and digits a password is made of, so that it is safe in a
 /// URL, a JSON string or a shell word.
@@ -30,16 +26,12 @@ const PASSWORD: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz01
 
 #[derive(Debug, thiserror::Error)]
 enum SecretError {
-    #[error("tay cannot make an `{0}` key pair yet")]
-    CannotMakeYet(&'static str),
     #[error("`{setting}` is `{found}`, and is one of {wanted}")]
     NotOneOf {
         setting: &'static str,
         found: String,
         wanted: String,
     },
-    #[error("`length` is {0}, and is from 1 to {LONGEST}")]
-    Length(i64),
     #[error("it has not been generated")]
     Missing,
     #[error(
@@ -194,14 +186,11 @@ fn kept(stored: &Stored, asked: Asked, place: &UnitPlace) -> Result<Exists, Secr
 impl SecretSettings<Filled> {
     fn asked(&self) -> Result<Asked, SecretError> {
         let length = |length: &Option<Filled>| -> Result<usize, SecretError> {
-            let length = match length {
-                Some(length) => operations::number(length, "length")?,
+            Ok(match length {
+                Some(length) => usize::try_from(operations::number(length, "length")?)
+                    .expect("a `length` the plan passes is from 1 to the longest there may be"),
                 None => LENGTH,
-            };
-            match usize::try_from(length) {
-                Ok(n) if (1..=LONGEST).contains(&length) => Ok(n),
-                _ => Err(SecretError::Length(length)),
-            }
+            })
         };
         Ok(match self {
             SecretSettings::Password { length: written } => Asked::Password {
@@ -230,7 +219,6 @@ impl SecretSettings<Filled> {
                     "rsa-2048" => Asked::Keypair {
                         algorithm: Algorithm::Rsa2048,
                     },
-                    "ed25519" => return Err(SecretError::CannotMakeYet("ed25519")),
                     other => return Err(not_one_of("algorithm", other, super::ALGORITHMS)),
                 }
             }

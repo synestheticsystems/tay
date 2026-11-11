@@ -21,6 +21,9 @@ pub enum Want {
     PortNumber,
     /// A whole number above 0: how many of something.
     Count,
+    /// A whole number from 1 to this: how many of something there may be
+    /// no more of than that.
+    CountUpTo(i64),
     OneOf(&'static [&'static str]),
     /// A whole number followed by `s`, `m` or `h`.
     Duration,
@@ -153,12 +156,15 @@ impl Want {
             (Want::Count, Form::Number(Some(n))) if *n < 1 => {
                 Some(format!("must be a whole number above 0; this is {n}"))
             }
-            (Want::Count, Form::Number(Some(_))) => None,
-            (Want::Count, Form::Number(None)) => Some(format!(
+            (Want::CountUpTo(most), Form::Number(Some(n))) if !(1..=*most).contains(n) => {
+                Some(format!("must be {}; this is {n}", self.expects()))
+            }
+            (Want::Count | Want::CountUpTo(_), Form::Number(Some(_))) => None,
+            (Want::Count | Want::CountUpTo(_), Form::Number(None)) => Some(format!(
                 "must be written out in full ({}); this holds a value not known until start",
                 self.expects()
             )),
-            (Want::Count, _) => wrong("a whole number"),
+            (Want::Count | Want::CountUpTo(_), _) => wrong("a whole number"),
             (_, Form::Number(_) | Form::Bool) => wrong("text"),
             (want, Form::Text(None)) => Some(format!(
                 "must be written out in full ({}); this holds a value not known until start",
@@ -174,7 +180,7 @@ impl Want {
     fn checks_exact_form(&self) -> bool {
         matches!(
             self,
-            Want::Count | Want::OneOf(_) | Want::Duration | Want::FileMode
+            Want::Count | Want::CountUpTo(_) | Want::OneOf(_) | Want::Duration | Want::FileMode
         )
     }
 
@@ -196,6 +202,7 @@ impl Want {
             Want::FileMode => "permissions in octal, such as `\"0600\"`".to_string(),
             Want::Path(_) => "the path of a file".to_string(),
             Want::Count => "a whole number above 0".to_string(),
+            Want::CountUpTo(most) => format!("a whole number from 1 to {most}"),
             _ => "text".to_string(),
         }
     }
@@ -297,6 +304,13 @@ mod tests {
         assert!(Want::Count.problem(&Form::Number(Some(0))).is_some());
         assert_eq!(Want::Count.problem(&Form::Number(Some(16))), None);
         assert!(Want::Count.problem(&Form::Number(None)).is_some());
+        assert_eq!(Want::CountUpTo(8).problem(&Form::Number(Some(8))), None);
+        assert_eq!(
+            Want::CountUpTo(8).problem(&Form::Number(Some(9))),
+            Some("must be a whole number from 1 to 8; this is 9".to_string())
+        );
+        assert!(Want::CountUpTo(8).problem(&Form::Number(Some(0))).is_some());
+        assert!(Want::CountUpTo(8).problem(&Form::Number(None)).is_some());
         assert!(Want::OneOf(&["a", "b"]).problem(&text("c")).is_some());
         assert!(Want::Duration.problem(&Form::Text(None)).is_some());
         assert!(Want::FileMode.problem(&text("0600")).is_none());
@@ -314,6 +328,7 @@ mod tests {
         );
         for want in [
             Want::Count,
+            Want::CountUpTo(8),
             Want::Duration,
             Want::OneOf(&["a"]),
             Want::FileMode,

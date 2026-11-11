@@ -75,17 +75,22 @@ fn a_secret_is_generated_once_and_kept_for_this_account_alone() {
 }
 
 #[test]
-fn an_ed25519_key_pair_fails_saying_tay_cannot_make_one_yet() {
+fn what_tay_cannot_make_is_refused_by_the_plan_before_anything_is_made() {
     let machine = Machine::new();
-    let root = machine.stack("keypairs");
+    let root = machine.stack("secrets-refused");
+    let refused = [
+        "tay.yaml:6:66: tay cannot make an `ed25519` key pair yet: `rsa-2048` is the one it makes",
+        "tay.yaml:7:66: this must be a whole number from 1 to 65536; this is 70000",
+    ];
+    let plan = machine.at(&root, "plan", &[]);
+    assert_eq!(plan.code, 2, "{}{}", plan.stdout, plan.stderr);
+    assert_eq!(plan.errors(), refused);
     let up = machine.at(&root, "up", &[]);
-    assert_eq!(up.code, 1);
-    assert_eq!(
-        up.last_change("edwards-key"),
-        "failed tay cannot make an `ed25519` key pair yet"
-    );
-    let status = machine.settled(&root);
-    assert_eq!(Machine::state(&status, "rsa-key"), "ready kept");
+    assert_eq!(up.code, 2, "{}{}", up.stdout, up.stderr);
+    for error in refused {
+        assert!(up.stderr.contains(error), "{}", up.stderr);
+    }
+    assert!(!root.join(".tay/state/secrets").exists());
 }
 
 #[test]

@@ -2,7 +2,7 @@
 
 mod generate;
 
-use crate::diagnostic::Diagnostics;
+use crate::diagnostic::{Diagnostics, quoted_list};
 use crate::disk::remove_if_there;
 use crate::syntax::fields::{self, Fields};
 use crate::syntax::names::NameAt;
@@ -24,7 +24,16 @@ const SETTING: Destination = Destination::Readable("a secret's settings");
 /// How `bytes` are written as text: `base64` is padded, `base64url` is not.
 const ENCODINGS: &[&str] = &["hex", "base64", "base64url"];
 
-const ALGORITHMS: &[&str] = &["ed25519", "rsa-2048"];
+/// The key pairs tay makes.
+const ALGORITHMS: &[&str] = &["rsa-2048"];
+
+/// A key pair the format names that tay cannot make yet: a unit that names
+/// it is refused when it is read, so that a stack that plans can be made.
+const NOT_BUILT: &str = "ed25519";
+
+/// The longest `length` there may be, as the format says: it keeps a
+/// mistyped length from making tay fill the machine's memory.
+const LONGEST: i64 = 65536;
 
 /// The names of the values a secret unit gives: `value` for a password or
 /// bytes, `public` and `private` for a key pair.
@@ -176,13 +185,38 @@ fn read(with: Option<&Node>, cx: &mut Cx<'_>) -> Option<SecretSettings<Slot>> {
         }
         Slot::read(node, want, SETTING, d)
     };
-    let length = only_for("length", &["password", "bytes"], Want::Count, d);
+    let length = only_for(
+        "length",
+        &["password", "bytes"],
+        Want::CountUpTo(LONGEST),
+        d,
+    );
     let encoding = only_for("encoding", &["bytes"], Want::OneOf(ENCODINGS), d);
-    let algorithm = only_for("algorithm", &["keypair"], Want::OneOf(ALGORITHMS), d);
+    let algorithm = match settings.get("algorithm") {
+        Some(node)
+            if kind == "keypair"
+                && node
+                    .as_str()
+                    .is_some_and(|written| written.text == NOT_BUILT) =>
+        {
+            d.error(
+                node.loc,
+                format!(
+                    "tay cannot make an `{NOT_BUILT}` key pair yet: {} is the one it makes",
+                    quoted_list(ALGORITHMS)
+                ),
+            );
+            None
+        }
+        _ => only_for("algorithm", &["keypair"], Want::OneOf(ALGORITHMS), d),
+    };
     if kind == "keypair" && settings.get("algorithm").is_none() {
         d.error(
             settings.loc(),
-            "a `keypair` secret needs `algorithm`: `ed25519` or `rsa-2048`",
+            format!(
+                "a `keypair` secret needs `algorithm`: {}",
+                quoted_list(ALGORITHMS)
+            ),
         );
     }
     if cx.d.len() != errors_before {
@@ -226,7 +260,7 @@ mod tests {
             [("value".to_string(), true)]
         );
         assert_eq!(
-            gives("kind: keypair\nalgorithm: ed25519\n"),
+            gives("kind: keypair\nalgorithm: rsa-2048\n"),
             [("public".to_string(), false), ("private".to_string(), true)]
         );
     }
@@ -261,14 +295,14 @@ mod tests {
         assert_eq!(
             errors,
             [
-                "1:1: a `keypair` secret needs `algorithm`: `ed25519` or `rsa-2048`",
+                "1:1: a `keypair` secret needs `algorithm`: `rsa-2048`",
                 "2:1: `length` is for `password` and `bytes`, not `keypair`",
             ]
         );
         let (_, errors) = check("secret", "kind: bytes\nlength: -4\n");
         assert_eq!(
             errors,
-            ["2:9: this must be a whole number above 0; this is -4"]
+            ["2:9: this must be a whole number from 1 to 65536; this is -4"]
         );
         let (_, errors) = check("secret", "kind: password\nencoding: hex\n");
         assert_eq!(errors, ["2:1: `encoding` is for `bytes`, not `password`"]);
@@ -282,5 +316,21 @@ mod tests {
             errors,
             ["2:11: this must be one of `hex`, `base64`, `base64url`; this is `base32`"]
         );
+    }
+
+    #[test]
+    fn what_tay_cannot_make_is_refused_where_it_is_written() {
+        let (_, errors) = check("secret", "kind: keypair\nalgorithm: ed25519\n");
+        assert_eq!(
+            errors,
+            ["2:12: tay cannot make an `ed25519` key pair yet: `rsa-2048` is the one it makes"]
+        );
+        let (_, errors) = check("secret", "kind: password\nlength: 65537\n");
+        assert_eq!(
+            errors,
+            ["2:9: this must be a whole number from 1 to 65536; this is 65537"]
+        );
+        let (_, errors) = check("secret", "kind: bytes\nlength: 65536\n");
+        assert!(errors.is_empty(), "{errors:?}");
     }
 }
