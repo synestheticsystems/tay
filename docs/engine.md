@@ -198,7 +198,7 @@ Docker is a container's parent: it keeps the exit code, says whether the contain
 
 **Bringing a container up.**
 
-1. The image is pulled if it is not here, or built if the unit has `build`. Either shows in the unit's detail while it runs, and neither holds up a unit that does not need this one. An image tay builds carries the environment's label, like everything else tay creates, and `tay wipe --all` removes it.
+1. The image is pulled if it is not here, or built if the unit has `build`. A pull is sent with the sign-in the account the daemon runs as has given Docker for the image's registry, when there is one: tay reads that account's Docker configuration as the `docker` command does, asking the credential helper or store it names. Nothing of a sign-in is printed, logged or kept. A pull the registry refuses for want of one fails the unit with the image, the registry and the `docker login` that would mend it. Either shows in the unit's detail while it runs, and neither holds up a unit that does not need this one. An image tay builds carries the environment's label, like everything else tay creates, and `tay wipe --all` removes it.
 2. The unit's volumes are made if missing, and given to their `owner` when they are made.
 3. The container is created from the unit's settings and started. A published port is given to Docker only if the plan opens it.
 4. Readiness is checked: the image's own health check, or having started, when the unit writes no `ready`; a `command` check runs inside the container; `http` and `tcp` checks are made from the host through the opened port; a `log` check reads what the container wrote.

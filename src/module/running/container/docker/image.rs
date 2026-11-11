@@ -1,6 +1,8 @@
 //! A container's image: pulled if it is not here, or built. Either says how
-//! far it has come while it runs. An image tay builds carries the labels of
-//! the environment and the unit it is built for, as everything tay creates
+//! far it has come while it runs. A pull is sent with the sign-in the
+//! account tay runs as has given Docker for the image's registry, when there
+//! is one ([`sign_in`]). An image tay builds carries the labels of the
+//! environment and the unit it is built for, as everything tay creates
 //! does, so that it is found by them, and removed with what the
 //! environment keeps.
 //!
@@ -11,6 +13,8 @@
 //! features of today's builder, so a Dockerfile that builds by hand would not
 //! build under tay. What a build is given holds no secret: the planner
 //! refuses one in a build's settings.
+
+mod sign_in;
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -25,6 +29,7 @@ use bollard::query_parameters::{
 
 use super::ours::{ENVIRONMENT, Owner, is_ours};
 use super::{Docker, DockerError, missing};
+use sign_in::SignIn;
 
 /// How a pull or a build is told to say how far it has come, in words a
 /// person reads after "pulling" or "building".
@@ -55,8 +60,9 @@ impl Docker {
         }
     }
 
-    /// Pulls `name`, for `platform` when one is named, telling `progress`
-    /// each time another of its layers is here.
+    /// Pulls `name`, for `platform` when one is named, with the account's
+    /// sign-in to its registry when there is one, telling `progress` each
+    /// time another of its layers is here.
     pub async fn pull(
         &self,
         name: &str,
@@ -67,11 +73,15 @@ impl Docker {
         if let Some(platform) = platform {
             options = options.platform(platform);
         }
-        let mut pulling = self.api.create_image(Some(options.build()), None, None);
-        let mut layers = Layers::default();
         progress(format!("pulling `{name}`"));
+        let sign_in = SignIn::for_image(name).await;
+        let mut pulling = self
+            .api
+            .create_image(Some(options.build()), None, sign_in.credentials());
+        let mut layers = Layers::default();
         while let Some(said) = pulling.next().await {
-            let said = said.map_err(self.failed(format!("pull `{name}`")))?;
+            let said = said
+                .map_err(|error| sign_in.refused(self.failed(format!("pull `{name}`"))(error)))?;
             if let (Some(layer), Some(status)) = (said.id, said.status)
                 && layers.saw(layer, &status)
             {

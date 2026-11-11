@@ -4,7 +4,8 @@
 //! ready, how it ended and what follows, finding it again, its logs,
 //! replacing it, taking it down, commands run in one, wiping what it keeps,
 //! the host and its containers reaching each other, actions that use one,
-//! and Docker itself stopping under them.
+//! an image pulled with the account's sign-in to its registry, and Docker
+//! itself stopping under them.
 
 mod actions;
 mod bringing_up;
@@ -16,6 +17,7 @@ mod logs;
 mod reaching;
 mod readiness;
 mod secrets;
+mod signing_in;
 mod when_docker_stops;
 mod wiping;
 

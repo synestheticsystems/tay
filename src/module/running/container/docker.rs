@@ -21,7 +21,9 @@ mod volume;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+use bollard::BollardRequest;
 use bollard::errors::Error as ApiError;
+use hyper::header::HeaderValue;
 
 use crate::disk::DiskError;
 
@@ -82,9 +84,10 @@ impl Docker {
         let path = socket.to_string_lossy();
         let api = bollard::Docker::connect_with_unix(&path, ANSWER, bollard::API_DEFAULT_VERSION)
             .map_err(|error| DockerError::Unreachable {
-            socket: socket.clone(),
-            why: error.to_string(),
-        })?;
+                socket: socket.clone(),
+                why: error.to_string(),
+            })?
+            .with_request_modifier(sign_in_as_docker_reads_it);
         let docker = Docker { api, socket };
         *found = Some(docker.clone());
         Ok(docker)
@@ -106,6 +109,29 @@ impl Docker {
             },
         }
     }
+}
+
+/// The header that carries a registry's sign-in to Docker.
+const SIGN_IN: &str = "x-registry-auth";
+
+/// `request` with the registry's sign-in it carries, if any, written as
+/// Docker reads it: in base64's URL alphabet. bollard writes it in the
+/// standard alphabet, whose `+` and `/` Docker does not read, and Docker
+/// then pulls as though no sign-in had been sent, without a word.
+fn sign_in_as_docker_reads_it(mut request: BollardRequest) -> BollardRequest {
+    if let Some(sign_in) = request.headers_mut().get_mut(SIGN_IN) {
+        let url: Vec<u8> = (sign_in.as_bytes().iter())
+            .map(|byte| match byte {
+                b'+' => b'-',
+                b'/' => b'_',
+                other => *other,
+            })
+            .collect();
+        *sign_in = HeaderValue::from_bytes(&url)
+            .expect("base64's characters are a header's, in either alphabet");
+        sign_in.set_sensitive(true);
+    }
+    request
 }
 
 /// Whether Docker could not be reached at all, rather than answered.
@@ -175,6 +201,18 @@ pub fn without_secrets(error: DockerError, secrets: &[String]) -> DockerError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_sign_in_is_sent_in_the_alphabet_docker_reads_and_marked_sensitive() {
+        let request = hyper::Request::builder()
+            .header("X-Registry-Auth", "eyJ+/w==")
+            .body(bollard::body_full(hyper::body::Bytes::new()))
+            .unwrap();
+        let sent = sign_in_as_docker_reads_it(request);
+        let sign_in = &sent.headers()[SIGN_IN];
+        assert_eq!(sign_in.as_bytes(), b"eyJ-_w==");
+        assert!(sign_in.is_sensitive());
+    }
 
     #[test]
     fn a_secret_is_taken_out_of_what_docker_says() {

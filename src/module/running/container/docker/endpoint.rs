@@ -5,6 +5,7 @@
 //! with neither, Docker's own default socket. tay reads Docker's
 //! configuration and never writes it.
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
@@ -63,7 +64,7 @@ pub fn socket() -> Result<PathBuf, EndpointError> {
     {
         return local(&host);
     }
-    let Some(config) = config_folder() else {
+    let Some(config) = config_folder(&|name| std::env::var_os(name)) else {
         return Ok(PathBuf::from(DEFAULT));
     };
     let context = match std::env::var("DOCKER_CONTEXT")
@@ -79,11 +80,12 @@ pub fn socket() -> Result<PathBuf, EndpointError> {
     }
 }
 
-/// The folder of Docker's configuration: `DOCKER_CONFIG`, or `~/.docker`.
-fn config_folder() -> Option<PathBuf> {
-    match std::env::var_os("DOCKER_CONFIG").filter(|folder| !folder.is_empty()) {
+/// The folder of Docker's configuration, as the variables `environment`
+/// reads name it: `DOCKER_CONFIG`, or `~/.docker`.
+pub(super) fn config_folder(environment: &dyn Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
+    match environment("DOCKER_CONFIG").filter(|folder| !folder.is_empty()) {
         Some(folder) => Some(PathBuf::from(folder)),
-        None => std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".docker")),
+        None => environment("HOME").map(|home| PathBuf::from(home).join(".docker")),
     }
 }
 
