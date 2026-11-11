@@ -244,7 +244,7 @@ fn stand_in(machine: &Machine, root: &Path) -> JoinHandle<Value> {
             reader.read_exact(&mut body).unwrap();
             let change = request.starts_with("POST ");
             let answer = match change {
-                true => "{\"event\":\"decided\",\"decision\":\"ready\"}\n".to_string(),
+                true => "{\"event\":\"decided\",\"decision\":{\"decision\":\"ready\"},\"seconds\":0.0,\"took\":[]}\n".to_string(),
                 false => about.clone(),
             };
             write!(

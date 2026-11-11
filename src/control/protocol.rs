@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::disk::{Asked, DiskError, Layout};
-use crate::engine::{Decision, Left, State};
+use crate::engine::{Decision, Left, State, Took};
 use crate::plan::ActionRun;
 
 /// `GET`: who the daemon is, its [`About`]. Every version of tay answers it
@@ -170,8 +170,14 @@ pub enum Event {
     /// `tay plan` prints it.
     Errors { lines: Vec<String>, too_old: bool },
     /// What a change that brings units up came to: `tay up`, or another
-    /// that ends by bringing up what it stopped.
-    Decided(Decision),
+    /// that ends by bringing up what it stopped; how long the change took
+    /// until then, in seconds, and how long each unit it started took, the
+    /// longest first.
+    Decided {
+        decision: Decision,
+        seconds: f64,
+        took: Vec<Took>,
+    },
     /// `tay up` was stopped before it came to anything, by what is
     /// said, as a person reads it.
     Cancelled { by: String },
@@ -223,7 +229,7 @@ impl Event {
             | Event::Output { .. }
             | Event::Removed { .. } => false,
             Event::Errors { .. }
-            | Event::Decided(_)
+            | Event::Decided { .. }
             | Event::Cancelled { .. }
             | Event::Down { .. }
             | Event::Problem { .. }

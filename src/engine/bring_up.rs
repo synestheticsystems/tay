@@ -12,7 +12,8 @@
 //! otherwise joined as it is. A bring-up that leaves what is up as it is
 //! joins it unasked. A bring-up for `tay up` has what the plan no longer
 //! has leave first, as [`Leaving`] says: until it has, only the units it
-//! waits for start, and nothing is decided.
+//! waits for start, and nothing is decided. Each unit it starts is timed,
+//! and the decision is told with how long each took.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
@@ -26,6 +27,7 @@ use super::settled::{Settled, Standing};
 use super::started_from;
 use super::state::{State, UnitState};
 use super::supervisor::{Begin, Supervisor};
+use super::units::Took;
 use crate::module::{Exists, Made, Operations, Running};
 use crate::plan::PlannedUnit;
 
@@ -64,8 +66,9 @@ pub enum Outdated {
 
 /// What a bring-up tells the change that made it, as it goes.
 pub enum Telling {
-    /// What it came to, once that is decided.
-    Decided(Decision),
+    /// What it came to, once that is decided, and how long each unit it
+    /// started took until then, the longest first.
+    Decided(Decision, Vec<Took>),
     /// Something a person should know of it, said once.
     Notice(String),
 }
@@ -85,6 +88,7 @@ pub async fn bring_up(
     told: &mut (dyn FnMut(Telling) + Send),
     mut cancel: watch::Receiver<bool>,
 ) -> Option<Decision> {
+    supervisor.time_afresh();
     let mut bringing = Bringing {
         supervisor,
         units,
@@ -151,7 +155,7 @@ pub async fn bring_up(
         if decision.is_none() && !cancelled {
             decision = bringing.decided(asked);
             if let Some(decision) = &decision {
-                told(Telling::Decided(decision.clone()));
+                told(Telling::Decided(decision.clone(), supervisor.took()));
             }
         }
         // What runs goes on under the supervisor whatever happens here.
@@ -237,7 +241,10 @@ async fn compared(
         Ok(Some(why)) => why,
         Err(why) => return Compared::Unknown(why),
     };
+    // Its time runs from here: stopping what runs of it is part of
+    // starting it again.
     let again = UnitState::new(State::Starting, format!("{why}, so it is started again"));
+    supervisor.time(&planned.name);
     supervisor.record(&planned.name, again, None);
     replace(&supervisor, &planned, running, &cancel).await
 }
@@ -302,7 +309,9 @@ impl Bringing<'_> {
     /// Starts the units that may start now, and gives those that are made,
     /// to be made, and those that run already, to be compared. A group
     /// becomes ready at once, a unit that runs is handed to the supervisor,
-    /// and a unit that cannot start yet is recorded waiting, or blocked.
+    /// and a unit that cannot start yet is recorded waiting, or blocked. A
+    /// unit made or handed over is timed from now; a group starts nothing,
+    /// and is not.
     fn start(&mut self) -> Started {
         let mut started = Started::default();
         // A group made ready can clear the units after it.
@@ -356,6 +365,7 @@ impl Bringing<'_> {
                     _ if tended => self.join(index),
                     Err(why) => self.record(index, UnitState::new(State::Failed, why.to_string())),
                     Ok(Operations::Made(operations)) => {
+                        self.supervisor.time(&planned.name);
                         self.record(index, UnitState::new(State::Starting, "making it"));
                         started.made.push((
                             index,
@@ -364,6 +374,7 @@ impl Bringing<'_> {
                         ));
                     }
                     Ok(Operations::Running(running)) => {
+                        self.supervisor.time(&planned.name);
                         self.supervisor.tend(&planned, running, Begin::Fresh, true);
                         self.running.insert(index);
                         self.handed = true;

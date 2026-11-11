@@ -24,4 +24,5 @@ pub use leaving::{Leaving, undos_owed, undos_waiting};
 pub use state::{State, UnitState};
 pub use supervisor::{Supervisor, Told, runs};
 pub use take_down::{Left, take_down};
+pub use units::Took;
 pub use unplanned::{check_unplanned, find_unplanned};

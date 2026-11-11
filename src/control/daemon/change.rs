@@ -1,9 +1,10 @@
 //! The one change a daemon makes at a time: what it is, since when, and
 //! everything it has said. Each command that follows a change reads what it
 //! said from the start, so a second `tay up` that joins the first gets the
-//! same result.
+//! same result, how long it took included.
 
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Instant;
 
 use http_body_util::channel::Sender;
 use hyper::body::{Bytes, Frame};
@@ -36,6 +37,9 @@ pub struct Change {
     pub kind: Kind,
     /// When it began, in seconds since 1970.
     pub since: u64,
+    /// When it began, on a clock that only goes forward, for saying how
+    /// long it took.
+    began: Instant,
     said: Mutex<Said>,
     /// How many events have been said, for followers to wait on.
     told: watch::Sender<usize>,
@@ -58,6 +62,7 @@ impl Change {
         Arc::new(Change {
             kind,
             since: clock::now(),
+            began: Instant::now(),
             said: Mutex::default(),
             told: watch::Sender::new(0),
             cancelled: watch::Sender::new(false),
@@ -90,6 +95,11 @@ impl Change {
                 .collect::<Vec<_>>()
                 .join(" "),
         }
+    }
+
+    /// How long the change has taken so far, in seconds.
+    pub fn seconds_so_far(&self) -> f64 {
+        clock::in_seconds(self.began.elapsed())
     }
 
     /// Tells every follower `event`. Once the change is closed, followers

@@ -1,0 +1,28 @@
+format: 1
+stack: timings
+up: [instant, slow, slower]
+units:
+  instant:
+    doc: Done at once.
+    uses: command
+    with: { run: ["true"] }
+  slow:
+    doc: Done after a little over a second.
+    uses: command
+    with: { run: ["sleep", "1.1"] }
+  slower:
+    doc: Done after two seconds.
+    uses: command
+    with: { run: ["sleep", "2"] }
+  failing:
+    doc: Fails after a little over a second.
+    uses: command
+    with: { run: { shell: "sleep 1.1; exit 3" } }
+  lasting:
+    doc: Runs for longer than any test waits for it.
+    uses: command
+    with: { run: ["sleep", "60"] }
+  steady:
+    doc: Runs until it is stopped, and is ready once it has started.
+    uses: process
+    with: { command: ["sleep", "600"] }

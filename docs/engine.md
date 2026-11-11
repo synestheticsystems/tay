@@ -34,7 +34,7 @@ Every command takes `--root FOLDER`, and `--json` where it prints something a pr
 2. Starts this environment's daemon if none is running, and hands it what was asked for. The daemon plans again from the same definitions, so no secret and no module's settings travel between the two.
 3. Prints each change of state as it happens, one line per change.
 4. Returns when every unit asked for is `ready`, or when one of them can no longer become ready. In the second case the daemon goes on bringing up whatever can still come up; `tay status` shows where that ends.
-5. Ends by saying how long it took and which units took longest, so that a slow bring-up shows where its time went: each unit this `tay up` started that took a second or more, from the start of its first attempt until it was `ready` or had failed, the longest first, five at most. The time a unit spent waiting for what it needs is not its own and is not counted. With `--json` the closing line carries `seconds`, and under `took` every unit this `tay up` started with its seconds. *Not built yet.*
+5. Ends by saying how long it took and which units took longest, so that a slow bring-up shows where its time went: each unit this `tay up` started that took a second or more, from the start of its first attempt until it was `ready` or had failed, the longest first, five at most. The time a unit spent waiting for what it needs is not its own and is not counted. With `--json` the closing line carries `seconds`, and under `took` every unit this `tay up` started with its seconds.
 
 With no unit named it brings up what the choices list under `up`. With units named it brings up those and what they need, and leaves everything else as it is.
 

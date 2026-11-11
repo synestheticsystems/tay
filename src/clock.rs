@@ -1,5 +1,5 @@
 //! Times as tay records them, in seconds or milliseconds since 1970, and
-//! writes them, in UTC.
+//! writes them, in UTC; and how long something took, in seconds.
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -20,6 +20,12 @@ pub fn now_millis() -> u64 {
 
 fn since_1970(time: SystemTime) -> Duration {
     time.duration_since(UNIX_EPOCH).unwrap_or(Duration::ZERO)
+}
+
+/// How long `length` is, in seconds to the millisecond, as tay says how
+/// long something took.
+pub fn in_seconds(length: Duration) -> f64 {
+    (length.as_secs_f64() * 1000.0).round() / 1000.0
 }
 
 /// `seconds` since 1970 as a person reads it: `2026-11-09 22:41:03 UTC`.

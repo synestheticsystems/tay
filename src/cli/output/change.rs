@@ -1,9 +1,11 @@
 //! A change's events as `tay up` and `tay down` print them while they
 //! happen: each change of state on a line of its own, and at the end what
-//! the change came to. `tay run` prints what the action writes, and the
-//! values it produced, on standard output, and its own lines on standard
-//! error. With `--json`, each is a JSON object on a line, in a versioned
-//! schema.
+//! the change came to, and of one that brings units up, how long it took.
+//! `tay run` prints what the action writes, and the values it produced, on
+//! standard output, and its own lines on standard error. With `--json`,
+//! each is a JSON object on a line, in a versioned schema.
+
+mod took;
 
 use serde_json::{Value, json};
 
@@ -83,8 +85,11 @@ impl Printer {
             ),
             Event::Errors { too_old: true, .. } => Some(Exit::TooOld),
             Event::Errors { .. } => Some(Exit::Errors),
-            Event::Decided(Decision::Ready) => Some(Exit::Done),
-            Event::Decided(_) | Event::Cancelled { .. } | Event::Problem { .. } => {
+            Event::Decided {
+                decision: Decision::Ready,
+                ..
+            } => Some(Exit::Done),
+            Event::Decided { .. } | Event::Cancelled { .. } | Event::Problem { .. } => {
                 Some(Exit::Failed)
             }
             Event::Down { left } if left.is_empty() => Some(Exit::Done),
@@ -126,7 +131,14 @@ impl Printer {
                     ));
                 }
             }
-            Event::Decided(decision) => self.decision(decision),
+            Event::Decided {
+                decision,
+                seconds,
+                took,
+            } => {
+                self.decision(decision);
+                own(&took::line(command, seconds, &took));
+            }
             Event::Cancelled { by } => own(&format!("{command}: cancelled by {by}.\n")),
             Event::Down { left } if left.is_empty() => {
                 own(&format!("{command}: nothing is left running.\n"));
@@ -231,7 +243,15 @@ impl Printer {
                 "too_old": too_old,
                 "errors": lines,
             }),
-            Event::Decided(decision) => self.decision_json(decision),
+            Event::Decided {
+                decision,
+                seconds,
+                took,
+            } => {
+                let mut decided = self.decision_json(decision);
+                took::add_to(&mut decided, *seconds, took);
+                decided
+            }
             Event::Cancelled { by } => json!({ "event": "cancelled", "by": by }),
             Event::Down { left } => json!({
                 "event": "down",

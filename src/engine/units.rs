@@ -1,16 +1,20 @@
 //! What the engine knows of an environment's units: each of the plan as it
 //! was last planned, its state, and the values it gives once it is made;
-//! and each that runs and that the plan does not have, until it is
-//! stopped.
+//! each that runs and that the plan does not have, until it is stopped;
+//! and how long each the bring-up under way started has taken.
+
+mod took;
 
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Instant, SystemTime};
 
 use super::fill::UnitValues;
 use super::state::{State, UnitState};
 use crate::module::{Runs, UnitKind, Values};
 use crate::plan::PlannedUnit;
+
+pub use took::{Timings, Took};
 
 /// The units, in an order they could start in, and after them those the
 /// plan does not have.
@@ -18,6 +22,9 @@ use crate::plan::PlannedUnit;
 pub struct Units {
     known: Vec<Known>,
     unplanned: Vec<Unplanned>,
+    /// How long each unit of the plan that the bring-up under way started
+    /// has taken, as the states it takes are recorded.
+    pub(super) timings: Timings,
 }
 
 /// One unit.
@@ -129,6 +136,7 @@ impl Units {
             if known.state == state {
                 return false;
             }
+            self.timings.saw(unit, state.state, Instant::now());
             known.state = state;
             known.since = SystemTime::now();
             return true;

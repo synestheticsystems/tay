@@ -73,7 +73,7 @@ fn a_second_up_joins_the_first_and_gets_the_same_result_and_another_change_is_re
     assert_eq!(first.stdout, second.stdout);
     assert!(
         first
-            .stdout
+            .before_it_took()
             .ends_with("tay up: everything asked for is ready.\n")
     );
 }

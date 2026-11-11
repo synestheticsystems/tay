@@ -50,6 +50,18 @@ impl Run {
             .collect()
     }
 
+    /// Standard output before its last line, which, of a change that
+    /// brings units up, says how long it took.
+    pub fn before_it_took(&self) -> &str {
+        let last = (self.stdout.trim_end_matches('\n').rfind('\n')).map_or(0, |at| at + 1);
+        assert!(
+            self.stdout[last..].contains(": it took "),
+            "the last line says how long it took:\n{}",
+            self.stdout
+        );
+        &self.stdout[..last]
+    }
+
     /// The last change of state `unit` printed, as `state detail`.
     pub fn last_change(&self, unit: &str) -> String {
         self.changes()

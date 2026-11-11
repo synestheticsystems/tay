@@ -6,7 +6,7 @@ use super::change::Change;
 use super::{Daemon, log, options, planned};
 use crate::control::protocol::{Event, UpRequest};
 use crate::disk::{Asked, Intent};
-use crate::engine::{self, Decision, Leaving, Outdated, Telling};
+use crate::engine::{self, Decision, Leaving, Outdated, Telling, Took};
 use crate::module::Occasion;
 use crate::plan::{Options, Plan, PlannedUnit};
 
@@ -88,7 +88,7 @@ impl Daemon {
                 &asked,
                 Outdated::Replace,
                 Some(leaving),
-                &mut |decision| conclude(change, Event::Decided(decision)),
+                &mut |decision, took| conclude_decided(change, decision, took),
             )
             .await;
         self.end(change, settled);
@@ -156,8 +156,9 @@ impl Daemon {
     /// with a unit that runs from other settings what `outdated` says, and
     /// first, with `leaving`, what it says, telling `change`'s followers
     /// each change of state; once it is decided whether everything in
-    /// `asked` is ready, the decision goes to `decided`. Why the change
-    /// came to no decision though nothing cancelled it, when it did not.
+    /// `asked` is ready, the decision goes to `decided`, with how long
+    /// each unit it started took. Why the change came to no decision though
+    /// nothing cancelled it, when it did not.
     pub(super) async fn settle(
         &self,
         change: &Arc<Change>,
@@ -165,12 +166,12 @@ impl Daemon {
         asked: &[String],
         outdated: Outdated,
         leaving: Option<Leaving>,
-        decided: &mut (dyn FnMut(Decision) + Send),
+        decided: &mut (dyn FnMut(Decision, Vec<Took>) + Send),
     ) -> Result<(), String> {
         let mut told = |telling: Telling| match telling {
-            Telling::Decided(decision) => {
+            Telling::Decided(decision, took) => {
                 log(&format!("{}: {}", change.describe(), words(&decision)));
-                decided(decision);
+                decided(decision, took);
             }
             Telling::Notice(notice) => change.say(Event::Notice { notice }),
         };
@@ -222,6 +223,21 @@ impl Daemon {
 pub(super) fn conclude(change: &Change, event: Event) {
     change.say(event);
     change.close();
+}
+
+/// Tells `change`'s followers what it came to, `decision`, with how long
+/// the change took until then and how long each unit it started took,
+/// `took`: the last thing they are told, though the change may go on.
+pub(super) fn conclude_decided(change: &Change, decision: Decision, took: Vec<Took>) {
+    let seconds = change.seconds_so_far();
+    conclude(
+        change,
+        Event::Decided {
+            decision,
+            seconds,
+            took,
+        },
+    );
 }
 
 /// The decision as the daemon's log says it.

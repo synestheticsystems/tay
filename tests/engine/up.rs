@@ -1,5 +1,7 @@
 //! `tay up`: what it brings up, what it prints as it does, and how it ends.
 
+mod took;
+
 use std::fs;
 
 use crate::harness::{Machine, kept_ports};
@@ -29,7 +31,7 @@ fn units_that_are_made_come_up_ready_and_up_says_everything_asked_for_is() {
         "ready everything it needs is ready"
     );
     assert!(
-        up.stdout
+        up.before_it_took()
             .ends_with("tay up: everything asked for is ready.\n"),
         "{}",
         up.stdout
@@ -107,7 +109,8 @@ fn each_change_of_state_is_a_line_with_the_units_lined_up() {
     assert_eq!(lines[3], "  config       starting  making it");
     assert_eq!(lines[4], "  config       ready     written");
     assert_eq!(lines[5], "tay up: everything asked for is ready.");
-    assert_eq!(lines.len(), 6);
+    assert!(lines[6].starts_with("tay up: it took "), "{}", up.stdout);
+    assert_eq!(lines.len(), 7);
 }
 
 #[test]

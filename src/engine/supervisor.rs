@@ -16,13 +16,14 @@ mod tending;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::AbortHandle;
 
 use super::fill::{self, HostListen, UnitValues};
 use super::state::{State, UnitState};
-use super::units::Units;
+use super::units::{Took, Units};
 use super::watching;
 use crate::disk::unit_log::UnitLog;
 use crate::disk::{Counts, Environment};
@@ -174,6 +175,24 @@ impl Supervisor {
     /// finds it.
     pub fn exited(&self, unit: &str, exit_status: Option<i64>) {
         self.units().exited(unit, exit_status);
+    }
+
+    /// Times, from now on, the units the bring-up that begins starts, and
+    /// none that an earlier one started.
+    pub fn time_afresh(&self) {
+        self.units().timings.begin();
+    }
+
+    /// Times `unit` from now, as the bring-up under way starts it, before
+    /// the state it starts in is recorded.
+    pub fn time(&self, unit: &str) {
+        self.units().timings.start(unit, Instant::now());
+    }
+
+    /// How long each unit the bring-up under way started has taken, the
+    /// longest first.
+    pub fn took(&self) -> Vec<Took> {
+        self.units().timings.took(Instant::now())
     }
 
     /// Wakes when any unit's state changes.

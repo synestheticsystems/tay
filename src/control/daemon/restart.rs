@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use super::change::{Change, NotBegun};
-use super::up::conclude;
+use super::up::conclude_decided;
 use super::{Daemon, log};
 use crate::control::protocol::{Event, Restart};
 use crate::engine::{Outdated, State, UnitState, runs};
@@ -79,7 +79,7 @@ impl Daemon {
                 &named,
                 Outdated::Replace,
                 None,
-                &mut |decision| conclude(&change, Event::Decided(decision)),
+                &mut |decision, took| conclude_decided(&change, decision, took),
             )
             .await;
         self.end(&change, settled);

@@ -91,7 +91,8 @@ tay up plans exactly as tay plan does, starts the environment's daemon if none
 runs, and has it bring up what the choices list under `up`, or the units named
 and what they need. What runs and is not in the plan any more is stopped, and
 it says so. It prints each change of state as it happens, and returns when
-everything asked for is ready or one of it can no longer become ready.
+everything asked for is ready or one of it can no longer become ready,
+saying how long it took and which of the units it started took longest.
 The environment remembers the profile, each --set and the units named, so a
 later plain tay up, tay status, tay plan and a daemon started afresh all see
 the same stack: --profile replaces the remembered profile, a --set replaces a

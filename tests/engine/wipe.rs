@@ -59,7 +59,7 @@ fn wiping_a_command_runs_its_undo_and_brings_up_again_what_needed_it() {
     // What it needs was left as it runs.
     assert_eq!(child(&root, "store"), store);
     assert!(
-        wipe.stdout
+        wipe.before_it_took()
             .ends_with("tay wipe: everything asked for is ready.\n"),
         "{}",
         wipe.stdout

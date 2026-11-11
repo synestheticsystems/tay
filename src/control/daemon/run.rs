@@ -90,7 +90,10 @@ impl Daemon {
                 std::slice::from_ref(&action),
                 Outdated::Join,
                 None,
-                &mut |decision| came_to = Some(self.ran(&action, decision)),
+                // It ends with how the action ended and what it produced,
+                // which is what an action is run for, and not with how long
+                // what it needed took.
+                &mut |decision, _| came_to = Some(self.ran(&action, decision)),
             )
             .await;
         following.abort();

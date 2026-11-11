@@ -74,7 +74,7 @@ fn a_service_slow_to_be_ready_makes_what_needs_it_wait_and_then_start_in_one_up(
     );
     assert_eq!(up.last_change("web"), "ready attempt 1, running");
     assert!(
-        up.stdout
+        up.before_it_took()
             .ends_with("tay up: everything asked for is ready.\n")
     );
 }

@@ -72,7 +72,7 @@ fn what_mounts_the_volumes_wiped_and_what_needs_it_are_stopped_first_and_brought
         ]
     );
     assert!(
-        wipe.stdout
+        wipe.before_it_took()
             .ends_with("tay wipe: everything asked for is ready.\n"),
         "{}",
         wipe.stdout

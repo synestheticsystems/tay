@@ -25,7 +25,7 @@ fn restart_stops_a_process_and_starts_it_again_and_leaves_what_needs_it_running(
     );
     assert!(
         restart
-            .stdout
+            .before_it_took()
             .ends_with("tay restart: everything asked for is ready.\n"),
         "{}",
         restart.stdout
