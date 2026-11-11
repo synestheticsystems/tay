@@ -111,7 +111,8 @@ impl Layout {
     }
 
     /// Removes everything in `.tay/` but `choices.yaml`, which people write,
-    /// and `daemon.lock`, which whoever runs as the daemon holds.
+    /// while the caller holds the daemon's lock: `daemon.lock` goes last,
+    /// and whoever takes the lock next makes it again.
     pub fn remove_kept(&self) -> Result<(), DiskError> {
         let folder = self.folder();
         let entries = match std::fs::read_dir(&folder) {
@@ -130,7 +131,12 @@ impl Layout {
             };
             removed.map_err(DiskError::io(&path, "removed"))?;
         }
-        Ok(())
+        let lock = self.daemon_lock();
+        match std::fs::remove_file(&lock) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(DiskError::io(lock, "removed")(error)),
+        }
     }
 
     /// The daemon's own log.

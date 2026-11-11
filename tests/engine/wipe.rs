@@ -154,6 +154,27 @@ fn a_unit_not_in_the_plan_or_a_group_does_not_fit() {
     assert_eq!(both.code, 2);
 }
 
+/// What `.tay/` at `root` holds, by name.
+fn left_in_tay(root: &Path) -> Vec<String> {
+    let mut left: Vec<String> = fs::read_dir(root.join(".tay"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    left.sort();
+    left
+}
+
+#[test]
+fn wipe_all_on_an_environment_never_brought_up_leaves_its_choices_alone() {
+    let machine = Machine::new();
+    let root = machine.stack("wipe");
+    fs::create_dir(root.join(".tay")).unwrap();
+    fs::write(root.join(".tay/choices.yaml"), "label: kept\n").unwrap();
+    let wipe = machine.at(&root, "wipe", &["--all", "--yes"]);
+    assert_eq!(wipe.code, 0, "{}{}", wipe.stdout, wipe.stderr);
+    assert_eq!(left_in_tay(&root), ["choices.yaml"]);
+}
+
 #[test]
 fn wipe_all_takes_the_environment_down_and_removes_everything_it_keeps() {
     let machine = Machine::new();
@@ -169,12 +190,7 @@ fn wipe_all_takes_the_environment_down_and_removes_everything_it_keeps() {
     assert!(machine.daemon(&root).is_some());
     let wipe = machine.at(&root, "wipe", &["--all", "--yes"]);
     assert_eq!(wipe.code, 0, "{}{}", wipe.stdout, wipe.stderr);
-    let mut left: Vec<String> = fs::read_dir(root.join(".tay"))
-        .unwrap()
-        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
-        .collect();
-    left.sort();
-    assert_eq!(left, ["choices.yaml", "daemon.lock"]);
+    assert_eq!(left_in_tay(&root), ["choices.yaml"]);
     assert_eq!(
         fs::read_to_string(root.join(".tay/choices.yaml")).unwrap(),
         "label: kept\n"

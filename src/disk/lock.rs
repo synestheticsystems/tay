@@ -30,16 +30,37 @@ impl Lock {
     /// The lock on `path`, whose file is made if it is missing; `None` while
     /// another holds it.
     pub fn try_take(path: &Path) -> Result<Option<Lock>, DiskError> {
-        let file = OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .read(true)
-            .write(true)
-            .open(path)
-            .map_err(DiskError::io(path, "opened to be locked"))?;
+        loop {
+            let file = OpenOptions::new()
+                .create(true)
+                .truncate(false)
+                .read(true)
+                .write(true)
+                .open(path)
+                .map_err(DiskError::io(path, "opened to be locked"))?;
+            match Lock::on(file, path)? {
+                Taking::Taken(lock) => return Ok(Some(lock)),
+                Taking::Held => return Ok(None),
+                // Its holder removed the file before it let go of it, as
+                // one that removes what an environment keeps does: the lock
+                // is had on the file at `path` now, made again.
+                Taking::Removed => {}
+            }
+        }
+    }
+
+    /// The lock on `file`, opened at `path`, unless another holds it or the
+    /// file is no longer the one at `path`.
+    fn on(file: File, path: &Path) -> Result<Taking, DiskError> {
         match flock(&file, FlockOperation::NonBlockingLockExclusive) {
-            Ok(()) => Ok(Some(Lock { file })),
-            Err(Errno::WOULDBLOCK) => Ok(None),
+            Ok(()) => {
+                let lock = Lock { file };
+                Ok(match lock.is_at(path) {
+                    true => Taking::Taken(lock),
+                    false => Taking::Removed,
+                })
+            }
+            Err(Errno::WOULDBLOCK) => Ok(Taking::Held),
             Err(errno) => Err(DiskError::io(path, "locked")(errno.into())),
         }
     }
@@ -102,6 +123,15 @@ impl Lock {
     }
 }
 
+/// What came of trying to take a lock on a file that was opened.
+enum Taking {
+    Taken(Lock),
+    /// Another holds it.
+    Held,
+    /// The file is no longer the one at its path.
+    Removed,
+}
+
 /// The lock's open file, which a process started with it inherits, and with
 /// it the lock.
 impl AsFd for Lock {
@@ -130,6 +160,29 @@ mod tests {
             .expect("the lock is free again");
         std::fs::remove_file(&path).unwrap();
         assert!(!again.is_at(&path));
+    }
+
+    #[test]
+    fn a_lock_on_a_file_removed_before_its_holder_let_go_is_taken_on_the_file_made_again() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("a.lock");
+        let held = Lock::try_take(&path).unwrap().expect("the lock is free");
+        // One that opened the file before its holder removed it, and locks
+        // it after the holder has let go.
+        let opened = File::open(&path).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        drop(held);
+        let until = Instant::now() + Duration::from_secs(1);
+        let taking = loop {
+            match Lock::on(opened.try_clone().unwrap(), &path).unwrap() {
+                // As above, another test's process may hold it a moment.
+                Taking::Held if Instant::now() < until => std::thread::sleep(RETRY),
+                taking => break taking,
+            }
+        };
+        assert!(matches!(taking, Taking::Removed));
+        let again = Lock::try_take(&path).unwrap().expect("the lock is free");
+        assert!(again.is_at(&path));
     }
 
     #[test]
