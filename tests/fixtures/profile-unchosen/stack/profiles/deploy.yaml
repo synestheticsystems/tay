@@ -1,0 +1,10 @@
+production: true
+require: [domain, licence]
+up: [ap]
+up_add: [srever]
+up_remove: [aap]
+run:
+  units: { app: image, server: imag, servr: image }
+settings:
+  domian: example.org
+  port: twenty

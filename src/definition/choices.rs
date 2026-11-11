@@ -71,10 +71,18 @@ impl Places<'_> {
         self.profile
             .map(|profile| &profile.choices)
             .into_iter()
-            .chain(self.personal.as_ref())
-            .chain(self.environment.as_ref())
+            .chain(self.outside_the_stack())
+            .collect()
+    }
+
+    /// The places that are not written in the stack's own files: this
+    /// person's own file, the environment's, and the command lines.
+    pub fn outside_the_stack(&self) -> Vec<&Choices> {
+        self.personal
+            .iter()
+            .chain(&self.environment)
             .chain(&self.sets)
-            .chain(self.named.as_ref())
+            .chain(&self.named)
             .collect()
     }
 }

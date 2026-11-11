@@ -198,6 +198,32 @@ fn a_profile_is_named_only_in_the_environments_file_and_must_exist() {
 }
 
 #[test]
+fn every_profile_is_checked_against_the_stack_whichever_is_chosen() {
+    // Planned under the default profile, `dev`: `deploy`, the one a server
+    // would use, names units, ways and settings the stack does not have.
+    let unchosen = [
+        "stack/profiles/deploy.yaml:2:19: `require` names setting `licence`, which is not declared in tay.yaml",
+        "stack/profiles/deploy.yaml:3:6: there is no unit `ap`",
+        "stack/profiles/deploy.yaml:4:10: there is no unit `srever`",
+        "stack/profiles/deploy.yaml:5:13: there is no unit `aap`",
+        "stack/profiles/deploy.yaml:7:12: unit `app` has no ways to choose between",
+        "stack/profiles/deploy.yaml:7:32: unit `server` has no way `imag`; its ways are `source`, `image`",
+        "stack/profiles/deploy.yaml:7:38: there is no unit `servr`",
+        "stack/profiles/deploy.yaml:9:3: no setting `domian` is declared in tay.yaml, so it cannot be set",
+        "stack/profiles/deploy.yaml:10:9: setting `port` is a whole number; this value is text",
+        "  tay.yaml:7:3: the setting is declared here",
+    ];
+    let run = crate::support::plan("profile-unchosen", &[]);
+    assert_eq!(run.code, 2);
+    assert_eq!(run.errors(), unchosen);
+    // Chosen, it says the same, and what only the profile in force is
+    // judged for: whether a required setting is given a value.
+    let run = crate::support::plan("profile-unchosen", &["--profile", "deploy"]);
+    let required = "stack/profiles/deploy.yaml:2:11: the profile `deploy` requires setting `domain`, and no choice gives it a value: the profile, the environment's file or a `--set` must (its default does not count)";
+    assert_eq!(run.errors(), [&[required][..], &unchosen].concat());
+}
+
+#[test]
 fn with_more_than_one_profile_the_default_must_be_named_and_must_exist() {
     // Which profile would say what comes up is not known, so that is not
     // reported as well.

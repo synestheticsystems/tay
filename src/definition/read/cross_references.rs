@@ -2,16 +2,23 @@
 //! something that exists: a need, a wait, a volume mounted, the container a
 //! command runs in, a reference, and what a choice names. Checked across
 //! all units and all their ways, whether or not they come up, so a mistake
-//! shows before the unit is ever used.
+//! shows before the unit is ever used; and across every profile, whichever
+//! is chosen, so a mistake in the one a server uses shows wherever the
+//! stack is planned.
 
 use crate::definition::reference_errors;
-use crate::definition::{Body, Check, Choices, GiveValue, Mechanism, SettingValue, Stack, Unit};
+use crate::definition::{
+    Body, Check, Choices, GiveValue, Mechanism, Profile, SettingValue, Stack, Unit,
+};
 use crate::diagnostic::{Diagnostic, Diagnostics, quoted_list};
 use crate::module::{ModuleValue, Runs, UnitKind, VolumeMount};
 use crate::syntax::expr::{Expr, Part, Reference, Target, UnitRef, View};
 use crate::syntax::names::NameAt;
 
-pub fn check(stack: &Stack, places: &[&Choices], d: &mut Diagnostics) {
+/// Checks the stack's units, its own choices (its defaults and every
+/// profile), and `outside`, the places of choices that are not written in
+/// the stack.
+pub fn check(stack: &Stack, outside: &[&Choices], d: &mut Diagnostics) {
     for unit in &stack.units {
         if let Body::Group { needs } = &unit.body {
             for name in needs {
@@ -45,9 +52,31 @@ pub fn check(stack: &Stack, places: &[&Choices], d: &mut Diagnostics) {
             }
         }
     }
-    for place in places {
+    choices(stack, &stack.defaults, d);
+    for profile in &stack.profiles {
+        profile_names(stack, profile, d);
+    }
+    for place in outside {
         choices(stack, place, d);
     }
+}
+
+/// What `profile` names exists in the stack: its choices, and the settings
+/// it requires. Whether a required setting is given a value is judged only
+/// of the profile chosen, once every place is layered.
+fn profile_names(stack: &Stack, profile: &Profile, d: &mut Diagnostics) {
+    for required in &profile.require {
+        if stack.setting(&required.name).is_none() {
+            d.error(
+                required.loc,
+                format!(
+                    "`require` names setting `{}`, which is not declared in tay.yaml",
+                    required.name
+                ),
+            );
+        }
+    }
+    choices(stack, &profile.choices, d);
 }
 
 /// Every value written in a mechanism.

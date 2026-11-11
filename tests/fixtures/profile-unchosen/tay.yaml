@@ -1,0 +1,13 @@
+format: 1
+stack: unchosen
+default_profile: dev
+up: [app]
+settings:
+  domain: { default: example.test }
+  port: { default: 20080 }
+units:
+  app: { uses: port }
+  server:
+    run:
+      source: { uses: process, with: { command: [serve] } }
+      image: { uses: container, with: { image: "example/server:1" } }

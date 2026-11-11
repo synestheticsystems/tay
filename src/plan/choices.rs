@@ -80,14 +80,9 @@ pub fn check_up_given(stack: &Stack, layered: &Layered, d: &mut Diagnostics) {
 /// not a choice.
 pub fn check_required(stack: &Stack, profile: &Profile, made: &[&Choices], d: &mut Diagnostics) {
     for required in &profile.require {
+        // A setting the stack does not declare is reported with the names
+        // every profile writes, whether or not it is chosen.
         if stack.setting(&required.name).is_none() {
-            d.error(
-                required.loc,
-                format!(
-                    "`require` names setting `{}`, which is not declared in tay.yaml",
-                    required.name
-                ),
-            );
             continue;
         }
         let given = made.iter().rev().find_map(|place| {

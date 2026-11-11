@@ -114,7 +114,7 @@ pub fn plan(root: &Path, options: &Options, sources: &mut Sources, d: &mut Diagn
         _ => None,
     };
     if every_file_parsed {
-        read::cross_references::check(&stack, &places.in_order(), d);
+        read::cross_references::check(&stack, &places.outside_the_stack(), d);
         if !profile_missing {
             choices::check_up_given(&stack, &layered, d);
         }
