@@ -1,0 +1,111 @@
+# Releases the version a tag names: builds tay for Linux and macOS, publishes
+# the crate to crates.io, and attaches the built programs to a GitHub
+# release. Pushing the tag v1.2.3 releases version 1.2.3, which Cargo.toml
+# must already say.
+#
+# The crate is published with no stored token: crates.io is told, in the
+# crate's settings, that this workflow in this repository, in the environment
+# `release`, may publish it, and gives each run a token of its own that lasts
+# half an hour.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  verify:
+    name: The tag names the crate's version, on main
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: version
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "tay") | .version')
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::the tag is $GITHUB_REF_NAME and Cargo.toml says $version"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::the tagged commit is not on main"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  programs:
+    name: tay for ${{ matrix.target }}
+    needs: verify
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          # Linked against musl, so that one program runs on any Linux of
+          # its processor, whatever C library that Linux has.
+          - { target: x86_64-unknown-linux-musl, runner: ubuntu-latest }
+          - { target: aarch64-unknown-linux-musl, runner: ubuntu-24.04-arm }
+          - { target: aarch64-apple-darwin, runner: macos-latest }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust for ${{ matrix.target }}
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add ${{ matrix.target }}
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Pack
+        run: |
+          name=tay-${{ needs.verify.outputs.version }}-${{ matrix.target }}
+          mkdir "$name"
+          cp target/${{ matrix.target }}/release/tay README.md LICENSE-APACHE LICENSE-MIT "$name/"
+          tar -czf "$name.tar.gz" "$name"
+          shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tay-${{ matrix.target }}
+          path: |
+            tay-*.tar.gz
+            tay-*.tar.gz.sha256
+          if-no-files-found: error
+
+  crate:
+    name: Publish the crate
+    needs: [verify, programs]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+      - run: cargo publish --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+
+  release:
+    name: Attach the programs to a release
+    needs: [verify, crate]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: programs
+          merge-multiple: true
+      - run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --title "tay ${{ needs.verify.outputs.version }}" --generate-notes programs/*
+        env:
+          GH_TOKEN: ${{ github.token }}

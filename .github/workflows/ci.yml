@@ -1,0 +1,76 @@
+# Checks every push to main and every pull request: formatting, lints, and
+# the tests, on Linux with the oldest Rust tay builds with and with the
+# current one, and on macOS. The engine's tests drive Docker, which GitHub's
+# macOS machines do not have, so macOS runs every suite but that one.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  linux:
+    name: Linux, Rust ${{ matrix.toolchain }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: ["1.93", stable]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust ${{ matrix.toolchain }}
+        run: |
+          rustup toolchain install ${{ matrix.toolchain }} --profile minimal --component rustfmt,clippy
+          rustup default ${{ matrix.toolchain }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: linux-${{ matrix.toolchain }}-${{ hashFiles('Cargo.lock') }}
+      # One version of rustfmt decides the formatting: the current one.
+      - name: Formatting
+        if: matrix.toolchain == 'stable'
+        run: cargo fmt --check
+      - name: Lints
+        run: cargo clippy --locked --all-targets -- -D warnings
+      # Two at a time: many of the engine's tests wait on real processes and
+      # containers, and a small machine running them all at once is late for
+      # their allowances.
+      - name: Tests
+        run: cargo test --locked --no-fail-fast -- --test-threads=2
+
+  macos:
+    name: macOS
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: macos-${{ hashFiles('Cargo.lock') }}
+      - name: Tests that need no Docker
+        run: cargo test --locked --no-fail-fast --lib --test reading --test planning --test command_line
+      - name: The engine's tests build
+        run: cargo test --locked --test engine --no-run
