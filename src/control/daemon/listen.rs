@@ -1,5 +1,5 @@
-//! Serving the daemon's socket until the daemon is to exit, and watching
-//! that its folder and its socket are still there.
+//! Listening on the daemon's socket until the daemon is to exit, and
+//! watching that its folder and its socket are still there.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -10,7 +10,7 @@ use hyper_util::rt::TokioIo;
 use tokio::net::UnixListener;
 use tokio::task::JoinSet;
 
-use super::{Daemon, Socket, log, routes};
+use super::{Daemon, Exiting, Socket, log, routes};
 use crate::disk::Lock;
 
 /// How often the daemon looks for its folder and its socket.
@@ -20,11 +20,19 @@ const WATCH: Duration = Duration::from_millis(500);
 /// the last of `tay down` among them.
 const FINISH: Duration = Duration::from_secs(5);
 
-pub async fn serve(daemon: &Arc<Daemon>, listener: UnixListener, lock: &Lock, socket: &Socket) {
+/// Answers on `socket`, through `listener`, until the daemon is to exit,
+/// and then removes the socket, while the daemon's `lock` is still held, so
+/// that no other daemon has made one there yet. Gives why it exits.
+pub async fn listen(
+    daemon: &Arc<Daemon>,
+    listener: UnixListener,
+    lock: &Lock,
+    socket: &Socket,
+) -> Option<Exiting> {
     let mut exit = daemon.exit.subscribe();
     let mut connections = JoinSet::new();
     let mut watch = tokio::time::interval(WATCH);
-    loop {
+    let exiting = loop {
         tokio::select! {
             accepted = listener.accept() => match accepted {
                 Ok((stream, _)) => {
@@ -49,17 +57,21 @@ pub async fn serve(daemon: &Arc<Daemon>, listener: UnixListener, lock: &Lock, so
                 }
             },
             Some(_) = connections.join_next() => {}
-            _ = exit.wait_for(Option::is_some) => break,
+            exiting = exit.wait_for(Option::is_some) => {
+                // The wait fails only once its sender has gone, and the
+                // daemon, which holds it, has not.
+                break exiting.ok().and_then(|exiting| exiting.clone());
+            }
             _ = watch.tick() => {
                 if !lock.is_at(&daemon.environment.layout.daemon_lock()) {
                     daemon.environment_gone();
                 } else if !socket.is_ours() {
-                    daemon.exit("its socket was removed or replaced, so no command can reach it");
+                    daemon.exit(Exiting::SocketLost);
                 }
             }
         }
-    }
-    if let Some(why) = exit.borrow().as_ref() {
+    };
+    if let Some(why) = &exiting {
         log(&format!("exiting: {why}"));
     }
     // A command that connects from now on finds nothing listening, and so
@@ -69,4 +81,8 @@ pub async fn serve(daemon: &Arc<Daemon>, listener: UnixListener, lock: &Lock, so
     if tokio::time::timeout(FINISH, finished).await.is_err() {
         log("answers still under way are cut off");
     }
+    if socket.is_ours() {
+        let _ = std::fs::remove_file(&socket.path);
+    }
+    exiting
 }

@@ -1,6 +1,7 @@
 //! What the daemon answers under `/v1/`: who it is, each unit's state, and
 //! the changes, one at a time. A second `tay up` that asks for what the one
-//! under way asks for joins it; `tay down` is always accepted and cancels
+//! under way asks for joins it, as a plain `tay up` joins the bring-up
+//! `tay serve` begins with; `tay down` is always accepted and cancels
 //! what is under way; any other change is refused while one runs. A change
 //! to what the environment remembers is made at once, while it holds the
 //! place of the change under way, so that none begins meanwhile.
@@ -19,7 +20,7 @@ use serde::de::DeserializeOwned;
 
 use super::change::{Change, Kind, NotBegun};
 use super::down::Down;
-use super::{Daemon, log};
+use super::{Daemon, Exiting, log};
 use crate::clock;
 use crate::control::protocol::{
     self, Problem, Refused, Remember, Restart, RunRequest, Status, UnitStatus, UpRequest,
@@ -89,7 +90,7 @@ pub async fn route(
         }
         (Method::POST, protocol::DOWN) => down(&daemon),
         (Method::POST, protocol::EXIT) => {
-            daemon.exit("asked to by a tay of another version");
+            daemon.exit(Exiting::MakingWay);
             json(StatusCode::OK, &serde_json::json!({}))
         }
         (
@@ -136,20 +137,19 @@ async fn asked<T: DeserializeOwned>(
 }
 
 fn up(daemon: &Arc<Daemon>, asked: UpRequest) -> Response<Body> {
-    let kind = Kind::Up(asked.clone());
     let mut under_way = daemon
         .change
         .lock()
         .expect("the change under way is not poisoned");
     let change = match under_way.as_ref() {
         None => {
-            let change = Change::new(kind);
+            let change = Change::new(Kind::Up(asked.clone()));
             *under_way = Some(Arc::clone(&change));
             let bringing = Arc::clone(daemon).bring_up(Arc::clone(&change), asked);
             tokio::spawn(then_leave_if_unneeded(Arc::clone(daemon), bringing));
             change
         }
-        Some(change) if change.kind == kind => Arc::clone(change),
+        Some(change) if change.kind.joined_by(&asked) => Arc::clone(change),
         Some(change) => return refused(change),
     };
     drop(under_way);
@@ -223,21 +223,7 @@ fn remembered(daemon: &Arc<Daemon>, remember: &Remember) -> Response<Body> {
 }
 
 fn down(daemon: &Arc<Daemon>) -> Response<Body> {
-    let mut under_way = daemon
-        .change
-        .lock()
-        .expect("the change under way is not poisoned");
-    let change = match under_way.take() {
-        Some(change) if change.kind == Kind::Down => change,
-        before => {
-            let change = Change::new(Kind::Down);
-            tokio::spawn(Arc::clone(daemon).take_down(Arc::clone(&change), before, Down::Asked));
-            change
-        }
-    };
-    *under_way = Some(Arc::clone(&change));
-    drop(under_way);
-    follow(change)
+    follow(daemon.begin_down(Down::Asked))
 }
 
 /// Each unit the daemon knows, from a check made now, and after them each

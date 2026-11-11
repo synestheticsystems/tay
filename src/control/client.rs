@@ -1,6 +1,6 @@
 //! The commands' side of an environment's daemon: finding the daemon,
-//! starting one when none answers, replacing one of an older tay, and asking
-//! it for what each command does.
+//! starting one when none answers, replacing one of an older tay, making
+//! way for `tay serve`, and asking it for what each command does.
 //!
 //! A socket file alone proves nothing: only a daemon that answers on it as
 //! the daemon of this environment does. Whether a daemon runs is decided by
@@ -149,6 +149,42 @@ impl Client {
         }
     }
 
+    /// The daemon's lock of `environment`, for `tay serve`, which takes the
+    /// daemon's place: a daemon of this tay or an older one that answers is
+    /// asked to exit first, which leaves the stack as it is. A daemon of a
+    /// newer tay is left alone, and is an error.
+    pub async fn take_daemons_place(environment: &Environment) -> Result<Lock, ClientError> {
+        environment
+            .machine
+            .make_socket_folder(environment.id.as_str())?;
+        // A command starts a daemon only while it holds this lock, so none
+        // is started between one daemon's exit and the taking of its lock.
+        let bootstrap = environment.bootstrap_lock();
+        let _bootstrap = tokio::task::spawn_blocking(move || Lock::take(&bootstrap))
+            .await
+            .expect("waiting for a lock does not panic")?;
+        let until = Instant::now() + START;
+        loop {
+            if let Some(client) = Client::find(environment).await? {
+                if client.daemon.tay != THIS_TAY && !older(&client.daemon.tay) {
+                    return Err(ClientError::Newer {
+                        theirs: client.daemon.tay,
+                    });
+                }
+                client.exit().await?;
+            }
+            if let Some(lock) = Lock::try_take(&environment.layout.daemon_lock())? {
+                return Ok(lock);
+            }
+            // A daemon that holds the lock and does not answer is starting
+            // or ending.
+            if Instant::now() >= until {
+                return Err(ClientError::NoDaemon(environment.layout.daemon_log()));
+            }
+            tokio::time::sleep(RETRY).await;
+        }
+    }
+
     /// Makes `change` to what `environment` remembers being asked for, as
     /// one change: through its daemon, which refuses it while another
     /// change runs, when one answers; and when none does, under the
@@ -197,11 +233,7 @@ impl Client {
         if self.daemon.tay == THIS_TAY {
             return Ok(Some(self));
         }
-        let older = matches!(
-            (parse_version(&self.daemon.tay), parse_version(THIS_TAY)),
-            (Some(theirs), Some(ours)) if theirs < ours
-        );
-        if !older {
+        if !older(&self.daemon.tay) {
             return Err(ClientError::Newer {
                 theirs: self.daemon.tay,
             });
@@ -364,6 +396,14 @@ impl Client {
         }
         Ok(())
     }
+}
+
+/// Whether a daemon of tay `theirs` is of an older tay than this one.
+fn older(theirs: &str) -> bool {
+    matches!(
+        (parse_version(theirs), parse_version(THIS_TAY)),
+        (Some(theirs), Some(ours)) if theirs < ours
+    )
 }
 
 fn parse<T: DeserializeOwned>(status: StatusCode, body: &[u8]) -> Result<T, ClientError> {

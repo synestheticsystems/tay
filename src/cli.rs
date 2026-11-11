@@ -1,6 +1,6 @@
 //! The command line: `tay plan`, `tay up`, `tay down`, `tay status`,
 //! `tay logs`, `tay ls`, `tay restart`, `tay run`, `tay set`, `tay unset`,
-//! `tay wipe`, `tay --version` and `tay --help`; `tay daemon`,
+//! `tay wipe`, `tay serve`, `tay --version` and `tay --help`; `tay daemon`,
 //! which a command runs to start an environment's daemon; and `tay keep`,
 //! which the daemon runs to keep one program of a unit.
 
@@ -18,7 +18,7 @@ use crate::keeper;
 use crate::print::{err, out};
 
 use args::{Takes, Words};
-use commands::{down, logs, ls, plan, restart, run, set, status, unset, up, wipe};
+use commands::{down, logs, ls, plan, restart, run, serve, set, status, unset, up, wipe};
 
 /// How a command ends, as its exit code says it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,6 +76,7 @@ Usage:
   tay unset PLACE... [--root FOLDER] [--json]
   tay wipe UNIT... [--yes] [--root FOLDER] [--json]
   tay wipe --all [--yes] [--root FOLDER] [--json]
+  tay serve [--root FOLDER]
   tay --version
   tay --help
 
@@ -139,6 +140,15 @@ command whose undo needs a unit that is not up is refused. tay wipe --all
 takes the environment down and removes everything it keeps: every volume of
 it, and .tay/ but for choices.yaml. Without --yes nothing changes, and it
 says what it would remove.
+
+tay serve is the environment's daemon in the foreground, for a service
+manager to start, restart and stop. It takes the place of the daemon that
+runs, which leaves the stack running, brings up what the environment
+remembers being asked for, whether or not it is meant to be up, and prints
+each change of state for as long as it runs. Told to stop by SIGTERM or
+SIGINT, it takes the environment down as tay down does and exits; tay down
+does the same through its socket. SIGHUP does not stop it. Every other
+command works through it as always.
 
 Options:
   --root FOLDER       look for tay.yaml from FOLDER instead of the current one
@@ -204,6 +214,7 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> ExitCode {
         Some("set") => (&set::TAKES, set::run),
         Some("unset") => (&unset::TAKES, unset::run),
         Some("wipe") => (&wipe::TAKES, wipe::run),
+        Some("serve") => (&serve::TAKES, serve::run),
         Some("keep") => return keeper::keep(args),
         Some(other) if other.starts_with('-') => {
             err(&format!(

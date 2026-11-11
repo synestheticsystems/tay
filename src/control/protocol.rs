@@ -22,7 +22,8 @@ pub const DOWN: &str = "/v1/down";
 /// `GET`: each unit's state from a check, a [`Status`].
 pub const STATUS: &str = "/v1/status";
 /// `POST`: the daemon exits and leaves the stack as it is, for a command of
-/// another version that starts its own. It answers `{}` first.
+/// another version that starts its own, or for `tay serve`, which takes its
+/// place. It answers `{}` first.
 pub const EXIT: &str = "/v1/exit";
 /// `POST` a [`Remember`]: changes what the environment remembers being
 /// asked for, and touches no unit. It answers `{}`.

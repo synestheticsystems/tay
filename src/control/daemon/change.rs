@@ -10,6 +10,7 @@ use http_body_util::channel::Sender;
 use hyper::body::{Bytes, Frame};
 use tokio::sync::watch;
 
+use super::Journal;
 use crate::clock;
 use crate::control::protocol::{Event, Refused, Restart, RunRequest, UpRequest, WipeRequest};
 
@@ -18,6 +19,9 @@ use crate::control::protocol::{Event, Refused, Restart, RunRequest, UpRequest, W
 #[derive(Clone, PartialEq, Eq)]
 pub enum Kind {
     Up(UpRequest),
+    /// The bring-up `tay serve` begins with, which asks what a `tay up`
+    /// that adds nothing to what is remembered asks, from its home.
+    Serve(UpRequest),
     Down,
     Restart(Restart),
     Run(RunRequest),
@@ -48,6 +52,20 @@ pub struct Change {
     /// person reads it.
     cancelled_by: OnceLock<&'static str>,
     ended: watch::Sender<bool>,
+    /// What `tay serve` prints, for a change it makes itself: told what the
+    /// change says other than its changes of state, which reach it from the
+    /// daemon whatever change is under way.
+    journal: Option<Journal>,
+}
+
+impl Kind {
+    /// Whether a `tay up` that asks `request` asks exactly what this change
+    /// does, and so joins it: another `tay up` that asks the same, or the
+    /// bring-up `tay serve` begins with, which a plain `tay up` from the
+    /// same home joins.
+    pub fn joined_by(&self, request: &UpRequest) -> bool {
+        matches!(self, Kind::Up(asked) | Kind::Serve(asked) if asked == request)
+    }
 }
 
 #[derive(Default)]
@@ -59,6 +77,16 @@ struct Said {
 
 impl Change {
     pub fn new(kind: Kind) -> Arc<Change> {
+        Change::with_journal(kind, None)
+    }
+
+    /// A change `tay serve` makes itself, whose `journal` is told what it
+    /// says.
+    pub fn journalled(kind: Kind, journal: Journal) -> Arc<Change> {
+        Change::with_journal(kind, Some(journal))
+    }
+
+    fn with_journal(kind: Kind, journal: Option<Journal>) -> Arc<Change> {
         Arc::new(Change {
             kind,
             since: clock::now(),
@@ -68,6 +96,7 @@ impl Change {
             cancelled: watch::Sender::new(false),
             cancelled_by: OnceLock::new(),
             ended: watch::Sender::new(false),
+            journal,
         })
     }
 
@@ -78,6 +107,7 @@ impl Change {
                 .chain(request.adds.units.iter().map(String::as_str))
                 .collect::<Vec<_>>()
                 .join(" "),
+            Kind::Serve(_) => "tay serve".to_string(),
             Kind::Down => "tay down".to_string(),
             Kind::Restart(restart) => std::iter::once("tay restart")
                 .chain(restart.units.iter().map(String::as_str))
@@ -102,8 +132,9 @@ impl Change {
         clock::in_seconds(self.began.elapsed())
     }
 
-    /// Tells every follower `event`. Once the change is closed, followers
-    /// have been told its end, and nothing more is said to them.
+    /// Tells every follower `event`, and the journal, if any, unless it is
+    /// a change of state. Once the change is closed, followers have been
+    /// told its end, and nothing more is said to them.
     pub fn say(&self, event: Event) {
         let mut said = self
             .said
@@ -112,10 +143,17 @@ impl Change {
         if said.closed {
             return;
         }
+        let journalled = match (&self.journal, &event) {
+            (_, Event::State { .. }) | (None, _) => None,
+            (Some(journal), _) => Some((journal, event.clone())),
+        };
         said.events.push(event);
         let count = said.events.len();
         drop(said);
         self.told.send_replace(count);
+        if let Some((journal, event)) = journalled {
+            journal(event);
+        }
     }
 
     /// Ends what followers are told: they end once they have read all

@@ -1,6 +1,6 @@
 //! The engine, through the real binary: `tay up`, `tay down`, `tay status`,
-//! `tay logs`, `tay ls`, `tay set`, `tay unset`, `tay restart`, `tay run`
-//! and `tay wipe`, the daemon, what is kept on disk, the units that are
+//! `tay logs`, `tay ls`, `tay set`, `tay unset`, `tay restart`, `tay run`,
+//! `tay wipe` and `tay serve`, the daemon, what is kept on disk, the units that are
 //! made and those that run, on the host and in containers. Each test runs on a machine of its
 //! own, whose daemons are gone, and whose environments have nothing left in
 //! Docker, when the test ends.
@@ -24,6 +24,7 @@ mod restart;
 mod run;
 mod running;
 mod secrets;
+mod serving;
 mod status;
 mod undoing;
 mod up;

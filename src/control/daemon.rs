@@ -1,29 +1,32 @@
-//! An environment's daemon, `tay daemon`: one per environment, started
-//! detached by the first command that needs it. It owns the changes to the
+//! An environment's daemon: one per environment, started detached by the
+//! first command that needs it as `tay daemon`, or run in the foreground by
+//! `tay serve` for a service manager. It owns the changes to the
 //! environment, listens on a Unix socket in a short folder named by the
 //! environment's id, and lives for as long as it holds `.tay/daemon.lock`.
 //!
-//! It tells the command that started it whether it is ready by one line on
-//! its standard output, which that command reads through a pipe: `ready`
-//! once it listens, `held` when another daemon holds the lock, or `error:`
-//! and why it cannot run. Everything else it says goes to its log, which is
-//! its standard error.
+//! One started detached tells the command that started it whether it is
+//! ready by one line on its standard output, which that command reads
+//! through a pipe: `ready` once it listens, `held` when another daemon holds
+//! the lock, or `error:` and why it cannot run. Everything else it says goes
+//! to its log, which is its standard error.
 
 mod change;
 mod down;
+mod listen;
+mod log;
 mod restart;
 mod routes;
 mod run;
-mod serve;
+mod served;
 mod up;
 mod wipe;
 
-use std::fs::{File, OpenOptions};
+use std::fmt;
 use std::io::Write;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex, OnceLock, Weak};
+use std::sync::{Arc, Mutex, Weak};
 
 use tokio::net::UnixListener;
 use tokio::sync::watch;
@@ -36,13 +39,20 @@ use crate::diagnostic::source::Sources;
 use crate::disk::{
     self, Asked, Counts, DiskError, Environment, Identity, Intent, Layout, Lock, Machine,
 };
-use crate::engine::{self, Supervisor, Told, UnitState};
+use crate::engine::{self, Left, Supervisor, Told, UnitState};
 use crate::module::Occasion;
 use crate::plan::{self, Options, Plan, PlannedUnit};
-use crate::print;
 
 use change::{Change, NotBegun};
 use down::Down;
+use log::log;
+
+pub use log::open_log;
+pub use served::{Served, serve};
+
+/// What `tay serve` prints for as long as it runs: each change of state,
+/// and what the changes it makes itself say.
+pub type Journal = Arc<dyn Fn(Event) + Send + Sync>;
 
 /// What the daemon holds while it runs.
 pub struct Daemon {
@@ -53,15 +63,46 @@ pub struct Daemon {
     /// The change under way, if any.
     change: Mutex<Option<Arc<Change>>>,
     /// Why the daemon is to exit, once it is.
-    exit: watch::Sender<Option<String>>,
+    exit: watch::Sender<Option<Exiting>>,
     /// Whether it has begun to stop everything because the environment's
     /// folder has gone.
     going: AtomicBool,
+    /// What `tay serve` prints, for a daemon it runs.
+    journal: Option<Journal>,
+}
+
+/// Why the daemon exits.
+#[derive(Clone)]
+enum Exiting {
+    /// It took the environment down, for the reason `because` gives: what
+    /// was left that could not be stopped, or why that could not be told.
+    TookDown {
+        because: Down,
+        left: Result<Vec<Left>, String>,
+    },
+    /// It was asked to, so that another daemon takes its place: one of
+    /// another version of tay, or one `tay serve` runs. The stack runs on.
+    MakingWay,
+    /// Its socket was removed or replaced, so no command can reach it. The
+    /// stack runs on.
+    SocketLost,
+}
+
+impl fmt::Display for Exiting {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Exiting::TookDown { because, .. } => f.write_str(because.exit()),
+            Exiting::MakingWay => f.write_str("asked to, so that another daemon takes its place"),
+            Exiting::SocketLost => {
+                f.write_str("its socket was removed or replaced, so no command can reach it")
+            }
+        }
+    }
 }
 
 /// Why the daemon cannot start.
 #[derive(Debug, thiserror::Error)]
-enum CannotStart {
+pub enum CannotStart {
     #[error(transparent)]
     Disk(#[from] DiskError),
     #[error("this folder has no id of its own: no `tay up` has been run in it")]
@@ -73,17 +114,19 @@ enum CannotStart {
     },
     #[error("tay cannot start the daemon's runtime: {0}")]
     Runtime(std::io::Error),
+    #[error("tay cannot be told to stop: {0}")]
+    Signals(std::io::Error),
 }
 
-/// Runs the daemon of the environment whose stack's root is `root`, until
-/// it is taken down, asked to exit, or its folder or socket disappears.
-/// Gives whether it could run; one that finds another daemon running
-/// leaves it to that one, which is as it should be.
+/// Runs the daemon of the environment whose stack's root is `root`,
+/// started detached, until it is taken down, asked to exit, or its folder
+/// or socket disappears. Gives whether it could run; one that finds
+/// another daemon running leaves it to that one, which is as it should be.
 pub fn run(root: &Path) -> bool {
     let layout = Layout::of(root);
     // The command that starts the daemon gives it this log as its standard
-    // error. It is set once, as the daemon starts.
-    let _ = LOG.set(layout.daemon_log());
+    // error.
+    log::on_stderr(layout.daemon_log());
     let lock = match Lock::try_take(&layout.daemon_lock()) {
         Ok(Some(lock)) => lock,
         Ok(None) => {
@@ -100,17 +143,12 @@ pub fn run(root: &Path) -> bool {
         Err(error) => return cannot_start(CannotStart::Runtime(error)),
     };
     runtime.block_on(async {
-        let (daemon, listener, socket) = match start(layout).await {
+        let (daemon, listener, socket) = match start(layout, None).await {
             Ok(started) => started,
             Err(why) => return cannot_start(why),
         };
         ready_line("ready");
-        serve::serve(&daemon, listener, &lock, &socket).await;
-        // The socket is removed while the lock is still held, so no other
-        // daemon has made one there yet.
-        if socket.is_ours() {
-            let _ = std::fs::remove_file(&socket.path);
-        }
+        listen::listen(&daemon, listener, &lock, &socket).await;
         true
     })
 }
@@ -129,7 +167,14 @@ impl Socket {
     }
 }
 
-async fn start(layout: Layout) -> Result<(Arc<Daemon>, UnixListener, Socket), CannotStart> {
+/// Becomes the daemon of the environment at `layout`, whose lock is held:
+/// listens on its socket, and finds its units again. `journal` is what
+/// `tay serve` prints, for a daemon it runs, and is told each change of
+/// state.
+async fn start(
+    layout: Layout,
+    journal: Option<Journal>,
+) -> Result<(Arc<Daemon>, UnixListener, Socket), CannotStart> {
     let machine = Machine::from_env()?;
     let Identity::Own(environment) = Environment::identify(&layout, &machine)? else {
         return Err(CannotStart::NotIdentified);
@@ -184,6 +229,7 @@ async fn start(layout: Layout) -> Result<(Arc<Daemon>, UnixListener, Socket), Ca
             change: Mutex::new(None),
             exit: watch::Sender::new(None),
             going: AtomicBool::new(false),
+            journal,
         }
     });
     found_again(&daemon.supervisor).await;
@@ -309,9 +355,10 @@ impl Daemon {
         }
     }
 
-    /// Asks the daemon to exit, once the answers under way have finished.
-    /// The stack is left as it is, and a change under way stops.
-    pub fn exit(&self, why: &str) {
+    /// Asks the daemon to exit, once the answers under way have finished,
+    /// for the reason `why` gives. What runs is left as it is, and a change
+    /// under way stops.
+    fn exit(&self, why: Exiting) {
         if let Some(change) = self
             .change
             .lock()
@@ -323,27 +370,31 @@ impl Daemon {
         self.exit.send_if_modified(|exit| {
             let first = exit.is_none();
             if first {
-                *exit = Some(why.to_string());
+                *exit = Some(why);
             }
             first
         });
     }
 
-    /// Tells the followers of the change under way, if any, that `unit`
-    /// took `state`.
+    /// Tells the journal, for a daemon `tay serve` runs, and the followers
+    /// of the change under way, if any, that `unit` took `state`.
     fn tell(&self, unit: &str, state: &UnitState) {
+        let event = Event::State {
+            unit: unit.to_string(),
+            state: state.state,
+            detail: state.detail.clone(),
+            at: clock::now(),
+        };
+        if let Some(journal) = &self.journal {
+            journal(event.clone());
+        }
         if let Some(change) = self
             .change
             .lock()
             .expect("the change under way is not poisoned")
             .as_ref()
         {
-            change.say(Event::State {
-                unit: unit.to_string(),
-                state: state.state,
-                detail: state.detail.clone(),
-                at: clock::now(),
-            });
+            change.say(event);
         }
     }
 
@@ -398,52 +449,6 @@ impl Daemon {
             .is_some_and(|other| Arc::ptr_eq(other, change))
         {
             *under_way = None;
-        }
-    }
-}
-
-/// A daemon's log longer than this is set aside and a new one begun, so
-/// that an environment brought up for months does not fill the disk. One
-/// file set aside is kept.
-const LOG_SIZE: u64 = 1 << 20;
-
-/// The daemon's log, the path it is at, once the daemon runs.
-static LOG: OnceLock<PathBuf> = OnceLock::new();
-
-/// The daemon's log at `path`, opened to be added to; a long one is set
-/// aside first.
-pub fn open_log(path: &Path) -> Result<File, DiskError> {
-    let folder = path
-        .parent()
-        .expect("the daemon's log is in the logs folder");
-    std::fs::create_dir_all(folder).map_err(DiskError::io(folder, "made"))?;
-    if std::fs::metadata(path).is_ok_and(|metadata| metadata.len() > LOG_SIZE) {
-        let set_aside = path.with_extension("log.1");
-        std::fs::rename(path, &set_aside).map_err(DiskError::io(path, "set aside"))?;
-    }
-    OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .map_err(DiskError::io(path, "opened"))
-}
-
-/// Writes a line to the daemon's log, which is its standard error, with its
-/// time, and begins a new log when it has grown too long.
-fn log(line: &str) {
-    print::err(&format!("{}  {line}\n", clock::utc(clock::now())));
-    let Some(path) = LOG.get() else {
-        return;
-    };
-    let long = rustix::fs::fstat(rustix::stdio::stderr())
-        .is_ok_and(|stat| u64::try_from(stat.st_size).is_ok_and(|size| size > LOG_SIZE));
-    // A log whose folder has gone, with the environment's, is not made
-    // again.
-    if long && path.parent().is_some_and(Path::exists) {
-        // A log that cannot be begun anew is written on as it is: there is
-        // nowhere else to say so.
-        if let Ok(file) = open_log(path) {
-            let _ = rustix::stdio::dup2_stderr(&file);
         }
     }
 }

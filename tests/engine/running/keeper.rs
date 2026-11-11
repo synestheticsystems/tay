@@ -3,10 +3,7 @@
 //! ended; and the order of a start leaves no moment at which a program runs
 //! that the next daemon does not know of.
 
-use std::fs::OpenOptions;
 use std::time::{Duration, Instant};
-
-use rustix::fs::{FlockOperation, flock};
 
 use crate::harness::{Machine, alive, child, command_of, eventually, log};
 
@@ -48,21 +45,6 @@ fn a_unit_outlives_its_daemon_goes_on_logging_and_is_found_again_without_startin
     assert_eq!(child(&root, "web"), web);
     assert!(alive(web));
     assert!(!log(&root, "web").contains("attempt 2"));
-}
-
-/// Holds the lock on the machine's list of environments, through which
-/// every port is chosen, until it is dropped: a start that needs a port
-/// waits on it.
-fn hold_the_list(machine: &Machine) -> std::fs::File {
-    let lock = OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(machine.path("state/tay/environments.lock"))
-        .unwrap();
-    flock(&lock, FlockOperation::NonBlockingLockExclusive).unwrap();
-    lock
 }
 
 /// Where in a start the daemon was when it was killed, as what it left on
@@ -136,7 +118,7 @@ fn the_daemon_killed_at_any_point_of_a_start_leaves_nothing_the_next_daemon_does
         let root = machine.stack("services");
         // The daemon runs, and the environment is on the machine's list.
         assert_eq!(machine.at(&root, "up", &["ticks-port"]).code, 0);
-        let list = hold_the_list(&machine);
+        let list = machine.hold_the_list();
         let mut up = machine.spawn_up(&root, &["ticking"]);
         up.until("ticks-port  starting");
         let daemon = machine.daemon_pid(&root).unwrap();

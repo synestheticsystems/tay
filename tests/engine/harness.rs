@@ -271,6 +271,21 @@ impl Machine {
         answer
     }
 
+    /// Holds the lock on the machine's list of environments, through which
+    /// every port is chosen, until it is dropped: a change that makes a
+    /// port waits on it, and so is held under way.
+    pub fn hold_the_list(&self) -> fs::File {
+        let lock = fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(self.path("state/tay/environments.lock"))
+            .unwrap();
+        rustix::fs::flock(&lock, rustix::fs::FlockOperation::NonBlockingLockExclusive).unwrap();
+        lock
+    }
+
     /// The machine's list of environments.
     pub fn list(&self) -> Value {
         let text = fs::read_to_string(self.path("state/tay/environments.json")).unwrap();
@@ -395,6 +410,46 @@ impl Following {
                 return;
             }
         }
+    }
+
+    /// The command's process.
+    pub fn pid(&self) -> i32 {
+        self.child.id() as i32
+    }
+
+    /// Sends the command `signal`.
+    pub fn signal(&self, signal: rustix::process::Signal) {
+        let pid = rustix::process::Pid::from_raw(self.pid()).unwrap();
+        rustix::process::kill_process(pid, signal).unwrap();
+    }
+
+    /// Waits for it to end, for as long as `limit`, and gives all it
+    /// printed. One that has not ended by then is killed, and the test
+    /// fails.
+    pub fn finish_within(mut self, limit: Duration) -> Run {
+        self.ended_within(limit);
+        self.finish()
+    }
+
+    /// Waits for it to be ended by a signal, for as long as `limit`, and
+    /// gives the signal's number.
+    pub fn killed_within(mut self, limit: Duration) -> i32 {
+        let status = self.ended_within(limit);
+        std::os::unix::process::ExitStatusExt::signal(&status)
+            .unwrap_or_else(|| panic!("a signal ended it, not {status}:\n{}", self.read))
+    }
+
+    fn ended_within(&mut self, limit: Duration) -> std::process::ExitStatus {
+        let mut status = None;
+        eventually(limit, || {
+            status = self.child.try_wait().unwrap();
+            status.is_some()
+        });
+        status.unwrap_or_else(|| {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+            panic!("the command did not end within {limit:?}:\n{}", self.read)
+        })
     }
 
     /// Waits for it to end, and gives all it printed.

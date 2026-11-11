@@ -36,7 +36,10 @@ serde_json = "1"
 # has no such hash.
 sha2 = "0.10"
 thiserror = "2"
-tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt", "sync", "time"] }
+# `signal`: `tay serve` is told to stop by a signal, which the daemon's
+# runtime must hear without blocking; it adds no crate tokio's `process`
+# does not already bring.
+tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt", "signal", "sync", "time"] }
 
 # When a process started, which tells a process tay recorded from another
 # given its number later. macOS says so only through libproc, which rustix

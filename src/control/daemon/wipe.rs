@@ -16,7 +16,7 @@ use std::sync::atomic::Ordering;
 
 use super::change::{Change, NotBegun};
 use super::down::Down;
-use super::{Daemon, log, options};
+use super::{Daemon, Exiting, log, options};
 use crate::control::protocol::{Event, FOLDER_WIPED, LISTING_WIPED, Refused};
 use crate::diagnostic::quoted_list;
 use crate::disk::{Asked, Intent, List};
@@ -199,17 +199,20 @@ impl Daemon {
         let environment = &self.environment;
         if let Err(error) = Intent::Down.write(&environment.layout) {
             self.fail(&change, &error.to_string());
-            self.exit(Down::Wiped.exit());
+            self.exit(Exiting::TookDown {
+                because: Down::Wiped,
+                left: Err(format!("nothing was stopped: {error}")),
+            });
             return;
         }
         let stopped = self.stop_everything(&change, Down::Wiped).await;
-        let removed = match stopped {
+        let removed = match &stopped {
             Ok(left) if left.is_empty() => self.remove_everything().await,
             Ok(left) => {
-                change.say(Event::Down { left });
+                change.say(Event::Down { left: left.clone() });
                 Err("something was left, so nothing was removed".to_string())
             }
-            Err(problem) => Err(problem),
+            Err(problem) => Err(problem.clone()),
         };
         match removed {
             Ok(removed) => {
@@ -222,7 +225,10 @@ impl Daemon {
             }
             Err(problem) => self.fail(&change, &problem),
         }
-        self.exit(Down::Wiped.exit());
+        self.exit(Exiting::TookDown {
+            because: Down::Wiped,
+            left: stopped,
+        });
     }
 
     /// Removes everything the environment keeps, once nothing of it runs:

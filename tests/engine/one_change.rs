@@ -8,26 +8,10 @@
 //! list of environments, through which every port is chosen: the change
 //! waits on it while it makes its port.
 
-use std::fs::{File, OpenOptions};
 use std::path::Path;
 use std::time::Duration;
 
-use rustix::fs::{FlockOperation, flock};
-
 use crate::harness::{Machine, eventually};
-
-/// The lock on the machine's list, held until it is dropped.
-fn hold_the_list(machine: &Machine) -> File {
-    let lock = OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(machine.path("state/tay/environments.lock"))
-        .unwrap();
-    flock(&lock, FlockOperation::NonBlockingLockExclusive).unwrap();
-    lock
-}
 
 /// A stack brought up once, so that its daemon runs and nothing more is
 /// needed of the list but choosing ports.
@@ -47,7 +31,7 @@ fn starting_port(root: &Path, machine: &Machine) -> crate::harness::Following {
 fn a_second_up_joins_the_first_and_gets_the_same_result_and_another_change_is_refused() {
     let machine = Machine::new();
     let root = up_once(&machine);
-    let list = hold_the_list(&machine);
+    let list = machine.hold_the_list();
     let first = starting_port(&root, &machine);
     let mut second = machine.spawn_up(&root, &[]);
     second.until("config-port  starting");
@@ -82,7 +66,7 @@ fn a_second_up_joins_the_first_and_gets_the_same_result_and_another_change_is_re
 fn down_is_accepted_while_up_runs_and_cancels_it() {
     let machine = Machine::new();
     let root = up_once(&machine);
-    let list = hold_the_list(&machine);
+    let list = machine.hold_the_list();
     let up = starting_port(&root, &machine);
     let mut down = machine.command(&root, &["down"]);
     down.stdout(std::process::Stdio::piped());
@@ -124,7 +108,7 @@ fn an_up_that_joins_after_the_decision_gets_the_same_result_and_another_is_refus
     machine.settled(&root);
     // `search` fails at once, which decides the change, while `site-port`
     // waits on the list.
-    let list = hold_the_list(&machine);
+    let list = machine.hold_the_list();
     let first = machine.at(&root, "up", &[]);
     assert_eq!(first.code, 1, "{}{}", first.stdout, first.stderr);
     let joined = machine.at(&root, "up", &[]);
@@ -239,7 +223,7 @@ fn definitions_that_have_errors_when_the_daemon_plans_them_start_nothing() {
 fn an_up_cancelled_while_its_last_unit_is_made_ends_cancelled() {
     let machine = Machine::new();
     let root = up_once(&machine);
-    let list = hold_the_list(&machine);
+    let list = machine.hold_the_list();
     // The unit asked for is the one being made when `tay down` comes.
     let mut up = machine.spawn_up(&root, &["config-port"]);
     up.until("config-port  starting");
@@ -263,7 +247,7 @@ fn set_and_unset_are_refused_while_another_change_runs() {
     let machine = Machine::new();
     let root = up_once(&machine);
     assert_eq!(machine.at(&root, "set", &["label=first"]).code, 0);
-    let list = hold_the_list(&machine);
+    let list = machine.hold_the_list();
     let up = starting_port(&root, &machine);
     for (command, word) in [("set", "label=second"), ("unset", "label")] {
         let refused = machine.at(&root, command, &[word]);
@@ -286,7 +270,7 @@ fn set_and_unset_are_refused_while_another_change_runs() {
 fn restart_is_refused_while_another_change_runs() {
     let machine = Machine::new();
     let root = up_once(&machine);
-    let list = hold_the_list(&machine);
+    let list = machine.hold_the_list();
     let up = starting_port(&root, &machine);
     let refused = machine.at(&root, "restart", &["config"]);
     assert_eq!(refused.code, 4, "{}{}", refused.stdout, refused.stderr);
@@ -305,7 +289,7 @@ fn restart_is_refused_while_another_change_runs() {
 fn run_is_refused_while_another_change_runs() {
     let machine = Machine::new();
     let root = up_once(&machine);
-    let list = hold_the_list(&machine);
+    let list = machine.hold_the_list();
     let up = starting_port(&root, &machine);
     let refused = machine.at(&root, "run", &["note"]);
     assert_eq!(refused.code, 4, "{}{}", refused.stdout, refused.stderr);
@@ -325,7 +309,7 @@ fn run_is_refused_while_another_change_runs() {
 fn wipe_is_refused_while_another_change_runs() {
     let machine = Machine::new();
     let root = up_once(&machine);
-    let list = hold_the_list(&machine);
+    let list = machine.hold_the_list();
     let up = starting_port(&root, &machine);
     let refused = machine.at(&root, "wipe", &["config", "--yes"]);
     assert_eq!(refused.code, 4, "{}{}", refused.stdout, refused.stderr);
