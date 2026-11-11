@@ -17,3 +17,9 @@ units:
     action: true
     uses: command
     with: { run: [echo, "${shared-port.number}"] }
+  own-port: { uses: port }
+  own:
+    doc: Listens on a port that no other unit uses.
+    uses: process
+    with: { command: [python3, "${environment.root}/listen.py", "${own-port.number}"] }
+    ready: { log: listening, within: 1m }

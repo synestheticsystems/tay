@@ -8,13 +8,11 @@
 
 use std::fmt;
 use std::io;
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
 use std::ops::RangeInclusive;
 
 use rand_core::{OsRng, RngCore};
-use rustix::io::Errno;
-use rustix::net::{AddressFamily, SocketType, bind, socket, sockopt};
 
+use super::free::is_free;
 use super::kept::{Holder, Ports};
 use super::{NUMBER, PortSettings};
 use crate::disk::DiskError;
@@ -180,52 +178,4 @@ fn choose(ports: &Ports<'_>, unit: &str) -> Result<u16, PortError> {
         }
     }
     Err(PortError::NoneFree)
-}
-
-/// Whether no socket on this machine has `number`. Each test binds every
-/// address of a family at once without `SO_REUSEADDR`, which the system
-/// refuses while any socket holds the number on any address of it: on
-/// macOS a bind with that option would be let through beside a program
-/// listening on one address only.
-fn is_free(number: u16) -> io::Result<bool> {
-    let ipv4 = socket(AddressFamily::INET, SocketType::STREAM, None)?;
-    match bind(&ipv4, &SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, number)) {
-        Ok(()) => {}
-        Err(Errno::ADDRINUSE) => return Ok(false),
-        Err(errno) => return Err(errno.into()),
-    }
-    let ipv6 = match socket(AddressFamily::INET6, SocketType::STREAM, None) {
-        Ok(ipv6) => ipv6,
-        // A machine with no IPv6 has nothing listening on it.
-        Err(Errno::AFNOSUPPORT) => return Ok(true),
-        Err(errno) => return Err(errno.into()),
-    };
-    sockopt::set_ipv6_v6only(&ipv6, true)?;
-    match bind(
-        &ipv6,
-        &SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, number, 0, 0),
-    ) {
-        Ok(()) | Err(Errno::ADDRNOTAVAIL) => Ok(true),
-        Err(Errno::ADDRINUSE) => Ok(false),
-        Err(errno) => Err(errno.into()),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::net::TcpListener;
-
-    #[test]
-    fn a_number_a_program_listens_on_is_not_free_on_any_one_address() {
-        // A program on the loopback address alone, or on every address.
-        for address in ["127.0.0.1:0", "0.0.0.0:0", "[::1]:0"] {
-            let Ok(listener) = TcpListener::bind(address) else {
-                continue;
-            };
-            let number = listener.local_addr().unwrap().port();
-            assert!(!is_free(number).unwrap(), "{address}");
-            drop(listener);
-        }
-    }
 }

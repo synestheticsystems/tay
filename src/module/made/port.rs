@@ -1,5 +1,6 @@
 //! `port`: a host port held for this environment.
 
+mod free;
 mod hold;
 mod kept;
 

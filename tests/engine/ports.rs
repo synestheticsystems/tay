@@ -255,3 +255,33 @@ fn a_change_that_brings_up_part_keeps_a_port_another_unit_of_the_environment_lis
     assert_eq!(run.stdout, format!("{kept}\n"));
     assert_eq!(number(&root, "shared-port"), kept);
 }
+
+#[test]
+fn a_port_its_own_unit_stopped_listening_on_is_kept_whatever_its_closed_connections_leave() {
+    let machine = Machine::new();
+    let root = machine.stack("held-ports");
+    let up = machine.at(&root, "up", &["own"]);
+    assert_eq!(up.code, 0, "{}{}", up.stdout, up.stderr);
+    let kept = number(&root, "own-port");
+    // A connection from outside the environment, which `own` closes as it
+    // is stopped, leaving its side of it holding the number for a while.
+    let mut connection = std::net::TcpStream::connect(("127.0.0.1", kept)).unwrap();
+    let held = crate::harness::eventually(Duration::from_secs(30), || {
+        crate::harness::log(&root, "own").contains("holding a connection")
+    });
+    assert!(held, "{}", crate::harness::log(&root, "own"));
+    let closing = std::thread::spawn(move || {
+        let mut rest = Vec::new();
+        std::io::Read::read_to_end(&mut connection, &mut rest)
+    });
+    let restart = machine.at(&root, "restart", &["own"]);
+    assert_eq!(restart.code, 0, "{}{}", restart.stdout, restart.stderr);
+    assert_eq!(
+        restart.last_change("own-port"),
+        format!("ready {kept}, kept")
+    );
+    // It listens on its number again.
+    let own = restart.last_change("own");
+    assert!(own.starts_with("ready "), "{own}");
+    closing.join().unwrap().unwrap();
+}
