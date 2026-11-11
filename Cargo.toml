@@ -10,8 +10,9 @@ readme = "README.md"
 keywords = ["orchestration", "dev-environment", "containers", "processes", "yaml"]
 categories = ["command-line-utilities", "development-tools"]
 # What the published crate leaves out: how the repository itself is built and
-# released, and which project in its tracker it belongs to.
-exclude = [".github/", ".fwd/"]
+# released, which project in its tracker it belongs to, and the README's
+# picture, which the README names by its public address.
+exclude = [".github/", ".fwd/", "docs/assets/"]
 
 [dependencies]
 base64ct = { version = "1.6", features = ["alloc"] }
