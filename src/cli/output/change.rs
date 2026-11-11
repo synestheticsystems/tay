@@ -14,7 +14,7 @@ use crate::cli::Exit;
 use crate::control::protocol::Event;
 use crate::definition::read::THIS_TAY;
 use crate::diagnostic::quoted_list;
-use crate::engine::Decision;
+use crate::engine::{Decision, State};
 use crate::print::{err, out};
 
 /// The schema of the JSON lines. A change to any key or its meaning is a
@@ -204,8 +204,12 @@ impl Printer {
             }
             Decision::Failed { failed } => {
                 for failed in failed {
+                    let came = match failed.state {
+                        State::Unready => "is unready",
+                        _ => "failed",
+                    };
                     own(&format!(
-                        "{command}: `{}` failed: {}\n",
+                        "{command}: `{}` {came}: {}\n",
                         failed.unit, failed.reason
                     ));
                     if !failed.lines.is_empty() {
@@ -308,6 +312,7 @@ impl Printer {
                 "decision": "failed",
                 "failed": failed.iter().map(|failed| json!({
                     "unit": failed.unit,
+                    "state": failed.state.word(),
                     "reason": failed.reason,
                     "lines": failed.lines,
                     "waiting": failed.waiting,

@@ -33,8 +33,8 @@ Every command takes `--root FOLDER`, and `--json` where it prints something a pr
 
 1. Reads and plans exactly as `tay plan` does. Errors in the definitions stop it here, with nothing started.
 2. Starts this environment's daemon if none is running, and hands it what was asked for. The daemon plans again from the same definitions, so no secret and no module's settings travel between the two.
-3. Prints each change of state as it happens, one line per change.
-4. Returns when every unit asked for is `ready`, or when one of them can no longer become ready. In the second case the daemon goes on bringing up whatever can still come up; `tay status` shows where that ends.
+3. Prints each change of state as it happens, one line per change. A unit that is already up when it begins is printed once with the state it is in.
+4. Returns when every unit asked for is `ready`, or when one of them can no longer become ready. A unit found `unready` is waited for no longer than its own `within`: if it is not ready again by then, `tay up` says that it is unready and why, and returns as it does when a unit has failed, while the unit goes on running. In the second case the daemon goes on bringing up whatever can still come up; `tay status` shows where that ends.
 5. Ends by saying how long it took and which units took longest, so that a slow bring-up shows where its time went: each unit this `tay up` started that took a second or more, from the start of its first attempt until it was `ready` or had failed, the longest first, five at most. The time a unit spent waiting for what it needs is not its own and is not counted. With `--json` the closing line carries `seconds`, and under `took` every unit this `tay up` started with its seconds. The whole is counted from when the daemon takes the change until it is decided, so a `tay up` that joins another says the same. A unit still under way when `tay up` returns, as one can be when another has failed, is counted until then and named as still under way; under `took` each unit also carries the state it came to. A unit started again because what it was started from changed is counted from when that was found, stopping it included.
 
 With no unit named it brings up what the environment is asked for: the units an earlier `tay up` named, or what the choices list under `up` when none did. With units named, those are what the environment is asked for from then on: it brings them up with what they need, and stops what was up and is no longer needed, as it stops a unit taken out of the plan. `tay restart <unit>` starts one unit again without changing what is asked for.
@@ -48,7 +48,7 @@ When a unit fails, `tay up` names it, gives the reason and the last lines it wro
 | Code | Meaning |
 |---|---|
 | 0 | Done: everything asked for is ready (`up`), or nothing is left running (`down`) |
-| 1 | A unit failed, or something was left that could not be stopped |
+| 1 | A unit failed or stayed unready, something was left that could not be stopped, or a down could not be recorded |
 | 2 | The definitions have errors, or what was asked does not fit this stack: a unit that does not exist, a restart of a unit that is made, an argument an action does not declare |
 | 3 | This tay is too old for the definitions |
 | 4 | Refused as things stand: another change is running (the message says which, and since when), or what was asked needs something that is not up, or could only be done by disturbing a unit that is up (the message says what) |
@@ -68,7 +68,7 @@ When a unit fails, `tay up` names it, gives the reason and the last lines it wro
 | `stopped` | It is not running because it was stopped or never asked for |
 
 - The time a unit has to become ready is its own `within`, counted from the moment its own program starts. Preparing, building and pulling come before that and are not counted. No constant in tay overrides it.
-- The daemon keeps checking after a unit is ready, so `unready` and a return to `ready` are both seen.
+- The daemon keeps checking after a unit is ready, so `unready` and a return to `ready` are both seen. An unready unit is left running: tay does not stop or restart a unit because its check stopped passing.
 - **Restarts.** When a unit that runs exits, its `restart` decides. `attempts` counts attempts in a row that did not reach `ready`; reaching `ready` starts the count again. When they are used up the unit is `failed`.
 - A unit whose need has failed stays `waiting` and is reported as blocked. It is never started against a failed need.
 

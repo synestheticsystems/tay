@@ -20,7 +20,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use super::check::CheckedState;
-use super::settled::{Settled, Standing, have_failed};
+use super::settled::{Settled, Standing};
 use super::state::{State, UnitState};
 use super::supervisor::Supervisor;
 use super::unplanned::{anything_left, stop_unplanned};
@@ -242,8 +242,8 @@ impl Leaving {
         match settled.standing_on(in_plan.iter().map(|need| need.as_str())) {
             Standing::Clear => {}
             Standing::Waiting(waiting) => return Judged::Waits(waiting),
-            Standing::Blocked(failed) => {
-                return Judged::Cannot(format!("its `undo` cannot run: {}", have_failed(&failed)));
+            Standing::Blocked(lost) => {
+                return Judged::Cannot(format!("its `undo` cannot run: {}", lost.words()));
             }
         }
         Judged::Runs(elsewhere.into_iter().cloned().collect())

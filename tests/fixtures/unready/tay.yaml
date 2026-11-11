@@ -1,0 +1,14 @@
+format: 1
+stack: unready
+up: [checked]
+units:
+  checked:
+    doc: Runs until it is stopped, and is ready while the file `passing` is beside the stack.
+    uses: process
+    with: { command: [sh, -c, "trap 'exit 0' TERM; sleep 3600 & wait"] }
+    ready: { command: [test, -f, "${environment.root}/passing"], within: 5s }
+  waiter:
+    doc: Needs `checked`, so that it waits while that is unready.
+    uses: process
+    needs: [checked]
+    with: { command: [sh, -c, "trap 'exit 0' TERM; sleep 3600 & wait"] }

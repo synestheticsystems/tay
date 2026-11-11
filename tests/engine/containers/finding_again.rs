@@ -10,7 +10,7 @@ use std::os::unix::fs::MetadataExt;
 use std::time::Duration;
 
 use super::container;
-use crate::harness::{Machine, eventually, log};
+use crate::harness::{Machine, eventually, left_running, log};
 
 /// The numbers of the ticks in the log of `ticker` at `root`, in the order
 /// the log holds them.
@@ -99,7 +99,7 @@ fn a_container_whose_settings_changed_is_replaced_keeping_its_volume_and_one_unc
         container(&machine, &root, "keeper-data").unwrap()["Id"],
         first
     );
-    assert!(again.changes().is_empty(), "{}", again.stdout);
+    left_running(&again, "keeper-data");
     let changed = machine.at(&root, "up", &["keeper-data", "--set", "settings.mode=two"]);
     assert_eq!(changed.code, 0, "{}{}", changed.stdout, changed.stderr);
     assert_eq!(
@@ -138,14 +138,7 @@ fn a_container_that_takes_a_file_tay_does_not_overwrite_as_its_own_is_left_runni
         again.last_change("taken-conf"),
         "ready left as it is, since `overwrite` is false"
     );
-    assert!(
-        !again
-            .changes()
-            .iter()
-            .any(|line| line.starts_with("taker ")),
-        "{}",
-        again.stdout
-    );
+    left_running(&again, "taker");
     assert_eq!(container(&machine, &root, "taker").unwrap()["Id"], first);
 }
 
@@ -162,7 +155,7 @@ fn a_container_is_compared_by_the_image_it_was_created_from_not_the_name_that_na
         &["--set", "settings.box=docker.io/library/busybox:1.36"],
     );
     assert_eq!(renamed.code, 0, "{}{}", renamed.stdout, renamed.stderr);
-    assert!(renamed.changes().is_empty(), "{}", renamed.stdout);
+    left_running(&renamed, "tagged");
     assert_eq!(container(&machine, &root, "tagged").unwrap()["Id"], first);
 }
 

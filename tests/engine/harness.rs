@@ -510,6 +510,20 @@ impl Following {
     }
 }
 
+/// That `run`, a `tay up`, left `unit` running as it was: it said it once,
+/// `ready` as it was found, and did not start it again.
+pub fn left_running(run: &Run, unit: &str) {
+    let said: Vec<String> = (run.changes().into_iter())
+        .filter(|line| line.starts_with(&format!("{unit} ")))
+        .collect();
+    assert_eq!(said.len(), 1, "{}", run.stdout);
+    assert!(
+        said[0].starts_with(&format!("{unit} ready ")),
+        "{}",
+        run.stdout
+    );
+}
+
 /// A folder nothing can be written in, as on a full disk, until this is
 /// dropped, also when the test fails, so that it and its machine can be
 /// removed. It is declared after its machine, which is then dropped after

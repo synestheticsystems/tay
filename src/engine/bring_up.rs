@@ -6,21 +6,27 @@
 //! A unit that is made is made on the blocking pool. A unit that runs is
 //! handed to the supervisor, whose task looks after it from then on, and the
 //! loop waits for it to become ready or fail: an attempt that fails and is
-//! followed by one that becomes ready counts as ready. What a unit that runs
-//! already would be started from now is compared with what it was started
-//! from; if they differ it is started again, saying what changed, and
-//! otherwise joined as it is. A bring-up that leaves what is up as it is
-//! joins it unasked. A bring-up for `tay up` has what the plan no longer
+//! followed by one that becomes ready counts as ready. A unit it waits for
+//! while it is `unready` is waited for no longer than its own `within`,
+//! counted from when the loop first sees it so, and is then lost to the
+//! bring-up as a failed one is, though it goes on running and being
+//! checked. What a unit that runs already would be started from now is
+//! compared with what it was started from; if they differ it is started
+//! again, saying what changed, and otherwise joined as it is, its state
+//! said once as it is. A bring-up that leaves what is up as it is joins it
+//! unasked. A bring-up for `tay up` has what the plan no longer
 //! has leave first, as [`Leaving`] says: until it has, only the units it
 //! waits for start, and nothing is decided. Each unit it starts is timed,
 //! and the decision is told with how long each took.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 use tokio::task::JoinSet;
+use tokio::time::Instant;
 
 use super::leaving::{Leaving, NotUndone, Step};
 use super::settled::{Settled, Standing};
@@ -29,7 +35,7 @@ use super::state::{State, UnitState};
 use super::supervisor::{Begin, Supervisor};
 use super::units::Took;
 use crate::module::{Exists, Made, Operations, Running};
-use crate::plan::PlannedUnit;
+use crate::plan::{PlannedUnit, Readiness};
 
 /// What bringing a plan up comes to for the units it was asked for, and
 /// for `tay up` for the `undo`s owed, decided as soon as it can be.
@@ -43,11 +49,13 @@ pub enum Decision {
     Failed { failed: Vec<FailedUnit> },
 }
 
-/// A unit that failed, or whose `undo` did not run, why, the last lines it
-/// wrote, and every unit that was waiting on it.
+/// A unit that failed, stayed unready, or whose `undo` did not run, the
+/// state it is in, why, the last lines it wrote, and every unit that was
+/// waiting on it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FailedUnit {
     pub unit: String,
+    pub state: State,
     pub reason: String,
     pub lines: Vec<String>,
     pub waiting: Vec<String>,
@@ -99,6 +107,7 @@ pub async fn bring_up(
         running: HashSet::new(),
         handed: false,
         joined: HashSet::new(),
+        unready_since: HashMap::new(),
     };
     let mut making = JoinSet::new();
     // The unit each one being made is, by its task.
@@ -164,6 +173,7 @@ pub async fn bring_up(
         if idle && !waits_on_running {
             break;
         }
+        let unready_until = bringing.unready_until().filter(|_| waits_on_running);
         tokio::select! {
             // A cancel that comes as a unit is made is seen first, so
             // nothing more starts after it.
@@ -207,6 +217,9 @@ pub async fn bring_up(
             changed = changes.changed(), if waits_on_running => if changed.is_err() {
                 break;
             },
+            // A unit waited for while unready is given up on once its
+            // `within` has passed, whether or not anything changed.
+            () = tokio::time::sleep_until(unready_until.unwrap_or_else(Instant::now)), if unready_until.is_some() => {}
         }
     }
     decision
@@ -293,6 +306,9 @@ struct Bringing<'a> {
     handed: bool,
     /// The units that run that this change found running, and joined.
     joined: HashSet<usize>,
+    /// When the loop first saw each unit it waits for `unready`, while it
+    /// is.
+    unready_since: HashMap<usize, Instant>,
 }
 
 /// What a pass over the units started: the units that are made, to be made,
@@ -401,8 +417,10 @@ impl Bringing<'_> {
     }
 
     /// Joins the unit at `index`, which runs already, as it is: nothing
-    /// starts it again, and its state is its own.
+    /// starts it again, and its state is its own, which is said now, as no
+    /// change of it would say it.
     fn join(&mut self, index: usize) {
+        self.supervisor.say_again(&self.units[index].name);
         self.running.insert(index);
         self.joined.insert(index);
         self.handed = true;
@@ -425,8 +443,9 @@ impl Bringing<'_> {
         }
     }
 
-    /// Settles each unit that runs that has become ready or failed, or can
-    /// no longer start because a need of it failed; whether any settled. A
+    /// Settles each unit that runs that has become ready or failed, that
+    /// has been `unready` longer than its own `within`, or that can no
+    /// longer start because a need of it is lost; whether any settled. A
     /// unit this change found running and joined, whose task has ended with
     /// it not ready, is started afresh, once: it is not running now, and
     /// `tay up` brings up what is not.
@@ -434,15 +453,21 @@ impl Bringing<'_> {
         let before = self.running.len();
         let running: Vec<usize> = self.running.iter().copied().collect();
         for index in running {
-            let planned = &self.units[index];
+            let planned = Arc::clone(&self.units[index]);
             let state = self
                 .supervisor
                 .state(&planned.name)
                 .map(|state| state.state);
+            if state != Some(State::Unready) {
+                self.unready_since.remove(&index);
+            }
             let joined = self.joined.contains(&index);
             match state {
                 Some(State::Ready) => self.settled.record(&planned.name, State::Ready),
                 Some(State::Failed) if !joined => self.settled.record(&planned.name, State::Failed),
+                Some(State::Unready) if self.unready_too_long(index) => {
+                    self.settled.stayed_unready(&planned.name);
+                }
                 _ if self.supervisor.is_tended(&planned.name) => continue,
                 _ if joined => {
                     self.joined.remove(&index);
@@ -450,7 +475,7 @@ impl Bringing<'_> {
                 }
                 // Its task ended without it ready or failed: a need of it
                 // failed before it could start again.
-                _ => match self.settled.standing(planned) {
+                _ => match self.settled.standing(&planned) {
                     Standing::Blocked(failed) => self.settled.blocked(&planned.name, failed),
                     Standing::Clear | Standing::Waiting(_) => {
                         self.settled.record(&planned.name, State::Failed);
@@ -458,8 +483,25 @@ impl Bringing<'_> {
                 },
             }
             self.running.remove(&index);
+            self.unready_since.remove(&index);
         }
         self.running.len() != before
+    }
+
+    /// Whether the unit at `index`, which is `unready`, has been so longer
+    /// than its own `within` since the loop first saw it so; it is timed
+    /// from now if it was not.
+    fn unready_too_long(&mut self, index: usize) -> bool {
+        let since = *self.unready_since.entry(index).or_insert_with(Instant::now);
+        since.elapsed() >= unready_allowance(&self.units[index])
+    }
+
+    /// When the first unit the loop waits for while it is `unready` will
+    /// have been so longer than its own `within`.
+    fn unready_until(&self) -> Option<Instant> {
+        (self.unready_since.iter())
+            .map(|(index, since)| *since + unready_allowance(&self.units[*index]))
+            .min()
     }
 
     fn made(&mut self, index: usize, made: Result<Exists, String>) {
@@ -505,6 +547,7 @@ impl Bringing<'_> {
         };
         failed.extend(not_undone.iter().map(|not_undone| FailedUnit {
             unit: not_undone.unit.clone(),
+            state: State::Failed,
             reason: not_undone.reason.clone(),
             lines: match not_undone.ran {
                 true => self.supervisor.last_lines(&not_undone.unit),
@@ -530,6 +573,10 @@ impl Bringing<'_> {
             .filter_map(|planned| Some((planned, self.supervisor.state(&planned.name)?)))
             .map(|(planned, failure)| FailedUnit {
                 unit: planned.name.clone(),
+                state: match self.settled.stayed_unready_is(&planned.name) {
+                    true => State::Unready,
+                    false => State::Failed,
+                },
                 reason: failure.detail,
                 lines: self.supervisor.last_lines(&planned.name),
                 waiting: self
@@ -546,5 +593,15 @@ impl Bringing<'_> {
                     .collect(),
             })
             .collect()
+    }
+}
+
+/// How long a bring-up waits for `planned` while it is `unready`: its own
+/// `within`. A unit that writes no `ready` has its module judge it, as by a
+/// container's own health check, which has allowed for it already.
+fn unready_allowance(planned: &PlannedUnit) -> Duration {
+    match planned.mechanism.as_ref().map(|mechanism| &mechanism.ready) {
+        Some(Readiness::Check { within, .. }) => within.length(),
+        _ => Duration::ZERO,
     }
 }

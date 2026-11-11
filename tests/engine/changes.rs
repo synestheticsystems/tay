@@ -4,12 +4,13 @@
 //! by its being there alone. One that differs is started again, and
 //! `tay up` says what changed, by name, never showing a secret; one that
 //! only receives a value from a unit that changed is started again only if
-//! the value it receives changed; everything else is left running.
+//! the value it receives changed; everything else is left running, and said
+//! once as it is.
 
 use std::path::Path;
 use std::time::Duration;
 
-use crate::harness::{Machine, child, eventually, log};
+use crate::harness::{Machine, child, eventually, left_running, log};
 
 /// Waits until `unit`'s log has a line with `said`.
 fn said(root: &Path, unit: &str, said: &str) {
@@ -38,13 +39,9 @@ fn a_unit_whose_setting_changed_is_started_again_and_one_given_an_unchanged_valu
     // uses is made again, as a made unit is at every `tay up`, and kept.
     let same = machine.at(&root, "up", &[]);
     assert_eq!(same.code, 0, "{}{}", same.stdout, same.stderr);
-    assert!(
-        same.changes()
-            .iter()
-            .all(|line| line.starts_with("web-port ")),
-        "{}",
-        same.stdout
-    );
+    for unit in ["web", "follower", "caller"] {
+        left_running(&same, unit);
+    }
     let changed = machine.at(&root, "up", &["--set", "settings.mode=two"]);
     assert_eq!(changed.code, 0, "{}{}", changed.stdout, changed.stderr);
     let changes = changed.changes();
@@ -58,11 +55,7 @@ fn a_unit_whose_setting_changed_is_started_again_and_one_given_an_unchanged_valu
             changed.stdout
         );
     }
-    assert!(
-        !changes.iter().any(|line| line.starts_with("caller ")),
-        "{}",
-        changed.stdout
-    );
+    left_running(&changed, "caller");
     said(&root, "web", "| mode two");
     said(&root, "follower", "| follows two");
     assert_eq!(child(&root, "caller"), caller);
@@ -99,14 +92,7 @@ fn a_unit_that_uses_a_file_tay_does_not_overwrite_is_left_running_when_the_file_
     std::fs::write(&conf, "rewritten by its owner\n").unwrap();
     let again = machine.at(&root, "up", &[]);
     assert_eq!(again.code, 0, "{}{}", again.stdout, again.stderr);
-    assert!(
-        !again
-            .changes()
-            .iter()
-            .any(|line| line.starts_with("conf-owner ")),
-        "{}",
-        again.stdout
-    );
+    left_running(&again, "conf-owner");
     assert_eq!(child(&root, "conf-owner"), owner);
 }
 
@@ -128,14 +114,7 @@ fn a_unit_that_runs_what_a_command_builds_is_started_again_only_when_the_file_di
         "{}",
         same.stdout
     );
-    assert!(
-        !same
-            .changes()
-            .iter()
-            .any(|line| line.starts_with("program ")),
-        "{}",
-        same.stdout
-    );
+    left_running(&same, "program");
     assert_eq!(child(&root, "program"), program);
     let changed = machine.at(&root, "up", &["--set", "settings.says=second"]);
     assert_eq!(changed.code, 0, "{}{}", changed.stdout, changed.stderr);

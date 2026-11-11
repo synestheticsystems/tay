@@ -3,8 +3,9 @@
 mod took;
 
 use std::fs;
+use std::time::{Duration, Instant};
 
-use crate::harness::{Machine, kept_ports};
+use crate::harness::{Machine, child, kept_ports};
 
 #[test]
 fn units_that_are_made_come_up_ready_and_up_says_everything_asked_for_is() {
@@ -227,4 +228,53 @@ fn a_unit_with_watch_starts_as_any_other() {
     assert_eq!(up.last_change("watcher"), "ready attempt 1, running");
     // Nothing is said of it but its states.
     assert!(!up.stdout.contains("tay up: `watcher`"), "{}", up.stdout);
+}
+
+#[test]
+fn up_says_the_state_of_a_unit_it_finds_up_and_waits_for_an_unready_one_no_longer_than_its_within()
+{
+    let machine = Machine::new();
+    let root = machine.stack("unready");
+    let passing = root.join("passing");
+    fs::write(&passing, "").unwrap();
+    let up = machine.at(&root, "up", &[]);
+    assert_eq!(up.code, 0, "{}{}", up.stdout, up.stderr);
+    let program = child(&root, "checked");
+    fs::remove_file(&passing).unwrap();
+    let unready = machine.until_state(&root, "checked", Duration::from_secs(30), |state| {
+        state.starts_with("unready ")
+    });
+    let began = Instant::now();
+    let up = machine
+        .spawn_up(&root, &["checked", "waiter"])
+        .finish_within(Duration::from_secs(60));
+    assert_eq!(up.code, 1, "{}{}", up.stdout, up.stderr);
+    // The unit it found up is said once, as it is, and waited for no
+    // longer than its `within`, five seconds.
+    let found = format!("checked {unready}");
+    let said: Vec<String> = (up.changes().into_iter())
+        .filter(|line| line.starts_with("checked "))
+        .collect();
+    assert_eq!(said, [found], "{}", up.stdout);
+    assert!(began.elapsed() >= Duration::from_secs(5));
+    let (_, why) = unready.split_once(' ').unwrap();
+    let ended = up.before_it_took();
+    for line in [
+        "  waiter   waiting   blocked: `checked` is unready\n".to_string(),
+        format!("tay up: `checked` is unready: {why}\n"),
+    ] {
+        assert!(ended.contains(&line), "{line}{}", up.stdout);
+    }
+    assert!(
+        ended.ends_with("  waiting on it: `waiter`\n"),
+        "{}",
+        up.stdout
+    );
+    // It goes on running and being checked, and is ready again once its
+    // check passes again.
+    fs::write(&passing, "").unwrap();
+    machine.until_state(&root, "checked", Duration::from_secs(30), |state| {
+        state.starts_with("ready ")
+    });
+    assert_eq!(child(&root, "checked"), program);
 }

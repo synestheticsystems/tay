@@ -167,6 +167,14 @@ impl Supervisor {
         }
     }
 
+    /// Tells the daemon the state `unit` is in, though it has not changed,
+    /// as a change that joins it says it.
+    pub fn say_again(&self, unit: &str) {
+        if let Some(state) = self.state(unit) {
+            (self.told)(unit, &state);
+        }
+    }
+
     /// Says that `unit` took `state`, whether or not the table has it, as
     /// a unit the plan no longer has does while its `undo` runs: it is
     /// recorded if the table has it, and the daemon is told.

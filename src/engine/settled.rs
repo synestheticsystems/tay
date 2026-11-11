@@ -1,7 +1,8 @@
 //! How a unit stands on what it needs and waits for: everything it needs is
-//! ready, some is not ready yet, or some has failed. A unit whose need has
-//! failed stays `waiting` and is blocked: it is never started against a
-//! failed need, and its detail names what failed at once.
+//! ready, some is not ready yet, or some is lost: it has failed, or it was
+//! waited for while `unready` longer than its own `within`. A unit whose
+//! need is lost stays `waiting` and is blocked: it is never started against
+//! a lost need, and its detail names what is lost at once.
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -18,8 +19,50 @@ pub struct Settled {
 enum Settles {
     Ready,
     Failed,
-    /// Waiting on these units, which failed.
-    Blocked(BTreeSet<String>),
+    /// Waited for while `unready` longer than its own `within`.
+    Unready,
+    /// Waiting on these units, which are lost.
+    Blocked(Lost),
+}
+
+/// The units that are lost to whatever needs them: those that failed, and
+/// those waited for while `unready` longer than their own `within`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Lost {
+    pub failed: BTreeSet<String>,
+    pub unready: BTreeSet<String>,
+}
+
+impl Lost {
+    /// Every unit that is lost, by name.
+    pub fn names(&self) -> BTreeSet<String> {
+        self.failed.union(&self.unready).cloned().collect()
+    }
+
+    fn extend(&mut self, other: &Lost) {
+        self.failed.extend(other.failed.iter().cloned());
+        self.unready.extend(other.unready.iter().cloned());
+    }
+
+    fn is_empty(&self) -> bool {
+        self.failed.is_empty() && self.unready.is_empty()
+    }
+
+    /// What is lost, as a person reads it: "`a` has failed", "`b` is
+    /// unready", or both.
+    pub fn words(&self) -> String {
+        let said = |units: &BTreeSet<String>, one: &str, more: &str, what: &str| {
+            let verb = if units.len() == 1 { one } else { more };
+            (!units.is_empty()).then(|| format!("{} {verb} {what}", quoted_list(units)))
+        };
+        let failed = said(&self.failed, "has", "have", "failed");
+        let unready = said(&self.unready, "is", "are", "unready");
+        failed
+            .into_iter()
+            .chain(unready)
+            .collect::<Vec<_>>()
+            .join(", and ")
+    }
 }
 
 /// How a unit stands on its needs.
@@ -29,8 +72,8 @@ pub enum Standing {
     Clear,
     /// These are not ready yet.
     Waiting(Vec<String>),
-    /// It can never start, because these failed.
-    Blocked(BTreeSet<String>),
+    /// It can never start in this pass, because these are lost.
+    Blocked(Lost),
 }
 
 impl Settled {
@@ -48,8 +91,19 @@ impl Settled {
         self.units.insert(unit.to_string(), settles);
     }
 
-    pub fn blocked(&mut self, unit: &str, by: BTreeSet<String>) {
+    pub fn blocked(&mut self, unit: &str, by: Lost) {
         self.units.insert(unit.to_string(), Settles::Blocked(by));
+    }
+
+    /// Records that `unit` was waited for while `unready` longer than its
+    /// own `within`: it is lost to this pass, as one that failed is.
+    pub fn stayed_unready(&mut self, unit: &str) {
+        self.units.insert(unit.to_string(), Settles::Unready);
+    }
+
+    /// Whether `unit` is lost to this pass because it stayed unready.
+    pub fn stayed_unready_is(&self, unit: &str) -> bool {
+        matches!(self.units.get(unit), Some(Settles::Unready))
     }
 
     pub fn is_ready(&self, unit: &str) -> bool {
@@ -60,15 +114,15 @@ impl Settled {
     pub fn is_lost(&self, unit: &str) -> bool {
         matches!(
             self.units.get(unit),
-            Some(Settles::Failed | Settles::Blocked(_))
+            Some(Settles::Failed | Settles::Unready | Settles::Blocked(_))
         )
     }
 
-    /// The units that failed that `unit` waits on, itself if it failed.
+    /// The units that are lost that `unit` waits on, itself if it is lost.
     pub fn failures_under(&self, unit: &str) -> BTreeSet<String> {
         match self.units.get(unit) {
-            Some(Settles::Failed) => BTreeSet::from([unit.to_string()]),
-            Some(Settles::Blocked(by)) => by.clone(),
+            Some(Settles::Failed | Settles::Unready) => BTreeSet::from([unit.to_string()]),
+            Some(Settles::Blocked(by)) => by.names(),
             Some(Settles::Ready) | None => BTreeSet::new(),
         }
     }
@@ -95,20 +149,23 @@ impl Settled {
 
     /// How whatever needs `needs` stands on them.
     pub fn standing_on<'a>(&self, needs: impl IntoIterator<Item = &'a str>) -> Standing {
-        let mut failed = BTreeSet::new();
+        let mut lost = Lost::default();
         let mut waiting = Vec::new();
         for need in needs {
             match self.units.get(need) {
                 Some(Settles::Ready) => {}
                 Some(Settles::Failed) => {
-                    failed.insert(need.to_string());
+                    lost.failed.insert(need.to_string());
                 }
-                Some(Settles::Blocked(by)) => failed.extend(by.iter().cloned()),
+                Some(Settles::Unready) => {
+                    lost.unready.insert(need.to_string());
+                }
+                Some(Settles::Blocked(by)) => lost.extend(by),
                 None => waiting.push(need.to_string()),
             }
         }
-        match (failed.is_empty(), waiting.is_empty()) {
-            (false, _) => Standing::Blocked(failed),
+        match (lost.is_empty(), waiting.is_empty()) {
+            (false, _) => Standing::Blocked(lost),
             (true, true) => Standing::Clear,
             (true, false) => Standing::Waiting(waiting),
         }
@@ -125,18 +182,12 @@ impl Standing {
                 State::Waiting,
                 format!("for {}", quoted_list(units)),
             )),
-            Standing::Blocked(failed) => Some(UnitState::new(
+            Standing::Blocked(lost) => Some(UnitState::new(
                 State::Waiting,
-                format!("blocked: {}", have_failed(failed)),
+                format!("blocked: {}", lost.words()),
             )),
         }
     }
-}
-
-/// That `failed` have failed, as a person reads it.
-pub fn have_failed(failed: &BTreeSet<String>) -> String {
-    let verb = if failed.len() == 1 { "has" } else { "have" };
-    format!("{} {verb} failed", quoted_list(failed))
 }
 
 #[cfg(test)]
@@ -200,6 +251,19 @@ mod tests {
         assert_eq!(
             settled.failures_under("api"),
             BTreeSet::from(["database".to_string()])
+        );
+    }
+
+    #[test]
+    fn a_unit_whose_need_stayed_unready_is_blocked_by_it_as_by_one_that_failed() {
+        let units = planned(UNITS);
+        let mut settled = Settled::default();
+        settled.stayed_unready("api");
+        settled.record("web-port", State::Failed);
+        assert!(settled.is_lost("api"));
+        assert_eq!(
+            detail(&settled.standing(named(&units, "web"))).as_deref(),
+            Some("blocked: `web-port` has failed, and `api` is unready")
         );
     }
 

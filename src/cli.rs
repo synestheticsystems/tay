@@ -175,12 +175,12 @@ Options:
   --follow            of logs: go on printing what the units write
 
 Exit codes: 0 done: the plan is sound, everything asked for is ready, or
-nothing is left running; 1 a unit failed, something was left that could not
-be stopped, or a down could not be recorded; 2 the definitions or the
-command line have errors, or what was asked does not fit the stack; 3 this
-tay is too old for the definitions; 4 refused as things stand: another
-change is running, or what was asked needs something that is not up; 5 the
-daemon could not be started or reached.
+nothing is left running; 1 a unit failed or stayed unready, something was
+left that could not be stopped, or a down could not be recorded; 2 the
+definitions or the command line have errors, or what was asked does not fit
+the stack; 3 this tay is too old for the definitions; 4 refused as things
+stand: another change is running, or what was asked needs something that is
+not up; 5 the daemon could not be started or reached.
 ";
 
 /// What `tay daemon` takes: the stack's root, which a command gives it.
