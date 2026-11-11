@@ -180,13 +180,13 @@ A command killed part-way, or whose daemon was killed during it, is simply not d
 
 ### `process`
 
-`prepare` commands run to completion, in order, before the first start of each bring-up, and not again before a restart. A `prepare` that fails fails the unit. Then the command runs under its keeper, with only the environment the definition gives it and the names under `inherit`, which are taken from the environment of the command that started the daemon.
+`prepare` commands run to completion, in order, before the unit is started by a `tay up` or a `tay restart`, because what it was started from changed, or because a file it watches was saved. They do not run again when its restart policy starts it after it ended. A `prepare` that fails fails the unit. Then the command runs under its keeper, with only the environment the definition gives it and the names under `inherit`, which are taken from the environment of the command that started the daemon.
 
 A process that ends is not ready, whatever its exit code: with nothing left to restart it, it is `failed`, and the detail says how it ended.
 
 ### Logs
 
-Every line a unit writes while its keeper runs reaches `.tay/logs/<unit>/` with the time it was written, whether or not any command, or the daemon, is running. Each attempt is marked in the log. Files are rotated by size, and old ones are dropped, so a stack left running does not fill the disk.
+Every line a unit writes while its keeper runs reaches `.tay/logs/<unit>/` with the time it was written, whether or not any command, or the daemon, is running. Each attempt is marked in the log. Files are rotated by size, and old ones are dropped, so a stack left running does not fill the disk. A line that cannot be written, as when the disk is full, is lost, and the program goes on running.
 
 ## Containers
 
@@ -209,7 +209,7 @@ Docker is a container's parent: it keeps the exit code, says whether the contain
 
 **Logs.** The daemon copies each container's output into the unit's log, with Docker's time for each line, from where it last stopped. A daemon that was away loses nothing Docker still has. Before a container is removed, what remains of its output is copied.
 
-**`tay down`** stops and removes the environment's containers and its network, and keeps its volumes: data is kept. A volume Docker made by itself for a path an image declares and the unit does not name belongs to that one container and is removed with it, whenever tay removes a container. Unnamed volumes that an earlier tay left behind carry no label, and this one does not find them.
+**`tay down`** stops and removes the environment's containers and its network, and keeps its volumes: data is kept. A volume Docker made by itself for a path an image declares and the unit does not name belongs to that one container and is removed with it, whenever tay removes a container. Each attempt runs in a container of its own, so such a volume is empty again at every attempt, a restart after a crash included: a unit that must keep what its image writes there names the volume. Unnamed volumes that an earlier tay left behind carry no label, and this one does not find them.
 
 **When Docker itself stops,** as it does when it is upgraded or restarted, every container ends with it, and none of that is a unit's doing. While Docker does not answer, nothing that ends or cannot start is counted against a unit; when it answers again, the daemon brings the environment up as `tay up` would, if it is meant to be up, and says in its log and in `tay status` when Docker stopped answering and when the environment was brought up again. Host processes are not touched. A `tay up` run while Docker does not answer cannot tell what is left in Docker, so it exits with code 1 and the units go on waiting. Two things this does not cover: a Docker set to keep containers running through its own restart has them replaced all the same, and a Docker that hangs without closing its connections is not noticed.
 
