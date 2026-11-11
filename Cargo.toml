@@ -1,6 +1,6 @@
 [package]
 name = "tay"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 rust-version = "1.93"
 description = "Topology Automation via YAML: brings a stack of host processes and containers up in dependency order and tells the truth about its state"
