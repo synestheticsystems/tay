@@ -2,5 +2,7 @@ format: 1
 stack: written
 default_profile: dev
 up: [app]
+settings:
+  where: { default: stack }
 units:
-  app: { uses: port }
+  app: { uses: port, gives: { where: "${settings.where}" } }

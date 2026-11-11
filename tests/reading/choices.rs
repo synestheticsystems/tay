@@ -174,6 +174,24 @@ fn the_environments_file_may_name_the_profile_and_the_command_line_wins() {
 }
 
 #[test]
+fn a_production_profile_the_environments_file_names_keeps_this_persons_own_file_unread() {
+    // The environment's file is read first, since the profile it names
+    // decides whether this person's own file is read.
+    let home = fixture("homes/written");
+    let where_from = |args: &[&str]| {
+        let run = plan_with_home("profile-written", &home, &[args, &["--json"]].concat());
+        assert_eq!(run.code, 0, "{}", run.stderr);
+        let plan = &run.json()["plan"];
+        let given = given(unit(plan, "app"), "where")["from_host"]["value"].clone();
+        (plan["profile"].clone(), given)
+    };
+    assert_eq!(where_from(&[]), ("deploy".into(), "stack".into()));
+    // Under a profile that is not a production one, the file is read.
+    let dev = where_from(&["--profile", "dev"]);
+    assert_eq!(dev, ("dev".into(), "personal".into()));
+}
+
+#[test]
 fn a_profile_is_named_only_in_the_environments_file_and_must_exist() {
     let run = plan_with_home(
         "profile-misplaced",
