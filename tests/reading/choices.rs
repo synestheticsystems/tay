@@ -224,6 +224,45 @@ fn every_profile_is_checked_against_the_stack_whichever_is_chosen() {
 }
 
 #[test]
+fn a_name_in_run_default_that_no_unit_has_as_a_way_is_an_error_wherever_it_is_written() {
+    // The stack, the profile in force, a profile not chosen, the
+    // environment's file, this person's own file and `--set` each name a
+    // way that no unit has, beside one that a unit has.
+    let home = fixture("homes/run-default-unknown");
+    let run = plan_with_home(
+        "run-default-unknown",
+        &home,
+        &["--set", "run.default=bogus,image"],
+    );
+    assert_eq!(run.code, 2);
+    let ways = "the ways are `image`, `in-container`, `source`";
+    let personal = home.join(".config/tay/run-default.yaml");
+    assert_eq!(
+        run.errors(),
+        [
+            format!("tay.yaml:5:18: no unit has a way `sorce`; {ways}"),
+            format!("stack/profiles/deploy.yaml:2:18: no unit has a way `contaner`; {ways}"),
+            format!("stack/profiles/dev.yaml:1:17: no unit has a way `imgae`; {ways}"),
+            format!(".tay/choices.yaml:1:18: no unit has a way `srce`; {ways}"),
+            format!(
+                "{}:1:17: no unit has a way `sourc`; {ways}",
+                personal.display()
+            ),
+            format!("--set run.default: no unit has a way `bogus`; {ways}"),
+        ]
+    );
+    // A unit whose definition has errors has no ways known, so a name it
+    // may have is not reported.
+    let run = crate::support::plan("run-default-unreadable", &[]);
+    assert_eq!(
+        run.errors(),
+        [
+            "tay.yaml:8:58: `colour` is not a field of the settings of a `process` unit; its fields are command, workdir, env, secret_env, inherit, prepare"
+        ]
+    );
+}
+
+#[test]
 fn with_more_than_one_profile_the_default_must_be_named_and_must_exist() {
     // Which profile would say what comes up is not known, so that is not
     // reported as well.

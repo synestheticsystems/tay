@@ -1,0 +1,14 @@
+format: 1
+stack: run-default
+default_profile: dev
+up: [server]
+run: { default: [sorce, image] }
+units:
+  server:
+    run:
+      source: { uses: process, with: { command: [serve] } }
+      image: { uses: container, with: { image: "example/server:1" } }
+  proxy:
+    run:
+      in-container: { uses: container, with: { image: "example/proxy:1" } }
+      source: { uses: process, with: { command: [proxy] } }

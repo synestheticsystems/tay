@@ -410,7 +410,7 @@ settings:
 ```
 
 - `up` from a later place replaces the earlier list. `up_add` and `up_remove` adjust it instead. If no place gives `up`, that is an error: tay does not guess what a stack's whole is.
-- `run.default` is one name or a list of them, and from a later place replaces the earlier one. `run.units` is joined, later entries winning.
+- `run.default` is one name or a list of them, and from a later place replaces the earlier one. `run.units` is joined, later entries winning. A name in it that no unit of the stack has as a way is an error.
 - `settings` is joined, later values winning.
 - `label` sets the environment's label, in place of the one worked out from the folder's name. It may be empty.
 - `--set` takes a place in this shape and a value: `up`, `up_add`, `up_remove`, `run.default`, `run.units.<unit>`, `settings.<name>` or `label`. A list is written with commas.

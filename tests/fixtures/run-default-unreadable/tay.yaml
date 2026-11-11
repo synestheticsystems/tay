@@ -1,0 +1,9 @@
+format: 1
+stack: run-default-unreadable
+up: [server]
+run: { default: source }
+units:
+  server:
+    run:
+      source: { uses: process, with: { command: [serve], colour: red } }
+      image: { uses: container, with: { image: "example/server:1" } }

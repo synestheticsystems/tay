@@ -16,3 +16,7 @@ units:
         with: { image: example/server, publish: { 80: "${server-port.number}" } }
         gives:
           http: { port: 80, scheme: http }
+  docs:
+    run:
+      published: { uses: container, with: { image: example/docs } }
+      local: { uses: process, with: { command: [docs] } }

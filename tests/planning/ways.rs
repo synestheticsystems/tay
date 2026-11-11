@@ -27,6 +27,7 @@ fn set_chooses_over_the_profile() {
 
 #[test]
 fn a_unit_that_no_choice_names_a_way_for_is_an_error_listing_them() {
+    // `run.default` names `published`, a way of `docs` and not of `server`.
     let run = plan("ways", &["--profile", "neither"]);
     assert_eq!(run.code, 2);
     assert_eq!(

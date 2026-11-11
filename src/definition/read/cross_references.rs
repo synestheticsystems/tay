@@ -354,6 +354,9 @@ fn choices(stack: &Stack, place: &Choices, d: &mut Diagnostics) {
             );
         }
     }
+    for name in place.run_default.iter().flatten() {
+        way_of_some_unit(stack, name, d);
+    }
     for (name, value) in &place.settings {
         let Some(decl) = stack.setting(&name.name) else {
             d.error(
@@ -387,4 +390,27 @@ fn choices(stack: &Stack, place: &Choices, d: &mut Diagnostics) {
                 .with(decl.name.loc, "the setting is declared here"),
         );
     }
+}
+
+/// A name in `run.default` is the name of a way some unit has: a misspelt
+/// one would be passed over, and the next name in the list chosen in its
+/// place. A unit whose definition has errors has no ways known, and has
+/// been reported, so then nothing more is said.
+fn way_of_some_unit(stack: &Stack, name: &NameAt, d: &mut Diagnostics) {
+    let may_have_it =
+        |unit: &Unit| matches!(unit.body, Body::Unreadable) || unit.way(&name.name).is_some();
+    if stack.units.iter().any(may_have_it) {
+        return;
+    }
+    let mut ways: Vec<&str> = stack.units.iter().flat_map(Unit::way_names).collect();
+    ways.sort_unstable();
+    ways.dedup();
+    let list = match ways.as_slice() {
+        [] => "no unit has ways at all".to_string(),
+        ways => format!("the ways are {}", quoted_list(ways)),
+    };
+    d.error(
+        name.loc,
+        format!("no unit has a way `{}`; {list}", name.name),
+    );
 }
