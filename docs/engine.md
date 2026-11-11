@@ -74,7 +74,7 @@ When a unit fails, `tay up` names it, gives the reason and the last lines it wro
 
 ### Readiness checks, exactly
 
-- `http`: a GET that gets any 2xx answer. `tcp`: a connection opens. Both are made from the host and tried again about twice a second until `within` passes.
+- `http`: a GET that gets any 2xx answer. `tcp`: a connection opens. Both are made from the host and tried again about twice a second until `within` passes. *A check of an `https` address is not built yet: it is an error when the stack is read, wherever the address is known then.*
 - `command`: exits 0. For a `process` it runs on the host; for a `container`, inside it.
 - `log`: a line the unit wrote contains the text.
 

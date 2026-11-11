@@ -241,3 +241,23 @@ fn a_url_asked_of_an_endpoint_with_no_scheme_is_an_error_at_every_reference() {
         0
     );
 }
+
+#[test]
+fn an_http_check_of_an_https_address_known_when_the_stack_is_read_is_an_error_at_the_check() {
+    let run = plan(
+        "checks",
+        &["--set", "up=secure-written,secure-endpoint,secure"],
+    );
+    assert_eq!(run.code, 2, "{}{}", run.stdout, run.stderr);
+    // The address `secure` is checked at is produced as it runs, and is
+    // judged then.
+    let said =
+        "this `http` check is of an `https` address, and tay cannot make an `https` check yet";
+    assert_eq!(
+        run.errors(),
+        [
+            format!("tay.yaml:52:20: {said}"),
+            format!("tay.yaml:58:20: {said}"),
+        ]
+    );
+}

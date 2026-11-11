@@ -73,7 +73,8 @@ fn a_tcp_check_passes_when_a_connection_opens_and_a_command_check_when_it_exits_
 }
 
 #[test]
-fn an_http_check_of_an_https_address_fails_saying_tay_cannot_make_it_yet() {
+fn an_http_check_of_an_https_address_known_only_as_the_unit_starts_fails_then_saying_tay_cannot_make_it_yet()
+ {
     let machine = Machine::new();
     let root = machine.stack("checks");
     let up = machine.at(&root, "up", &["secure"]);

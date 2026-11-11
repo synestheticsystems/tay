@@ -30,13 +30,34 @@ units:
       env: { READY_FILE: "${environment.state}/probed-ready" }
     ready: { command: ["${environment.root}/services/is-ready.sh", "${environment.state}/probed-ready"], within: 20s }
   secure-port: { uses: port }
+  secure-address:
+    doc: Gives, once it has run, the https address `secure` is checked at, which is known only then.
+    uses: command
+    with:
+      run: [sh, -c, "printf '{\"url\": \"https://127.0.0.1:%s/health\"}' \"$PORT\" > \"$TAY_VALUES\""]
+      env: { PORT: "${secure-port.number}" }
+      produces: [url]
   secure:
-    doc: Checked over https, which tay cannot do yet.
+    doc: Checked over https at an address known only once it starts, which tay cannot check yet.
+    uses: process
+    with:
+      command: ["python3", "${environment.root}/services/serve.py", "${secure-port.number}"]
+    ready: { http: "${secure-address.url}", within: 3s }
+    restart: { on: never }
+  secure-written:
+    doc: Checked over https at an address written out.
     uses: process
     with:
       command: ["python3", "${environment.root}/services/serve.py", "${secure-port.number}"]
     ready: { http: "https://127.0.0.1:${secure-port.number}/health", within: 3s }
-    restart: { on: never }
+  secure-endpoint:
+    doc: Checked over https at its own endpoint, whose scheme says so.
+    uses: process
+    with:
+      command: ["python3", "${environment.root}/services/serve.py", "${secure-port.number}"]
+    ready: { http: "${self.web.url}/health", within: 3s }
+    gives:
+      web: { port: "${secure-port.number}", scheme: https }
   brief-port: { uses: port }
   brief:
     doc: Ready by an http check that is allowed eight seconds.

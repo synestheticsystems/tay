@@ -194,6 +194,21 @@ impl<'s> Planner<'s> {
             Duration::parse(text.as_deref().unwrap_or_default())
                 .expect("a value `Want::Duration` passes is a duration")
         });
+        // Where the scheme is known now, as it is of an address written out
+        // or built from an endpoint, a check tay cannot make is said here,
+        // not when the unit first starts.
+        if let (Check::Http(slot), Some(Check::Http(url))) = (&ready.check, &check)
+            && url
+                .leading_text()
+                .split_once("://")
+                .map(|(scheme, _)| scheme)
+                == Some("https")
+        {
+            self.resolver.d.error(
+                slot.expr.loc,
+                "this `http` check is of an `https` address, and tay cannot make an `https` check yet",
+            );
+        }
         Some(Readiness::Check {
             check: check?,
             within: within?,
