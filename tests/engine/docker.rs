@@ -5,8 +5,8 @@
 //! environments create is held to a small memory limit as soon as it is
 //! created; and once a test ends, also when it fails, every container,
 //! volume, network and image that carries the label of one of its
-//! environments is removed. Nothing without such a label is ever touched
-//! here.
+//! environments is removed, each container with the volumes Docker made
+//! for it alone. Nothing without such a label is ever touched here.
 
 use std::io::{BufRead, BufReader};
 use std::path::Path;
@@ -160,11 +160,15 @@ impl Drop for Docker {
 }
 
 /// Removes every container, volume, network and image that carries the
-/// label of the environment `id`, and nothing else.
+/// label of the environment `id`, each container with the volumes Docker
+/// made for it alone, and nothing else.
 pub fn remove_all_of(id: &str) {
     let label = format!("label=tay.environment={id}");
     for (list, remove) in [
-        (vec!["ps", "-aq", "--filter", &label], vec!["rm", "-f"]),
+        (
+            vec!["ps", "-aq", "--filter", &label],
+            vec!["rm", "-f", "-v"],
+        ),
         (
             vec!["volume", "ls", "-q", "--filter", &label],
             vec!["volume", "rm", "-f"],

@@ -168,11 +168,18 @@ impl Docker {
         }
     }
 
-    /// Removes `container`, stopping it first if it runs. One that has gone
-    /// is gone.
+    /// Removes `container`, stopping it first if it runs, with the volumes
+    /// Docker made by itself for it: one with no name for each path its
+    /// image declares as a volume and its unit does not name, which belongs
+    /// to that container alone and carries no label of tay's. Docker never
+    /// removes a named volume with a container, so a unit's own volumes
+    /// stay. One that has gone is gone.
     pub async fn remove(&self, container: OurContainer) -> Result<(), DockerError> {
         self.stop(&container).await?;
-        let options = RemoveContainerOptionsBuilder::default().force(true).build();
+        let options = RemoveContainerOptionsBuilder::default()
+            .force(true)
+            .v(true)
+            .build();
         match self
             .api
             .remove_container(&container.id, Some(options))

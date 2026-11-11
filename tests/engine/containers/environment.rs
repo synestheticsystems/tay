@@ -2,13 +2,15 @@
 //! every container, volume and network tay creates labelled with the
 //! environment's id and, but for the network, its unit. Nothing without
 //! that label is ever stopped, removed or changed. `tay down` removes the
-//! containers and the network and keeps the volumes.
+//! containers and the network and keeps the volumes, but for those Docker
+//! made by itself for one container, which go with it whenever it is
+//! removed.
 
 use std::time::Duration;
 
 use super::{container, labelled, name};
 use crate::docker::{docker, inspect};
-use crate::harness::{Machine, eventually};
+use crate::harness::{Machine, eventually, log};
 
 #[test]
 fn what_tay_creates_carries_the_environments_label_and_a_container_answers_to_its_unit_and_aliases()
@@ -108,6 +110,49 @@ fn down_leaves_no_container_or_network_and_keeps_the_volumes() {
         volumes,
         [format!("tay-{}-keeper-data.data", machine.id(&root))]
     );
+}
+
+#[test]
+fn a_volume_docker_made_for_an_image_goes_with_its_container_and_the_units_own_volume_stays() {
+    let machine = Machine::with_docker();
+    let root = machine.stack("containers");
+    let started = |start: u32| {
+        let said = format!(", start {start}\n");
+        assert!(
+            eventually(Duration::from_secs(20), || log(&root, "cached")
+                .contains(&said)),
+            "{}",
+            log(&root, "cached")
+        );
+    };
+    // The volume Docker made by itself for the path the image declares,
+    // which the unit does not name.
+    let made_for_the_image = || {
+        let cached = container(&machine, &root, "cached").unwrap();
+        let mounts = cached["Mounts"].as_array().unwrap().clone();
+        let cache = mounts.iter().find(|mount| mount["Destination"] == "/cache");
+        cache.unwrap()["Name"].as_str().unwrap().to_string()
+    };
+    let up = machine.at(&root, "up", &["cached"]);
+    assert_eq!(up.code, 0, "{}{}", up.stdout, up.stderr);
+    started(1);
+    let first = made_for_the_image();
+    // Replaced, the container goes with it.
+    let replaced = machine.at(&root, "up", &["cached", "--set", "settings.mode=two"]);
+    assert_eq!(replaced.code, 0, "{}{}", replaced.stdout, replaced.stderr);
+    started(2);
+    assert!(inspect(&first).is_none(), "`{first}` is left");
+    let second = made_for_the_image();
+    assert_ne!(second, first);
+    // Taken down, likewise.
+    let down = machine.at(&root, "down", &[]);
+    assert_eq!(down.code, 0, "{}{}", down.stdout, down.stderr);
+    assert!(inspect(&second).is_none(), "`{second}` is left");
+    // The unit's own volume stays, and what it holds: it counts every start.
+    let [_, volumes, _] = labelled(&machine, &root);
+    assert_eq!(volumes, [format!("tay-{}-cached.data", machine.id(&root))]);
+    assert_eq!(machine.at(&root, "up", &["cached"]).code, 0);
+    started(3);
 }
 
 /// A container and a network made by the test itself, with no label of

@@ -46,6 +46,15 @@ units:
       env: { MODE: "${settings.mode}" }
       volumes: { data: /data }
 
+  cached:
+    doc: Built from an image that declares a volume the unit does not name, and keeps a count of its starts on the volume it owns.
+    uses: container
+    with:
+      build: { context: ./cached }
+      command: [sh, -c, "date >> /data/starts; echo mode $MODE, start $(wc -l < /data/starts); trap 'exit 0' TERM; sleep 3600 & wait"]
+      env: { MODE: "${settings.mode}" }
+      volumes: { data: /data }
+
   data-reader:
     doc: Mounts the keeper's volume, without needing the keeper, once the keeper has made it.
     uses: container
