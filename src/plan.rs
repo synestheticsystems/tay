@@ -84,7 +84,8 @@ pub fn plan(root: &Path, options: &Options, sources: &mut Sources, d: &mut Diagn
         None => (None, None),
     };
     let asked_profile = options.asked.profile.as_deref();
-    let profile = choose_profile(&stack, asked_profile, written_profile.as_ref(), sources, d);
+    let profile = choose_profile(&stack, asked_profile, written_profile.as_ref(), sources, d)
+        .map(|(profile, _)| profile);
     let production = profile.and_then(|profile| profile.production);
     let home = options.home.as_deref();
     let (places, places_parsed) = read::places(
@@ -225,15 +226,43 @@ impl Planning<'_> {
     }
 }
 
+/// What chose the profile a plan is made with.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChosenBy {
+    /// `--profile`, now or remembered, as `tay set profile=` remembers it
+    /// too.
+    CommandLine,
+    /// `profile:` in the environment's own file.
+    EnvironmentFile,
+    /// The stack's `default_profile`, or its only profile.
+    StackDefault,
+}
+
+/// The profile a plan of `stack` is made with when `asked` is the profile
+/// asked for, now or remembered, and what chose it, as `tay status` names
+/// it; `None` when the stack has no profile to choose, or the one chosen
+/// is none of its profiles, which planning reports.
+pub fn profile_in_force<'s>(
+    stack: &'s Stack,
+    asked: Option<&str>,
+) -> Option<(&'s Profile, ChosenBy)> {
+    let mut sources = Sources::default();
+    let mut d = Diagnostics::default();
+    let (file, _) = read::environment_file(stack, &mut sources, &mut d);
+    let written = file.and_then(|file| file.profile);
+    choose_profile(stack, asked, written.as_ref(), &mut sources, &mut d)
+}
+
 /// `--profile`, now or remembered, or the profile this environment's file
-/// names, or the stack's default profile, or its only one.
+/// names, or the stack's default profile, or its only one, with which of
+/// these chose it.
 fn choose_profile<'s>(
     stack: &'s Stack,
     asked: Option<&str>,
     written: Option<&NameAt>,
     sources: &mut Sources,
     d: &mut Diagnostics,
-) -> Option<&'s Profile> {
+) -> Option<(&'s Profile, ChosenBy)> {
     let find = |name: &str| stack.profiles.iter().find(|p| p.name.name == name);
     let none_called = |name: &str| {
         format!(
@@ -250,22 +279,23 @@ fn choose_profile<'s>(
         }
         profile
     });
-    match (asked, written, &stack.default_profile) {
+    let (profile, by) = match (asked, written, &stack.default_profile) {
         (Some(asked), _, _) => {
             let profile = find(asked);
             if profile.is_none() {
                 let loc = Loc::new(sources.add_argument(&format!("--profile {asked}")), 1, 1);
                 d.error(loc, none_called(asked));
             }
-            profile
+            (profile, ChosenBy::CommandLine)
         }
-        (None, Some(written), _) => written,
-        (None, None, Some(default)) => find(&default.name),
+        (None, Some(written), _) => (written, ChosenBy::EnvironmentFile),
+        (None, None, Some(default)) => (find(&default.name), ChosenBy::StackDefault),
         (None, None, None) => match stack.profiles.as_slice() {
-            [only] => Some(only),
-            _ => None,
+            [only] => (Some(only), ChosenBy::StackDefault),
+            _ => (None, ChosenBy::StackDefault),
         },
-    }
+    };
+    profile.map(|profile| (profile, by))
 }
 
 #[cfg(test)]

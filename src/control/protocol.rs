@@ -86,9 +86,13 @@ impl UpRequest {
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "change", rename_all = "snake_case")]
 pub enum Remember {
-    /// `tay set`: each `PLACE=VALUE` replaces what is remembered for its
-    /// place, as a `--set` of `tay up` does.
-    Set { sets: Vec<String> },
+    /// `tay set`: `profile=NAME` replaces the remembered profile, as
+    /// `--profile` does, and each other `PLACE=VALUE` replaces what is
+    /// remembered for its place, as a `--set` of `tay up` does.
+    Set {
+        profile: Option<String>,
+        sets: Vec<String>,
+    },
     /// `tay unset`: what is remembered for each place is forgotten.
     Unset { places: Vec<String> },
 }
@@ -98,17 +102,18 @@ impl Remember {
     pub fn apply(&self, layout: &Layout) -> Result<(), DiskError> {
         let remembered = Asked::read(layout)?;
         let asked = match self {
-            Remember::Set { sets } => remembered.with(None, sets, &[]),
+            Remember::Set { profile, sets } => remembered.with(profile.clone(), sets, &[]),
             Remember::Unset { places } => remembered.without(places),
         };
         asked.write(layout)
     }
 
     /// The change as the command that asked for it is written, with no
-    /// value, which may be a secret.
+    /// value of a `--set`, which may be a secret.
     pub fn describe(&self) -> String {
         let words: Vec<String> = match self {
-            Remember::Set { sets } => std::iter::once("tay set".to_string())
+            Remember::Set { profile, sets } => std::iter::once("tay set".to_string())
+                .chain(profile.iter().map(|profile| format!("profile={profile}")))
                 .chain(sets.iter().map(|set| format!("{}=…", Asked::place(set))))
                 .collect(),
             Remember::Unset { places } => std::iter::once("tay unset".to_string())

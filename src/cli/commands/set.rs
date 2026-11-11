@@ -1,6 +1,7 @@
 //! `tay set [PLACE=VALUE...]`: changes what the environment remembers being
-//! asked for, in the places `--set` takes, and touches no unit until the
-//! next `tay up`; with nothing after it, lists what is remembered. Each is
+//! asked for, in the places `--set` takes and in `profile`, which it
+//! remembers as `--profile` does, and touches no unit until the next
+//! `tay up`; with nothing after it, lists what is remembered. Each is
 //! checked as `tay up --set` checks it, by planning with it, and a stack
 //! that does not plan with it remembers nothing of it. What is remembered is
 //! listed afterwards, with the value of every secret setting hidden.
@@ -45,7 +46,17 @@ pub fn run(args: Args) -> Exit {
     if args.words.is_empty() {
         return list(COMMAND, &root, args.json);
     }
-    let options = match options(&root, None, &args.words, &[]) {
+    // `profile=NAME` names the profile, as `--profile` does; every other
+    // word is a `--set`.
+    let mut profile = None;
+    let mut sets = Vec::new();
+    for word in args.words {
+        match word.split_once('=') {
+            Some((Asked::PROFILE, name)) => profile = Some(name.to_string()),
+            _ => sets.push(word),
+        }
+    }
+    let options = match options(&root, profile.clone(), &sets, &[]) {
         Ok(options) => options,
         Err(error) => return disk_problem(COMMAND, &error),
     };
@@ -58,12 +69,7 @@ pub fn run(args: Args) -> Exit {
     ) {
         return exit;
     }
-    remember(
-        COMMAND,
-        &root,
-        &Remember::Set { sets: args.words },
-        args.json,
-    )
+    remember(COMMAND, &root, &Remember::Set { profile, sets }, args.json)
 }
 
 /// Makes `change` to what the environment at `root` remembers, as one
@@ -98,7 +104,7 @@ pub fn remember(command: &str, root: &Path, change: &Remember, json: bool) -> Ex
 /// Lists what the environment at `root` remembers being asked for.
 fn list(command: &str, root: &Path, json: bool) -> Exit {
     let asked = match Asked::read(&Layout::of(root)) {
-        Ok(remembered) => asked::shown(remembered, root),
+        Ok(remembered) => asked::shown(remembered, asked::stack(root).as_deref()),
         Err(error) => return disk_problem(command, &error),
     };
     if json {

@@ -1,8 +1,10 @@
 //! `tay status [UNIT]`: each unit's state, from a check, and each unit the
-//! plan no longer has whose `undo` waits, with why. The daemon makes the
-//! checks; with none running, an environment meant to be up, or with
-//! anything of it left, has one started to find its units, and any other
-//! has every unit stopped.
+//! plan no longer has whose `undo` waits, with why; and the profile a plan
+//! is made with now, with what chose it, and what the environment
+//! remembers being asked for. The daemon makes the checks; with none
+//! running, an environment meant to be up, or with anything of it left,
+//! has one started to find its units, and any other has every unit
+//! stopped.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -18,6 +20,7 @@ use crate::definition::read::THIS_TAY;
 use crate::disk::{Asked, Environment, Identity, Intent, Layout};
 use crate::engine::{self, State};
 use crate::module;
+use crate::plan::{self, ChosenBy};
 use crate::print::out;
 
 use super::plan::{no_stack, options, planned, print_json};
@@ -44,6 +47,9 @@ struct Report {
     id: Option<String>,
     /// `up`, `down`, or `never brought up`.
     standing: &'static str,
+    /// The profile a plan is made with now, and what chose it; `None` for a
+    /// stack with no profile to choose.
+    profile: Option<(String, ChosenBy)>,
     /// What the environment remembers being asked for, with the value of
     /// every secret setting a `--set` gives hidden.
     asked: Asked,
@@ -85,10 +91,16 @@ pub fn run(args: Args) -> Exit {
         Ok(report) => report,
         Err(exit) => return exit,
     };
-    report.asked = match Asked::read(&Layout::of(&root)) {
-        Ok(asked) => asked::shown(asked, &root),
+    let remembered = match Asked::read(&Layout::of(&root)) {
+        Ok(remembered) => remembered,
         Err(error) => return disk_problem(COMMAND, &error),
     };
+    let stack = asked::stack(&root);
+    report.profile = stack.as_deref().and_then(|stack| {
+        let (profile, by) = plan::profile_in_force(stack, remembered.profile.as_deref())?;
+        Some((profile.name.name.clone(), by))
+    });
+    report.asked = asked::shown(remembered, stack.as_deref());
     if let [unit] = args.words.as_slice() {
         report.units.retain(|line| line.unit == *unit);
         if report.units.is_empty() {
@@ -133,6 +145,7 @@ fn from_daemon(environment: &Environment, args: &Args) -> Result<Report, Exit> {
             root: root.display().to_string(),
             id,
             standing: intent.word(),
+            profile: None,
             asked: Asked::default(),
             units: status
                 .units
@@ -197,6 +210,7 @@ fn stopped(
         root: root.display().to_string(),
         id,
         standing,
+        profile: None,
         asked: Asked::default(),
         units,
     })
@@ -230,6 +244,15 @@ fn remembered(asked: &Asked) -> String {
     words.join(" ")
 }
 
+/// What chose the profile, as `--json` writes it and as a person reads it.
+fn chosen_by(by: ChosenBy) -> (&'static str, &'static str) {
+    match by {
+        ChosenBy::CommandLine => ("command_line", "chosen on the command line"),
+        ChosenBy::EnvironmentFile => ("environment_file", "named in the environment's file"),
+        ChosenBy::StackDefault => ("stack_default", "the stack's default"),
+    }
+}
+
 fn print(report: &Report, json: bool) {
     if json {
         print_json(&json!({
@@ -239,6 +262,10 @@ fn print(report: &Report, json: bool) {
                 "root": report.root,
                 "id": report.id,
                 "standing": report.standing,
+                "profile": report.profile.as_ref().map(|(name, by)| json!({
+                    "name": name,
+                    "chosen_by": chosen_by(*by).0,
+                })),
                 "asked": {
                     "profile": report.asked.profile,
                     "sets": report.asked.sets,
@@ -261,6 +288,9 @@ fn print(report: &Report, json: bool) {
         .max()
         .unwrap_or(0);
     let mut text = format!("{}: {}\n", report.root, report.standing);
+    if let Some((name, by)) = &report.profile {
+        text.push_str(&format!("  profile: {name}, {}\n", chosen_by(*by).1));
+    }
     if !report.asked.is_empty() {
         text.push_str(&format!("  remembered: {}\n", remembered(&report.asked)));
     }

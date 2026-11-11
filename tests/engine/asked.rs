@@ -2,9 +2,11 @@
 //! and the units named on `tay up` are remembered, the profile winning over
 //! the one the environment's own file names, so that a later plain
 //! `tay up`, a `tay status`, a `tay plan` and a daemon started afresh all
-//! see the same stack. A `tay up` hands the daemon only what it adds, which
-//! the daemon joins with what is remembered when it takes the change, so a
-//! `tay set` made meanwhile is not lost.
+//! see the same stack. `tay set` and `tay unset` take the profile as a
+//! place, and `tay status` names the profile in force with what chose it.
+//! A `tay up` hands the daemon only what it adds, which the daemon joins
+//! with what is remembered when it takes the change, so a `tay set` made
+//! meanwhile is not lost.
 
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -201,6 +203,86 @@ fn set_and_unset_change_what_is_remembered_and_touch_no_unit_until_the_next_up()
     );
     let listed = machine.at(&root, "set", &[]);
     assert_eq!(listed.stdout, "set      settings.name=there\n");
+}
+
+/// The profile `tay status` at `root` names as in force, with what chose
+/// it, as its text and its JSON give them.
+fn in_force(machine: &Machine, root: &Path) -> (String, Value) {
+    let status = machine.at(root, "status", &[]);
+    let line = status
+        .stdout
+        .lines()
+        .find(|line| line.starts_with("  profile: "))
+        .unwrap_or_else(|| panic!("a profile is named: {}", status.stdout))
+        .to_string();
+    let json = machine.at(root, "status", &["--json"]).json();
+    (line, json["environment"]["profile"].clone())
+}
+
+#[test]
+fn set_and_unset_take_the_profile_and_status_names_the_one_in_force_with_what_chose_it() {
+    let machine = Machine::new();
+    let root = machine.stack("remembered");
+    assert_eq!(
+        in_force(&machine, &root),
+        (
+            "  profile: quiet, the stack's default".to_string(),
+            json!({ "name": "quiet", "chosen_by": "stack_default" })
+        )
+    );
+    fs::create_dir(root.join(".tay")).unwrap();
+    fs::write(root.join(".tay/choices.yaml"), "profile: loud\n").unwrap();
+    assert_eq!(machine.at(&root, "up", &[]).code, 0);
+    assert_eq!(greeting(&root), "HELLO, world\n");
+    assert_eq!(
+        in_force(&machine, &root),
+        (
+            "  profile: loud, named in the environment's file".to_string(),
+            json!({ "name": "loud", "chosen_by": "environment_file" })
+        )
+    );
+    // `tay set profile=` remembers a profile as `--profile` does, and
+    // touches no unit until the next `tay up`.
+    let set = machine.at(&root, "set", &["profile=quiet", "settings.name=there"]);
+    assert_eq!(set.code, 0, "{}{}", set.stdout, set.stderr);
+    assert_eq!(set.stdout, "profile  quiet\nset      settings.name=there\n");
+    assert_eq!(greeting(&root), "HELLO, world\n");
+    assert_eq!(machine.at(&root, "up", &[]).code, 0);
+    assert_eq!(greeting(&root), "hello, there\n");
+    assert_eq!(
+        in_force(&machine, &root),
+        (
+            "  profile: quiet, chosen on the command line".to_string(),
+            json!({ "name": "quiet", "chosen_by": "command_line" })
+        )
+    );
+    // A profile the stack does not have is not remembered.
+    let none = machine.at(&root, "set", &["profile=nowhere"]);
+    assert_eq!(none.code, 2, "{}{}", none.stdout, none.stderr);
+    assert!(
+        none.stderr.contains("there is no profile `nowhere`"),
+        "{}",
+        none.stderr
+    );
+    // `tay unset profile` forgets it alone, so that the environment's file
+    // chooses again.
+    let unset = machine.at(&root, "unset", &["profile"]);
+    assert_eq!(unset.code, 0, "{}{}", unset.stdout, unset.stderr);
+    assert_eq!(unset.stdout, "set      settings.name=there\n");
+    assert_eq!(machine.at(&root, "up", &[]).code, 0);
+    assert_eq!(greeting(&root), "HELLO, there\n");
+    assert_eq!(
+        in_force(&machine, &root).1,
+        json!({ "name": "loud", "chosen_by": "environment_file" })
+    );
+    let again = machine.at(&root, "unset", &["profile"]);
+    assert_eq!(
+        (again.code, again.stderr.as_str()),
+        (
+            2,
+            "tay unset: nothing is remembered for `profile`, so nothing was forgotten\n"
+        )
+    );
 }
 
 #[test]

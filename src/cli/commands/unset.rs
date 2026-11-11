@@ -1,6 +1,8 @@
 //! `tay unset PLACE...`: forgets what the environment remembers being asked
 //! for in each place, so that the profile's or the stack's value holds
-//! again, and touches no unit until the next `tay up`. A place with nothing
+//! again, or for `profile`, the remembered profile, so that the
+//! environment's file or the stack's default chooses it again; and touches
+//! no unit until the next `tay up`. A place with nothing
 //! remembered is an error, and nothing is forgotten. What is remembered is
 //! listed afterwards, as `tay set` lists it.
 
@@ -34,7 +36,7 @@ pub fn run(args: Args) -> Exit {
         return problem(
             COMMAND,
             Exit::Errors,
-            "name each place to forget, as `settings.NAME`",
+            "name each place to forget, as `settings.NAME` or `profile`",
         );
     }
     let remembered = match Asked::read(&Layout::of(&root)) {

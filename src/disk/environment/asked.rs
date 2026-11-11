@@ -24,6 +24,10 @@ pub struct Asked {
 }
 
 impl Asked {
+    /// The place `tay set` and `tay unset` take for the profile, which
+    /// `--set` does not.
+    pub const PROFILE: &str = "profile";
+
     /// What the environment remembers; nothing when it has never been asked.
     pub fn read(layout: &Layout) -> Result<Asked, DiskError> {
         let path = layout.asked();
@@ -62,9 +66,14 @@ impl Asked {
         self
     }
 
-    /// What is asked once the `--set`s for `places` are forgotten, so that
-    /// what the profile or the stack gives there holds again.
+    /// What is asked once what is remembered for `places` is forgotten: the
+    /// `--set` for each, so that what the profile or the stack gives there
+    /// holds again, and the profile for [`Asked::PROFILE`], so that the
+    /// environment's file or the stack's default chooses it again.
     pub fn without(mut self, places: &[String]) -> Asked {
+        if places.iter().any(|forgotten| forgotten == Asked::PROFILE) {
+            self.profile = None;
+        }
         self.sets.retain(|kept| {
             !places
                 .iter()
@@ -73,9 +82,13 @@ impl Asked {
         self
     }
 
-    /// Whether a `--set` for `place` is remembered.
+    /// Whether anything is remembered for `place`: a profile for
+    /// [`Asked::PROFILE`], or a `--set` for any other.
     pub fn remembers(&self, wanted: &str) -> bool {
-        self.sets.iter().any(|kept| Asked::place(kept) == wanted)
+        match wanted == Asked::PROFILE {
+            true => self.profile.is_some(),
+            false => self.sets.iter().any(|kept| Asked::place(kept) == wanted),
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -127,6 +140,12 @@ mod tests {
         assert_eq!(asked.sets, strings(&["settings.a=1", "settings.b=2"]));
         assert!(!asked.remembers("up_add"));
         assert_eq!(asked.profile.as_deref(), Some("dev"));
+        // The profile is a place of its own, forgotten alone.
+        assert!(asked.remembers(Asked::PROFILE));
+        let asked = asked.without(&strings(&[Asked::PROFILE]));
+        assert_eq!(asked.profile, None);
+        assert!(!asked.remembers(Asked::PROFILE));
+        assert_eq!(asked.sets, strings(&["settings.a=1", "settings.b=2"]));
     }
 
     #[test]

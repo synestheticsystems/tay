@@ -101,13 +101,15 @@ remembered one for the same place, and units named replace those remembered.
 
 tay down stops everything the environment runs, checks that nothing is left,
 and says so; its daemon exits. tay status prints each unit's state, from a
-check made now, each unit that runs and is not in the plan any more, and what
-the environment remembers being asked for. tay logs prints what a unit wrote,
-each line with its time, and tay's notes of where each attempt starts and how
-it ended; with several units named, or none, which is every unit that has
-written anything, it prints the lines of all in the order of their times, each
-naming its unit. tay ls prints the environments tay knows on this machine, and
-marks with * the one it is run in.
+check made now, each unit that runs and is not in the plan any more, the
+profile in force with what chose it (the command line, now or remembered, the
+environment's file, or the stack's default), and what the environment
+remembers being asked for. tay logs prints what a unit wrote, each line with
+its time, and tay's notes of where each attempt starts and how it ended; with
+several units named, or none, which is every unit that has written anything,
+it prints the lines of all in the order of their times, each naming its unit.
+tay ls prints the environments tay knows on this machine, and marks with * the
+one it is run in.
 
 tay restart stops each unit named and starts it again, with a new first
 attempt, bringing up what it needs as tay up would, and leaving the units that
@@ -124,11 +126,14 @@ it exits as the action did. Nothing the action gave is kept.
 
 tay set changes what the environment remembers being asked for, in the places
 --set takes, and touches no unit until the next tay up: tay up --set is the
-same thing followed by up. Each is checked as tay up --set checks it, and
-nothing is remembered of a stack that does not plan with it. tay unset forgets
-what is remembered for each place, so that the profile's or the stack's value
-holds again. Both list what is remembered afterwards, as tay set with nothing
-after it does; the value of a secret setting is never printed.
+same thing followed by up. tay set profile=NAME remembers a profile as
+--profile does. Each is checked as tay up --set checks it, and nothing is
+remembered of a stack that does not plan with it. tay unset forgets what is
+remembered for each place, so that the profile's or the stack's value holds
+again; tay unset profile forgets the remembered profile, so that the
+environment's file or the stack's default chooses again. Both list what is
+remembered afterwards, as tay set with nothing after it does; the value of a
+secret setting is never printed.
 
 tay wipe removes what each unit named keeps, so that it starts from nothing:
 a container's volumes, what a command's undo undoes and the values it
