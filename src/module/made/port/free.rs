@@ -26,9 +26,10 @@
 
 use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
+use std::os::fd::OwnedFd;
 
 use rustix::io::Errno;
-use rustix::net::{AddressFamily, SocketType, bind, socket, sockopt};
+use rustix::net::{AddressFamily, SocketType, bind, sockopt};
 
 /// Whether no program on this machine listens on `number`.
 pub fn is_free(number: u16) -> io::Result<bool> {
@@ -54,19 +55,41 @@ fn may_not_bind(_: &io::Error) -> bool {
     false
 }
 
+/// A socket to try an address with, which no program tay starts meanwhile
+/// is given: a child that inherited one bound to a number would hold the
+/// number for as long as it ran, and whatever was then to listen on it
+/// would be refused.
+#[cfg(not(target_os = "macos"))]
+fn probe(family: AddressFamily) -> Result<OwnedFd, Errno> {
+    use rustix::net::{SocketFlags, socket_with};
+
+    socket_with(family, SocketType::STREAM, SocketFlags::CLOEXEC, None)
+}
+
+/// macOS cannot make a socket so in one step. It is made so before it is
+/// bound, and one a child was given in between is bound to nothing.
+#[cfg(target_os = "macos")]
+fn probe(family: AddressFamily) -> Result<OwnedFd, Errno> {
+    use rustix::io::{FdFlags, fcntl_setfd};
+
+    let probe = rustix::net::socket(family, SocketType::STREAM, None)?;
+    fcntl_setfd(&probe, FdFlags::CLOEXEC)?;
+    Ok(probe)
+}
+
 /// Whether no socket on this machine has `number`. Each test binds every
 /// address of a family at once without `SO_REUSEADDR`, which the system
 /// refuses while any socket holds the number on any address of it: on
 /// macOS a bind with that option would be let through beside a program
 /// listening on one address only.
 fn nothing_has(number: u16) -> io::Result<bool> {
-    let ipv4 = socket(AddressFamily::INET, SocketType::STREAM, None)?;
+    let ipv4 = probe(AddressFamily::INET)?;
     match bind(&ipv4, &SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, number)) {
         Ok(()) => {}
         Err(Errno::ADDRINUSE) => return Ok(false),
         Err(errno) => return Err(errno.into()),
     }
-    let ipv6 = match socket(AddressFamily::INET6, SocketType::STREAM, None) {
+    let ipv6 = match probe(AddressFamily::INET6) {
         Ok(ipv6) => ipv6,
         // A machine with no IPv6 has nothing listening on it.
         Err(Errno::AFNOSUPPORT) => return Ok(true),
@@ -153,7 +176,7 @@ fn refuses(address: &std::net::SocketAddr) -> io::Result<bool> {
         std::net::SocketAddr::V4(_) => AddressFamily::INET,
         std::net::SocketAddr::V6(_) => AddressFamily::INET6,
     };
-    let probe = socket(family, SocketType::STREAM, None)?;
+    let probe = probe(family)?;
     sockopt::set_socket_reuseaddr(&probe, true)?;
     if address.is_ipv6() {
         sockopt::set_ipv6_v6only(&probe, true)?;
@@ -214,6 +237,18 @@ mod tests {
     use super::*;
     use std::io::Read;
     use std::net::{TcpListener, TcpStream, UdpSocket};
+
+    #[test]
+    fn a_socket_that_tries_an_address_is_not_given_to_a_program_started_meanwhile() {
+        use rustix::io::{FdFlags, fcntl_getfd};
+
+        for family in [AddressFamily::INET, AddressFamily::INET6] {
+            let Ok(probe) = probe(family) else {
+                continue;
+            };
+            assert!(fcntl_getfd(&probe).unwrap().contains(FdFlags::CLOEXEC));
+        }
+    }
 
     #[test]
     fn a_number_a_program_listens_on_is_not_free_on_any_one_address() {
