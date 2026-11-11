@@ -44,12 +44,12 @@ use crate::disk::{
     self, Asked, Asking, Counts, DiskError, Environment, Identity, Intent, Layout, Lock, Machine,
     daemon_socket,
 };
-use crate::engine::{self, Left, Supervisor, Told, UnitState};
+use crate::engine::{self, Supervisor, Told, UnitState};
 use crate::module::Occasion;
 use crate::plan::{self, Options, Plan, PlannedUnit};
 
 use change::{Change, NotBegun};
-use down::Down;
+use down::{Down, WentDown};
 use log::log;
 
 pub use log::open_log;
@@ -82,12 +82,9 @@ pub struct Daemon {
 /// Why the daemon exits.
 #[derive(Clone)]
 enum Exiting {
-    /// It took the environment down, for the reason `because` gives: what
-    /// was left that could not be stopped, or why that could not be told.
-    TookDown {
-        because: Down,
-        left: Result<Vec<Left>, String>,
-    },
+    /// It took the environment down, for the reason `because` gives, and
+    /// what that came to.
+    TookDown { because: Down, went: WentDown },
     /// It was asked to, so that another daemon takes its place: one of
     /// another version of tay, or one `tay serve` runs. The stack runs on.
     MakingWay,

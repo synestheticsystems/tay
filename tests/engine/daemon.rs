@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use rustix::fs::{FlockOperation, flock};
 
-use crate::harness::{Machine, alive, eventually};
+use crate::harness::{Machine, Unwritable, alive, child, eventually};
 use crate::support::Run;
 
 /// Whether another holds the lock on the file at `path`.
@@ -198,6 +198,36 @@ fn down_stops_everything_and_the_daemon_exits() {
     assert_eq!(again.code, 0);
     assert_eq!(again.stdout, "tay down: nothing is left running.\n");
     assert!(machine.daemon_pid(&root).is_none());
+}
+
+#[test]
+fn a_down_that_cannot_record_that_the_environment_is_down_stops_everything_and_exits_with_1() {
+    let machine = Machine::new();
+    let root = machine.stack("leaving");
+    assert_eq!(machine.at(&root, "up", &[]).code, 0);
+    let programs = [child(&root, "staying"), child(&root, "leaving")];
+    let state = root.join(".tay/state");
+    let _full = Unwritable::make(&state);
+    let down = machine.at(&root, "down", &[]);
+    assert_eq!(down.code, 1, "{}{}", down.stdout, down.stderr);
+    assert!(
+        down.stdout
+            .ends_with("tay down: nothing is left running.\n"),
+        "{}",
+        down.stdout
+    );
+    assert_eq!(
+        down.stderr,
+        format!(
+            "tay down: that the environment is down cannot be recorded: `{}` cannot be written: Permission denied (os error 13); the next command will take the environment for up and start its units again\n",
+            state.join("intent").display()
+        )
+    );
+    for program in programs {
+        assert!(!alive(program));
+    }
+    assert!(machine.daemon_pid(&root).is_none());
+    assert_eq!(fs::read_to_string(state.join("intent")).unwrap(), "up\n");
 }
 
 #[test]

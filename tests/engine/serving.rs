@@ -4,7 +4,8 @@
 //! manager that waits for it once it answers, prints each change of
 //! state, and takes everything down when told to stop by
 //! `SIGTERM` or `SIGINT`, or by `tay down` through its socket, exiting with
-//! 0. A hang-up does not stop it. Killed, it leaves the stack running, and
+//! 0, or with 1 when it cannot record that the environment is down. A
+//! hang-up does not stop it. Killed, it leaves the stack running, and
 //! the next daemon adopts it. It takes the place of a daemon that runs, and
 //! exits with another status only when it could not be the daemon or could
 //! not go on, saying why.
@@ -17,7 +18,7 @@ use std::time::Duration;
 
 use rustix::process::Signal;
 
-use crate::harness::{Following, Machine, alive, child, eventually, record};
+use crate::harness::{Following, Machine, Unwritable, alive, child, eventually, record};
 
 /// How long a served daemon has to take the environment down and exit.
 const ENDS: Duration = Duration::from_secs(30);
@@ -181,6 +182,38 @@ fn told_to_stop_it_takes_everything_down_and_exits_with_0() {
     assert!(machine.processes().is_empty());
     // Down means down: no later command brings it up unasked.
     assert_eq!(intent(&root), "down\n");
+}
+
+#[test]
+fn told_to_stop_where_it_cannot_record_that_the_environment_is_down_it_stops_everything_and_exits_with_1()
+ {
+    let machine = Machine::new();
+    let root = machine.stack("services");
+    let served = serve(&machine, &root);
+    let programs = programs(&root, &["api", "web"]);
+    let state = root.join(".tay/state");
+    let _full = Unwritable::make(&state);
+    served.signal(Signal::TERM);
+    let ended = served.finish_within(ENDS);
+    assert_eq!(ended.code, 1, "{}{}", ended.stdout, ended.stderr);
+    assert!(
+        ended
+            .stdout
+            .ends_with("  api  stopped   stopped: `tay serve` was told to stop\ntay serve: nothing is left running.\n"),
+        "{}",
+        ended.stdout
+    );
+    assert_eq!(
+        ended.stderr,
+        format!(
+            "tay serve: that the environment is down cannot be recorded: `{}` cannot be written: Permission denied (os error 13); the next command will take the environment for up and start its units again\n",
+            state.join("intent").display()
+        )
+    );
+    for (program, _) in programs {
+        assert!(!alive(program));
+    }
+    assert_eq!(intent(&root), "up\n");
 }
 
 #[test]

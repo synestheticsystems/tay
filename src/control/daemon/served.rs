@@ -14,19 +14,17 @@ use std::sync::Arc;
 use tokio::signal::unix::{Signal, SignalKind, signal};
 
 use super::change::{Change, Kind};
-use super::down::Down;
+use super::down::{Down, WentDown};
 use super::{CannotStart, Daemon, Exiting, Journal, listen, log, start};
 use crate::control::client::Place;
 use crate::control::protocol::{Event, UpRequest};
 use crate::disk::{Asked, Layout};
-use crate::engine::Left;
 
 /// How `tay serve` ended, once it was the daemon.
 pub enum Served {
     /// It took the environment down, told to stop or by `tay down` or
-    /// `tay wipe --all`: what was left that could not be stopped, or why
-    /// that could not be told.
-    Down(Result<Vec<Left>, String>),
+    /// `tay wipe --all`, and what that came to.
+    Down(WentDown),
     /// It could not go on, and why, as a person reads it.
     CannotGoOn(String),
 }
@@ -71,7 +69,7 @@ pub async fn serve(
         }) => Served::CannotGoOn(
             "the environment's folder has gone, so what it ran was stopped".to_string(),
         ),
-        Some(Exiting::TookDown { left, .. }) => Served::Down(left),
+        Some(Exiting::TookDown { went, .. }) => Served::Down(went),
         Some(Exiting::MakingWay) => Served::CannotGoOn(
             "it was asked to exit, so that another daemon takes its place: one of another version of tay, or another `tay serve`; the stack runs on".to_string(),
         ),

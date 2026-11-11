@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use super::change::{Change, NotBegun};
-use super::down::Down;
+use super::down::{Down, WentDown};
 use super::{Daemon, Exiting, log, options};
 use crate::control::protocol::{Event, FOLDER_WIPED, LISTING_WIPED, Refused};
 use crate::diagnostic::quoted_list;
@@ -202,7 +202,10 @@ impl Daemon {
             self.fail(&change, &error.to_string());
             self.exit(Exiting::TookDown {
                 because: Down::Wiped,
-                left: Err(format!("nothing was stopped: {error}")),
+                went: WentDown {
+                    left: Err(format!("nothing was stopped: {error}")),
+                    unrecorded: None,
+                },
             });
             return;
         }
@@ -228,7 +231,10 @@ impl Daemon {
         }
         self.exit(Exiting::TookDown {
             because: Down::Wiped,
-            left: stopped,
+            went: WentDown {
+                left: stopped,
+                unrecorded: None,
+            },
         });
     }
 

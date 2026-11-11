@@ -95,16 +95,17 @@ async fn serve(args: Args) -> Exit {
     }
     let journal: Journal = Arc::new(print.clone());
     match daemon::serve(environment.layout, place, signals, options.home, journal).await {
-        Ok(Served::Down(left)) => {
-            let exit = match &left {
-                Ok(left) if left.is_empty() => Exit::Done,
-                _ => Exit::Failed,
-            };
-            print(match left {
-                Ok(left) => Event::Down { left },
-                Err(problem) => Event::Problem { problem },
-            });
-            exit
+        Ok(Served::Down(went)) => {
+            for event in went.said() {
+                print(event);
+            }
+            // It exits as `tay down` would, from what the down said, which
+            // always says how it ended.
+            printer
+                .lock()
+                .expect("the printer is not poisoned")
+                .exit()
+                .unwrap_or(Exit::Failed)
         }
         Ok(Served::CannotGoOn(why)) => problem(COMMAND, Exit::Unreachable, &why),
         Err(why) => problem(COMMAND, Exit::Unreachable, &why.to_string()),

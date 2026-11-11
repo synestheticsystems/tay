@@ -66,6 +66,36 @@ impl Down {
     }
 }
 
+/// What taking the environment down came to.
+#[derive(Clone)]
+pub struct WentDown {
+    /// What was left that could not be stopped, or why that cannot be told.
+    pub left: Result<Vec<engine::Left>, String>,
+    /// Why it could not be recorded that the environment is down, when it
+    /// could not: the next command then takes the environment for up, finds
+    /// its units ended while no daemon ran, and starts them again.
+    pub unrecorded: Option<String>,
+}
+
+impl WentDown {
+    /// What the down says at its end: what is left, or why that cannot be
+    /// told, and then, when it could not be recorded, a problem saying so.
+    pub fn said(&self) -> Vec<Event> {
+        let left = match &self.left {
+            Ok(left) => Event::Down { left: left.clone() },
+            Err(problem) => Event::Problem {
+                problem: problem.clone(),
+            },
+        };
+        let unrecorded = self.unrecorded.iter().map(|why| Event::Problem {
+            problem: format!(
+                "that the environment is down cannot be recorded: {why}; the next command will take the environment for up and start its units again"
+            ),
+        });
+        std::iter::once(left).chain(unrecorded).collect()
+    }
+}
+
 impl Daemon {
     /// Begins taking the environment down, `because` says why, cancelling
     /// the change under way; or joins the down under way. Gives the down.
@@ -101,23 +131,27 @@ impl Daemon {
         }
         // What a person or a service manager takes down is meant to be
         // down, so that no later command brings it up unasked. A folder
-        // that has gone is not made again to say so.
-        if let Down::Asked | Down::Stopped = because
-            && let Err(error) = Intent::Down.write(&self.environment.layout)
-        {
+        // that has gone is not made again to say so. A down must always
+        // work, so one that cannot be recorded stops everything all the
+        // same, and says so at its end.
+        let recorded = match because {
+            Down::Asked | Down::Stopped => Intent::Down.write(&self.environment.layout),
+            Down::Gone | Down::Wiped | Down::Unneeded => Ok(()),
+        };
+        if let Err(error) = &recorded {
             log(&format!(
                 "the environment's intent cannot be written: {error}"
             ));
         }
-        let left = self.stop_everything(&change, because).await;
-        change.say(match &left {
-            Ok(left) => Event::Down { left: left.clone() },
-            Err(problem) => Event::Problem {
-                problem: problem.clone(),
-            },
-        });
+        let went = WentDown {
+            left: self.stop_everything(&change, because).await,
+            unrecorded: recorded.err().map(|error| error.to_string()),
+        };
+        for event in went.said() {
+            change.say(event);
+        }
         self.finish(&change);
-        self.exit(Exiting::TookDown { because, left });
+        self.exit(Exiting::TookDown { because, went });
     }
 
     /// The environment's `.tay/` folder has gone while the stack runs: the

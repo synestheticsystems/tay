@@ -87,7 +87,7 @@ One daemon per environment. The first command that needs it starts it, detached 
 - **Its lifetime is a lock** on `.tay/daemon.lock`, held for as long as it runs and released by the system if it dies. A socket file whose lock is free is stale and is replaced.
 - **One change at a time.** A second `up` that asks for exactly what the running one asks for joins it and gets the same result. `down` is always accepted and cancels what is running, so there is always a way to stop. Any other change, a different `up` included, is refused with exit code 4.
 - **Versions.** A command and a daemon of different versions do not talk past each other: the command asks an older daemon to exit, which leaves the stack running, and starts its own. A command older than the daemon is refused with exit code 5 and changes nothing.
-- **`tay down`** stops every unit, in the reverse of the order they started in, then the daemon exits. What made units left on disk stays: ports, secrets and files are an environment's own and are kept.
+- **`tay down`** stops every unit, in the reverse of the order they started in, then the daemon exits. What made units left on disk stays: ports, secrets and files are an environment's own and are kept. If it cannot record that the environment is down, as on a full disk, it stops everything all the same, says that the next command will take the environment for up and start it again, and exits with code 1.
 - **If the daemon dies,** nothing in the stack stops. The next command starts a new daemon, which adopts what is running (see "Finding units again").
 - **If the environment's folder disappears** while the stack runs, the daemon stops everything it started and exits.
 

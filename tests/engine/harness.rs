@@ -510,6 +510,27 @@ impl Following {
     }
 }
 
+/// A folder nothing can be written in, as on a full disk, until this is
+/// dropped, also when the test fails, so that it and its machine can be
+/// removed. It is declared after its machine, which is then dropped after
+/// it.
+pub struct Unwritable(PathBuf);
+
+impl Unwritable {
+    pub fn make(folder: &Path) -> Unwritable {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(folder, fs::Permissions::from_mode(0o555)).unwrap();
+        Unwritable(folder.to_path_buf())
+    }
+}
+
+impl Drop for Unwritable {
+    fn drop(&mut self) {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o755));
+    }
+}
+
 /// Copies the folder `from` to `to`, everything in it included.
 pub fn copy(from: &Path, to: &Path) {
     fs::create_dir_all(to).unwrap();
