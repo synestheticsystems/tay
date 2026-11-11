@@ -79,8 +79,9 @@ pub struct Daemon {
     outage: Mutex<Option<protocol::Outage>>,
     /// Why it has no plan, while it has none.
     no_plan: Mutex<Option<NoPlan>>,
-    /// Held while it plans again for want of a plan, so that two commands
-    /// that ask at once do not both go on from it.
+    /// Held while it plans again for want of a plan, and finds its units
+    /// again against the plan, so that two commands that ask at once do not
+    /// both go on from it, and a down waits until what is found is found.
     planning: tokio::sync::Mutex<()>,
 }
 

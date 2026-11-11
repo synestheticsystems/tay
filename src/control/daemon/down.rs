@@ -129,6 +129,11 @@ impl Daemon {
             before.cancel(because.cancels());
             before.ended().await;
         }
+        // A daemon that had no plan may be finding its units again against
+        // one, as a command asked it something. The down waits for that to
+        // end, so that it stops everything found and nothing is started
+        // behind it; none begins once the down is the change under way.
+        drop(self.planning.lock().await);
         // What a person or a service manager takes down is meant to be
         // down, so that no later command brings it up unasked. A folder
         // that has gone is not made again to say so. A down must always
