@@ -36,7 +36,7 @@ use tokio::net::UnixListener;
 use tokio::sync::watch;
 
 use crate::clock;
-use crate::control::protocol::{self, Event, Refused};
+use crate::control::protocol::{self, DefinitionErrors, Event, NoPlan, Refused};
 use crate::definition::read::THIS_TAY;
 use crate::diagnostic::Diagnostics;
 use crate::diagnostic::source::Sources;
@@ -77,6 +77,8 @@ pub struct Daemon {
     /// When Docker last stopped answering under it, and when the
     /// environment was brought up again, if it has.
     outage: Mutex<Option<protocol::Outage>>,
+    /// Why it has no plan, while it has none.
+    no_plan: Mutex<Option<NoPlan>>,
 }
 
 /// Why the daemon exits.
@@ -221,9 +223,13 @@ async fn start(
             going: AtomicBool::new(false),
             journal,
             outage: Mutex::default(),
+            no_plan: Mutex::default(),
         }
     });
-    found_again(&daemon.supervisor).await;
+    *daemon
+        .no_plan
+        .lock()
+        .expect("why there is no plan is not poisoned") = found_again(&daemon.supervisor).await;
     tokio::spawn(Arc::clone(&daemon).follow_docker());
     // The socket is made, and its path written, once the daemon can answer
     // on it: until then a command finds nothing listening, and waits for
@@ -256,26 +262,37 @@ fn listen_on(path: PathBuf) -> Result<(UnixListener, Socket), CannotStart> {
 /// list, with what the environment remembers being asked for, each as it is
 /// found, and each that runs that the plan does not have. What runs is
 /// looked after again whether or not the environment is meant to be up,
-/// and what is made is checked when it is.
-async fn found_again(supervisor: &Arc<Supervisor>) {
+/// and what is made is checked when it is. Without a plan, what runs is
+/// found all the same and looked after by nothing, and why there is no
+/// plan is given.
+async fn found_again(supervisor: &Arc<Supervisor>) -> Option<NoPlan> {
     let layout = &supervisor.environment.layout;
-    let asked = match Asked::read(layout) {
-        Ok(asked) => asked,
-        Err(error) => {
-            log(&format!("{error}, so no unit is known yet"));
-            return;
+    let planned = match Asked::read(layout) {
+        Ok(asked) => {
+            let options = options(
+                asked.asking(Asked::default()),
+                std::env::var_os("HOME").map(PathBuf::from),
+            );
+            planned(layout.root(), &options).map_err(NoPlan::Errors)
         }
+        Err(error) => Err(NoPlan::Unread {
+            problem: error.to_string(),
+        }),
     };
-    let asked = asked.asking(Asked::default());
-    let options = options(asked, std::env::var_os("HOME").map(PathBuf::from));
-    let planned = match planned(layout.root(), &options) {
+    let planned = match planned {
         Ok(plan) => plan,
-        Err(unplanned) => {
+        Err(no_plan) => {
+            let why = match &no_plan {
+                NoPlan::Errors(errors) => errors.lines.join("\n"),
+                NoPlan::Unread { problem } => problem.clone(),
+            };
             log(&format!(
-                "the definitions do not plan, so no unit is known yet:\n{}",
-                unplanned.lines.join("\n")
+                "there is no plan, so what runs is found and looked after by nothing:\n{why}"
             ));
-            return;
+            if let Err(why) = engine::find_without_plan(supervisor).await {
+                log(&format!("what is left of the units cannot be told: {why}"));
+            }
+            return Some(no_plan);
         }
     };
     if planned.uses_host_listen {
@@ -303,12 +320,7 @@ async fn found_again(supervisor: &Arc<Supervisor>) {
             "what is left of units the plan does not have cannot be told: {why}"
         ));
     }
-}
-
-/// The definitions did not plan: each error as `tay plan` prints it.
-struct Unplanned {
-    lines: Vec<String>,
-    too_old: bool,
+    None
 }
 
 /// What the daemon plans with: `asked`, with the choices of whoever has
@@ -323,7 +335,7 @@ fn options(asked: Asking, home: Option<PathBuf>) -> Options {
 }
 
 /// Plans the stack at `root` as `tay plan` would with `options`.
-fn planned(root: &Path, options: &Options) -> Result<Plan, Unplanned> {
+fn planned(root: &Path, options: &Options) -> Result<Plan, DefinitionErrors> {
     let mut sources = Sources::default();
     let mut d = Diagnostics::default();
     let rendered = |errors: Vec<crate::diagnostic::Diagnostic>, sources: &Sources| {
@@ -331,11 +343,11 @@ fn planned(root: &Path, options: &Options) -> Result<Plan, Unplanned> {
     };
     match plan::plan(root, options, &mut sources, &mut d) {
         plan::Outcome::Plan(plan) => Ok(plan),
-        plan::Outcome::Errors => Err(Unplanned {
+        plan::Outcome::Errors => Err(DefinitionErrors {
             lines: rendered(d.into_sorted(), &sources),
             too_old: false,
         }),
-        plan::Outcome::TooOld(reasons) => Err(Unplanned {
+        plan::Outcome::TooOld(reasons) => Err(DefinitionErrors {
             lines: rendered(reasons, &sources),
             too_old: true,
         }),
@@ -358,6 +370,19 @@ fn cannot_start(why: CannotStart) -> bool {
 }
 
 impl Daemon {
+    /// Refuses a change that acts on the units of the daemon's plan while
+    /// it has none, saying why it has none.
+    fn has_a_plan(&self) -> Result<(), NotBegun> {
+        let no_plan = self
+            .no_plan
+            .lock()
+            .expect("why there is no plan is not poisoned");
+        match no_plan.as_ref() {
+            Some(no_plan) => Err(NotBegun::NoPlan(no_plan.clone())),
+            None => Ok(()),
+        }
+    }
+
     /// Refuses a change that brings up units unless the environment is
     /// meant to be up, so that no unit is started against its intent.
     fn meant_to_be_up(&self) -> Result<(), NotBegun> {

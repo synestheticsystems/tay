@@ -20,14 +20,15 @@ pub struct Restarting {
 }
 
 impl Daemon {
-    /// What `restart` acts on; why it is not begun, when it is not: a unit
-    /// named is not one that runs in the plan the daemon holds, or the
-    /// environment is not meant to be up.
+    /// What `restart` acts on; why it is not begun, when it is not: the
+    /// daemon has no plan, a unit named is not one that runs in the plan
+    /// it holds, or the environment is not meant to be up.
     pub fn restarting(&self, restart: &Restart) -> Result<Restarting, NotBegun> {
         let does_not_fit = NotBegun::DoesNotFit;
         if restart.units.is_empty() {
             return Err(does_not_fit("name each unit to restart".to_string()));
         }
+        self.has_a_plan()?;
         let units = self.supervisor.snapshot();
         let mut named = Vec::new();
         for unit in &restart.units {

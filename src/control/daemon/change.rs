@@ -12,7 +12,9 @@ use tokio::sync::watch;
 
 use super::Journal;
 use crate::clock;
-use crate::control::protocol::{Event, Refused, Restart, RunRequest, UpRequest, WipeRequest};
+use crate::control::protocol::{
+    Event, NoPlan, Refused, Restart, RunRequest, UpRequest, WipeRequest,
+};
 
 /// What a change does. It has no `Debug`, since a `--set` it carries may
 /// hold a secret setting's value.
@@ -32,6 +34,8 @@ pub enum Kind {
 pub enum NotBegun {
     /// What was asked does not fit the stack, as said.
     DoesNotFit(String),
+    /// The daemon has no plan whose units it acts on, as said.
+    NoPlan(NoPlan),
     /// It is refused as things stand: what was asked needs something that
     /// is not up.
     Refused(Refused),

@@ -18,6 +18,7 @@ mod docker;
 mod environments;
 mod files;
 mod harness;
+mod no_plan;
 mod one_change;
 mod ports;
 mod restart;

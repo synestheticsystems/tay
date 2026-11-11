@@ -23,7 +23,7 @@ use super::check::CheckedState;
 use super::settled::{Settled, Standing, have_failed};
 use super::state::{State, UnitState};
 use super::supervisor::Supervisor;
-use super::unplanned::stop_unplanned;
+use super::unplanned::{anything_left, stop_unplanned};
 use crate::diagnostic::quoted_list;
 use crate::disk::Environment;
 use crate::module::{self, UnitPlace};
@@ -131,8 +131,8 @@ pub type Step = Pin<Box<dyn Future<Output = Option<NotUndone>> + Send>>;
 
 /// How the next `undo` owed stands.
 enum Judged {
-    /// It runs now, without these units it needed, which the plan no
-    /// longer has and which are not up.
+    /// It runs now. These units it needed are not in the plan any more, and
+    /// it runs without each that is not up as it begins.
     Runs(Vec<String>),
     /// It waits for these units of the plan.
     Waits(Vec<String>),
@@ -189,10 +189,10 @@ impl Leaving {
             return None;
         }
         while let Some(owed) = self.owed.pop_front() {
-            match self.judged(supervisor, settled, &owed) {
-                Judged::Runs(without) => {
+            match self.judged(settled, &owed) {
+                Judged::Runs(elsewhere) => {
                     self.waiting_said = false;
-                    let undo = undo(Arc::clone(supervisor), owed.unit, without);
+                    let undo = undo(Arc::clone(supervisor), owed.unit, elsewhere);
                     return Some(Box::pin(undo));
                 }
                 Judged::Waits(waiting) => {
@@ -231,9 +231,8 @@ impl Leaving {
         }
     }
 
-    /// How `owed` stands, as the units of the plan stand in `settled` and
-    /// the units the plan no longer has stand with `supervisor`.
-    fn judged(&self, supervisor: &Supervisor, settled: &Settled, owed: &Owed) -> Judged {
+    /// How `owed` stands, as the units of the plan stand in `settled`.
+    fn judged(&self, settled: &Settled, owed: &Owed) -> Judged {
         let needs = match &owed.needs {
             Ok(needs) => needs,
             Err(why) => return Judged::Cannot(why.clone()),
@@ -247,12 +246,7 @@ impl Leaving {
                 return Judged::Cannot(format!("its `undo` cannot run: {}", have_failed(&failed)));
             }
         }
-        let without = elsewhere
-            .into_iter()
-            .filter(|need| (supervisor.state(need)).is_none_or(|state| state.state != State::Ready))
-            .cloned()
-            .collect();
-        Judged::Runs(without)
+        Judged::Runs(elsewhere.into_iter().cloned().collect())
     }
 }
 
@@ -274,15 +268,15 @@ fn said_without(without: &[String]) -> String {
 }
 
 /// Runs the `undo` `unit` keeps, saying what came of it, and that it runs
-/// without `without`, the units it needed that are neither up nor in the
-/// plan any more; once it has run, the unit is forgotten. What of the unit
-/// still runs, as of a command that was running when it left the plan, is
-/// stopped first, so that nothing of it goes on after its work is undone.
-/// How it did not run, when it did not.
+/// without each of `elsewhere`, the units it needed that the plan no longer
+/// has, that is not up; once it has run, the unit is forgotten. What of the
+/// unit still runs, as of a command that was running when it left the
+/// plan, is stopped first, so that nothing of it goes on after its work is
+/// undone. How it did not run, when it did not.
 async fn undo(
     supervisor: Arc<Supervisor>,
     unit: String,
-    without: Vec<String>,
+    elsewhere: Vec<String>,
 ) -> Option<NotUndone> {
     let running = (supervisor.snapshot().unplanned(&unit)).map(|unplanned| unplanned.runs.clone());
     if let Some(runs) = running
@@ -290,6 +284,19 @@ async fn undo(
     {
         let why = format!("it could not be stopped for its `undo` to run: {why}");
         return Some(not_undone(&supervisor, &unit, &why, false));
+    }
+    let mut without = Vec::new();
+    for need in elsewhere {
+        match is_up(&supervisor, &need).await {
+            Ok(true) => {}
+            Ok(false) => without.push(need),
+            Err(why) => {
+                let why = format!(
+                    "whether `{need}`, which its `undo` needs, is up cannot be told: {why}"
+                );
+                return Some(not_undone(&supervisor, &unit, &why, false));
+            }
+        }
     }
     let without = said_without(&without);
     let undoing = format!("it is not in the plan any more, so its `undo` runs{without}");
@@ -307,6 +314,18 @@ async fn undo(
             let why = format!("{why}, having run{without}");
             Some(not_undone(&supervisor, &unit, &why, true))
         }
+    }
+}
+
+/// Whether `unit`, which the plan no longer has, is up: a task looks after
+/// it, or something of it is left where it runs. The state recorded for it
+/// does not tell: a unit a daemon found running outside its plan is
+/// `failed`, however well it runs.
+async fn is_up(supervisor: &Supervisor, unit: &str) -> Result<bool, String> {
+    let runs = (supervisor.snapshot().unplanned(unit)).map(|unplanned| unplanned.runs.clone());
+    match runs {
+        Some(runs) => anything_left(supervisor, unit, &runs).await,
+        None => Ok(supervisor.is_tended(unit)),
     }
 }
 

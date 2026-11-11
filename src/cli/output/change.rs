@@ -9,6 +9,7 @@ mod took;
 
 use serde_json::{Value, json};
 
+use super::no_plan;
 use crate::cli::Exit;
 use crate::control::protocol::Event;
 use crate::definition::read::THIS_TAY;
@@ -83,8 +84,9 @@ impl Printer {
                     .filter(|code| *code != 0)
                     .map_or(Exit::Failed, Exit::Action),
             ),
-            Event::Errors { too_old: true, .. } => Some(Exit::TooOld),
-            Event::Errors { .. } => Some(Exit::Errors),
+            Event::Errors(errors) if errors.too_old => Some(Exit::TooOld),
+            Event::Errors(_) => Some(Exit::Errors),
+            Event::NoPlan(no_plan) => Some(no_plan::exit(no_plan)),
             Event::Decided {
                 decision: Decision::Ready,
                 ..
@@ -121,16 +123,17 @@ impl Printer {
                 width = self.width
             )),
             Event::Notice { notice } => own(&format!("{command}: {notice}.\n")),
-            Event::Errors { lines, too_old } => {
-                for line in &lines {
+            Event::Errors(errors) => {
+                for line in &errors.lines {
                     err(&format!("{line}\n"));
                 }
-                if !too_old {
+                if !errors.too_old {
                     err(&format!(
                         "{command}: the definitions have errors now; nothing more was started.\n"
                     ));
                 }
             }
+            Event::NoPlan(no_plan) => err(&no_plan::text(command, &no_plan)),
             Event::Decided {
                 decision,
                 seconds,
@@ -238,11 +241,16 @@ impl Printer {
                 "at": at,
             }),
             Event::Notice { notice } => json!({ "event": "notice", "notice": notice }),
-            Event::Errors { lines, too_old } => json!({
+            Event::Errors(errors) => json!({
                 "event": "errors",
-                "too_old": too_old,
-                "errors": lines,
+                "too_old": errors.too_old,
+                "errors": errors.lines,
             }),
+            Event::NoPlan(why) => {
+                let mut line = no_plan::json(why);
+                line["event"] = json!("no_plan");
+                line
+            }
             Event::Decided {
                 decision,
                 seconds,

@@ -4,7 +4,8 @@
 //! remembers being asked for. The daemon makes the checks; with none
 //! running, an environment meant to be up, or with anything of it left,
 //! has one started to find its units, and any other has every unit
-//! stopped.
+//! stopped. A daemon that has no plan says why, which is printed after
+//! the units it found running, and the command ends on it.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -13,17 +14,17 @@ use serde_json::json;
 
 use crate::cli::Exit;
 use crate::cli::args::{Args, Takes, Words};
-use crate::cli::output::asked;
+use crate::cli::output::{asked, no_plan};
 use crate::cli::stack;
 use crate::clock;
 use crate::control::client::{Client, ClientError};
-use crate::control::protocol::Outage;
+use crate::control::protocol::{NoPlan, Outage};
 use crate::definition::read::THIS_TAY;
 use crate::disk::{Asked, Environment, Identity, Intent, Layout};
 use crate::engine::{self, State};
 use crate::module;
 use crate::plan::{self, ChosenBy};
-use crate::print::out;
+use crate::print::{err, out};
 
 use super::plan::{no_stack, options, planned, print_json};
 use super::{block_on, client_problem, disk_problem, machine, problem};
@@ -58,6 +59,8 @@ struct Report {
     /// When Docker last stopped answering under the daemon, if it has.
     outage: Option<Outage>,
     units: Vec<Line>,
+    /// Why the daemon has no plan, while it has none.
+    no_plan: Option<NoPlan>,
 }
 
 /// One unit as `tay status` reports it.
@@ -107,7 +110,8 @@ pub fn run(args: Args) -> Exit {
     report.asked = asked::shown(remembered, stack.as_deref());
     if let [unit] = args.words.as_slice() {
         report.units.retain(|line| line.unit == *unit);
-        if report.units.is_empty() {
+        // Without a plan, why there is none is the answer.
+        if report.units.is_empty() && report.no_plan.is_none() {
             return problem(
                 COMMAND,
                 Exit::Errors,
@@ -116,9 +120,10 @@ pub fn run(args: Args) -> Exit {
         }
     }
     print(&report, args.json);
-    match report.units.iter().any(|line| line.state == State::Failed) {
-        true => Exit::Failed,
-        false => Exit::Done,
+    match &report.no_plan {
+        Some(no_plan) => no_plan::exit(no_plan),
+        None if report.units.iter().any(|line| line.state == State::Failed) => Exit::Failed,
+        None => Exit::Done,
     }
 }
 
@@ -152,6 +157,7 @@ fn from_daemon(environment: &Environment, args: &Args) -> Result<Report, Exit> {
             profile: None,
             asked: Asked::default(),
             outage: status.outage,
+            no_plan: status.no_plan,
             units: status
                 .units
                 .into_iter()
@@ -219,6 +225,7 @@ fn stopped(
         asked: Asked::default(),
         outage: None,
         units,
+        no_plan: None,
     })
 }
 
@@ -279,6 +286,7 @@ fn print(report: &Report, json: bool) {
                 },
                 "outage": report.outage,
             },
+            "no_plan": report.no_plan.as_ref().map(no_plan::json),
             "units": report.units.iter().map(|line| json!({
                 "unit": line.unit,
                 "state": line.state.word(),
@@ -321,4 +329,7 @@ fn print(report: &Report, json: bool) {
         ));
     }
     out(&text);
+    if let Some(why) = &report.no_plan {
+        err(&no_plan::text(COMMAND, why));
+    }
 }

@@ -5,6 +5,7 @@
 pub mod asked;
 pub mod change;
 pub mod json;
+pub mod no_plan;
 pub mod text;
 
 use crate::definition::Check;

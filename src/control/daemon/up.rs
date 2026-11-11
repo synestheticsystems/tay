@@ -102,11 +102,8 @@ impl Daemon {
         let root = self.environment.layout.root().to_path_buf();
         match tokio::task::spawn_blocking(move || planned(&root, &options)).await {
             Ok(Ok(plan)) => Some(plan),
-            Ok(Err(unplanned)) => {
-                change.say(Event::Errors {
-                    lines: unplanned.lines,
-                    too_old: unplanned.too_old,
-                });
+            Ok(Err(errors)) => {
+                change.say(Event::Errors(errors));
                 self.finish(change);
                 None
             }
@@ -123,9 +120,10 @@ impl Daemon {
     /// Takes in the units of `plan`, once what they need of the machine is
     /// there: the stack's shared folder made, and `${host.listen}` learnt.
     /// A unit set apart that the plan has again, as one a daemon found
-    /// running that its plan then lacked, is found again where it runs,
-    /// and not started a second time. Gives the plan's units; `None` when
-    /// the change has failed.
+    /// running that its plan then lacked, or found running while it had no
+    /// plan, is found again where it runs, and not started a second time.
+    /// The daemon has a plan from then on. Gives the plan's units; `None`
+    /// when the change has failed.
     pub(super) async fn take_in_plan(
         &self,
         change: &Arc<Change>,
@@ -149,6 +147,10 @@ impl Daemon {
         }
         let units: Vec<Arc<PlannedUnit>> = plan.units.into_iter().map(Arc::new).collect();
         let returned = self.supervisor.take_in(&units);
+        *self
+            .no_plan
+            .lock()
+            .expect("why there is no plan is not poisoned") = None;
         engine::find_again(&self.supervisor, &returned, true).await;
         Some(units)
     }

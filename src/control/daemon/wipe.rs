@@ -35,13 +35,15 @@ pub struct Wiping {
 
 impl Daemon {
     /// What a wipe of `units` acts on; why it is not begun, when it is not:
-    /// a unit named is not in the plan the daemon holds, or is a group, or
-    /// its removal runs something that needs a unit that is not up.
+    /// the daemon has no plan, a unit named is not in the plan it holds, or
+    /// is a group, or its removal runs something that needs a unit that is
+    /// not up.
     pub fn wiping(&self, units: &[String], home: Option<PathBuf>) -> Result<Wiping, NotBegun> {
         let does_not_fit = NotBegun::DoesNotFit;
         if units.is_empty() {
             return Err(does_not_fit("name each unit to wipe".to_string()));
         }
+        self.has_a_plan()?;
         let table = self.supervisor.snapshot();
         let mut named = Vec::new();
         for unit in units {

@@ -133,10 +133,15 @@ impl Supervisor {
     }
 
     /// Sets apart `unit`, which runs where `runs` says and which the plan
-    /// does not have, in `state`, and tells the daemon of it, unless the
-    /// table has it already.
-    pub fn take_in_unplanned(&self, unit: &str, runs: Runs, state: UnitState) {
-        if self.units().take_in_unplanned(unit, runs, state.clone()) {
+    /// does not have, in `state`, or says it is in `state` if it is set
+    /// apart already; and tells the daemon when that changed its state. A
+    /// unit of the plan, or one a task looks after, which says its own
+    /// state, is left as it is.
+    pub fn set_apart(&self, unit: &str, runs: Runs, state: UnitState) {
+        if self.is_tended(unit) {
+            return;
+        }
+        if self.units().set_apart(unit, runs, state.clone()) {
             (self.told)(unit, &state);
             self.changes.send_modify(|count| *count += 1);
         }

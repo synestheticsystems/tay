@@ -23,7 +23,7 @@ use super::down::Down;
 use super::{Daemon, Exiting, log};
 use crate::clock;
 use crate::control::protocol::{
-    self, Problem, Refused, Remember, Restart, RunRequest, Status, UnitStatus, UpRequest,
+    self, Event, Problem, Refused, Remember, Restart, RunRequest, Status, UnitStatus, UpRequest,
     WipeRequest,
 };
 use crate::engine;
@@ -191,6 +191,14 @@ where
                     json(StatusCode::UNPROCESSABLE_ENTITY, &Problem { problem })
                 }
                 NotBegun::Refused(refused) => json(StatusCode::CONFLICT, &refused),
+                // Said as a change says the definitions' errors, so that
+                // the command prints them as `tay plan` does.
+                NotBegun::NoPlan(no_plan) => {
+                    change.say(Event::NoPlan(no_plan));
+                    change.close();
+                    change.end();
+                    follow(change)
+                }
             };
         }
     };
@@ -230,8 +238,15 @@ fn down(daemon: &Arc<Daemon>) -> Response<Body> {
 /// the plan does not have of which something runs, and each whose `undo`
 /// waits. A unit the check finds in the state recorded keeps the time it
 /// took it. With them, when Docker last stopped answering under the
-/// daemon, if it has.
+/// daemon, if it has, and why it has no plan, while it has none: then
+/// whether a unit whose `undo` is kept has left the plan cannot be told,
+/// and none is said to wait.
 async fn status(daemon: &Arc<Daemon>) -> Response<Body> {
+    let no_plan = daemon
+        .no_plan
+        .lock()
+        .expect("why there is no plan is not poisoned")
+        .clone();
     let units = daemon.supervisor.snapshot();
     let environment = Arc::clone(&daemon.environment);
     let host_listen = daemon.supervisor.host_listen();
@@ -254,6 +269,7 @@ async fn status(daemon: &Arc<Daemon>) -> Response<Body> {
     found.extend(engine::check_unplanned(&daemon.supervisor).await);
     let listed = |unit: &str| found.iter().any(|found| found.unit == unit);
     match engine::undos_waiting(&daemon.environment, listed) {
+        _ if no_plan.is_some() => {}
         Ok(waiting) => found.extend(waiting),
         Err(problem) => {
             return json(StatusCode::INTERNAL_SERVER_ERROR, &Problem { problem });
@@ -280,7 +296,14 @@ async fn status(daemon: &Arc<Daemon>) -> Response<Body> {
         .lock()
         .expect("the outage is not poisoned")
         .clone();
-    json(StatusCode::OK, &Status { units, outage })
+    json(
+        StatusCode::OK,
+        &Status {
+            units,
+            outage,
+            no_plan,
+        },
+    )
 }
 
 /// The answer to a change asked for while `change` is under way.

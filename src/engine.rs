@@ -25,4 +25,4 @@ pub use state::{State, UnitState};
 pub use supervisor::{Supervisor, Told, runs};
 pub use take_down::{Left, take_down};
 pub use units::Took;
-pub use unplanned::{check_unplanned, find_unplanned};
+pub use unplanned::{check_unplanned, find_unplanned, find_without_plan};

@@ -5,6 +5,20 @@ use crate::plan::{
     Because, Given, OpenedBy, Plan, PlannedMechanism, PlannedUnit, PublishedPort, Readiness, Seen,
 };
 
+/// The definitions' errors, each as `tay plan` prints it, closed by
+/// `command`, which counts them and says what that means, `closing`.
+pub fn errors(command: &str, errors: &[String], closing: &str) -> String {
+    let count = match errors.len() {
+        1 => "1 error".to_string(),
+        n => format!("{n} errors"),
+    };
+    let mut text: String = errors.iter().map(|error| format!("{error}\n")).collect();
+    text.push_str(&format!(
+        "{command}: {count} in the definitions; {closing}.\n"
+    ));
+    text
+}
+
 pub fn plan(plan: &Plan) -> String {
     let profile = match (&plan.profile, plan.production) {
         (Some(profile), true) => format!("profile `{profile}` (production)"),

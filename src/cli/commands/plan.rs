@@ -87,16 +87,9 @@ pub fn planned(
             if json {
                 print_json(&json::errors("errors", &errors, &sources));
             } else {
-                for error in &errors {
-                    err(&format!("{}\n", error.render(&sources)));
-                }
-                let count = match errors.len() {
-                    1 => "1 error".to_string(),
-                    n => format!("{n} errors"),
-                };
-                err(&format!(
-                    "{command}: {count} in the definitions; {closing}.\n"
-                ));
+                let rendered: Vec<String> =
+                    errors.iter().map(|error| error.render(&sources)).collect();
+                err(&text::errors(command, &rendered, closing));
             }
             Err(Exit::Errors)
         }

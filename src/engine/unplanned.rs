@@ -4,7 +4,14 @@
 //! one the plan left as it changed, or one of which a daemon finds
 //! something left where units run that its plan does not list, as it does
 //! when the definitions changed while no daemon ran. A container of such a
-//! unit that has ended is left too, and goes the same way.
+//! unit that has ended is left too, and goes the same way. A daemon that
+//! has no plan sets apart everything it finds so, and looks after none of
+//! it until a `tay up` plans.
+//!
+//! Such a unit is `failed`: nothing checks it, so it cannot become ready
+//! until a `tay up` changes that, and its detail says what of it is left.
+//! Whether it is up is judged by whether anything of it is left, never by
+//! that state.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -21,11 +28,27 @@ use crate::module::Runs;
 const STILL_LEFT: &str =
     "it is not in the plan any more, and something of it is left: the next `tay up` stops it";
 
+/// What a unit a daemon with no plan found is while something of it is
+/// left.
+const NO_PLAN: &str = "something of it is left, and the daemon has no plan, so nothing looks after it until `tay up` plans";
+
 /// Sets apart, as unplanned, each unit of which anything is left, found
-/// where units run, that the table does not have.
+/// where units run, that the plan does not have; one set apart before,
+/// as by a daemon that had no plan, and that no task looks after, is said
+/// to be left.
 pub async fn find_unplanned(supervisor: &Supervisor) -> Result<(), String> {
+    set_apart(supervisor, STILL_LEFT).await
+}
+
+/// Sets apart, as unplanned, each unit of which anything is left, found
+/// where units run, for a daemon that has no plan.
+pub async fn find_without_plan(supervisor: &Supervisor) -> Result<(), String> {
+    set_apart(supervisor, NO_PLAN).await
+}
+
+async fn set_apart(supervisor: &Supervisor, detail: &str) -> Result<(), String> {
     for (unit, runs) in supervisor.found_left().await? {
-        supervisor.take_in_unplanned(&unit, runs, UnitState::new(State::Failed, STILL_LEFT));
+        supervisor.set_apart(&unit, runs, UnitState::new(State::Failed, detail));
     }
     Ok(())
 }
@@ -109,7 +132,11 @@ pub async fn check_unplanned(supervisor: &Supervisor) -> Vec<CheckedState> {
 
 /// Whether anything of `unit`, which runs where `runs` says, is left now: a
 /// task looks after it, or something of it is found where it runs.
-async fn anything_left(supervisor: &Supervisor, unit: &str, runs: &Runs) -> Result<bool, String> {
+pub(super) async fn anything_left(
+    supervisor: &Supervisor,
+    unit: &str,
+    runs: &Runs,
+) -> Result<bool, String> {
     match supervisor.is_tended(unit) {
         true => Ok(true),
         false => supervisor.anything_left(unit, runs).await,

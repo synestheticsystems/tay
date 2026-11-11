@@ -188,6 +188,27 @@ fn an_undo_runs_without_a_unit_it_needed_that_is_neither_up_nor_in_the_plan() {
 }
 
 #[test]
+fn an_undo_runs_with_a_unit_it_needed_that_a_new_daemon_finds_running_outside_the_plan() {
+    let machine = Machine::new();
+    let root = brought_up(&machine);
+    let token = token(&root);
+    machine.kill_daemon(&root);
+    // `made` and `holder` leave the plan while no daemon runs: the next
+    // daemon finds `holder` running, which its plan does not have.
+    let set = machine.at(&root, "set", &["up=token"]);
+    assert_eq!(set.code, 0, "{}{}", set.stdout, set.stderr);
+    let up = machine.at(&root, "up", &[]);
+    assert_eq!(up.code, 0, "{}{}", up.stdout, up.stderr);
+    let runs = "made starting it is not in the plan any more, so its `undo` runs";
+    assert!(up.changes().contains(&runs.to_string()), "{}", up.stdout);
+    assert_eq!(up.last_change("made"), UNDONE);
+    assert_eq!(
+        fs::read_to_string(root.join("undone")).unwrap(),
+        format!("one {token} running\n")
+    );
+}
+
+#[test]
 fn an_undo_that_fails_without_a_unit_it_needed_says_so_and_is_kept() {
     let machine = Machine::new();
     let root = brought_up(&machine);

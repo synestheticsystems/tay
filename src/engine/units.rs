@@ -101,11 +101,15 @@ impl Units {
         returned
     }
 
-    /// Sets apart `unit`, which runs where `runs` says and which the table
-    /// does not have, as unplanned and in `state`; whether it was new.
-    pub fn take_in_unplanned(&mut self, unit: &str, runs: Runs, state: UnitState) -> bool {
-        if self.get(unit).is_some() || self.unplanned(unit).is_some() {
+    /// Sets apart `unit`, which runs where `runs` says, as unplanned and in
+    /// `state`, unless the plan has it; one set apart already takes `state`.
+    /// Whether its state changed.
+    pub fn set_apart(&mut self, unit: &str, runs: Runs, state: UnitState) -> bool {
+        if self.get(unit).is_some() {
             return false;
+        }
+        if self.unplanned(unit).is_some() {
+            return self.record(unit, state, None);
         }
         self.unplanned.push(Unplanned {
             name: unit.to_string(),

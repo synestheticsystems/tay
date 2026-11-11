@@ -179,9 +179,11 @@ pub enum Event {
     },
     /// Something a person should know of the change, said once.
     Notice { notice: String },
-    /// The definitions, planned again by the daemon, have errors: each as
-    /// `tay plan` prints it.
-    Errors { lines: Vec<String>, too_old: bool },
+    /// The definitions, planned again by the daemon, have errors.
+    Errors(DefinitionErrors),
+    /// The change was not begun: the daemon has no plan, as said, and
+    /// looks after nothing until a `tay up` plans.
+    NoPlan(NoPlan),
     /// What a change that brings units up came to: `tay up`, or another
     /// that ends by bringing up what it stopped; how long the change took
     /// until then, in seconds, and how long each unit it started took, the
@@ -224,6 +226,26 @@ pub enum Event {
     },
 }
 
+/// The errors the definitions have, each as `tay plan` prints it, and
+/// whether they say that this tay is too old for them.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DefinitionErrors {
+    pub lines: Vec<String>,
+    pub too_old: bool,
+}
+
+/// Why a daemon has no plan, while it has none: it started while the
+/// definitions did not plan, and no `tay up` has planned since.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "no_plan", rename_all = "snake_case")]
+pub enum NoPlan {
+    /// The definitions have errors.
+    Errors(DefinitionErrors),
+    /// What the environment remembers being asked for cannot be read, as
+    /// said.
+    Unread { problem: String },
+}
+
 /// A value an action produced, by name: `None` for one declared secret,
 /// which is never given.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -241,7 +263,8 @@ impl Event {
             | Event::Notice { .. }
             | Event::Output { .. }
             | Event::Removed { .. } => false,
-            Event::Errors { .. }
+            Event::Errors(_)
+            | Event::NoPlan(_)
             | Event::Decided { .. }
             | Event::Cancelled { .. }
             | Event::Down { .. }
@@ -290,12 +313,15 @@ impl fmt::Display for Refused {
     }
 }
 
-/// Each unit's state, in the order units start in, and when what runs
-/// containers last stopped answering under the daemon, if it has.
+/// Each unit's state, in the order units start in, when what runs
+/// containers last stopped answering under the daemon, if it has, and why
+/// the daemon has no plan, while it has none: then the units are each found
+/// running.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Status {
     pub units: Vec<UnitStatus>,
     pub outage: Option<Outage>,
+    pub no_plan: Option<NoPlan>,
 }
 
 /// What runs containers stopping under the environment, as Docker does
