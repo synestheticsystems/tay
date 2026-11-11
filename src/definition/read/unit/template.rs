@@ -57,7 +57,7 @@ pub fn read(name: NameAt, node: &Node, d: &mut Diagnostics) -> Template {
         .unwrap_or_default()
         .into_iter()
         .map(|(name, decl)| {
-            let default = Fields::of(decl, "a parameter's declaration", &["default"], d)
+            let default = Fields::all_optional(decl, "a parameter's declaration", &["default"], d)
                 .and_then(|decl| decl.get("default").cloned());
             Param { name, default }
         })

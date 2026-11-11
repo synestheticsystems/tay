@@ -4,7 +4,7 @@ A stack's definitions say what the stack is made of and what each part needs. ta
 
 Two rules run through all of it.
 
-- **Strict.** An unknown key, a wrong type, a duplicate name, or a reference to something that does not exist is an error with the file, line and column. So is a YAML tag, a second document in one file, and a file or folder under the units folder that defines nothing. A file or folder whose name begins with a dot is not read at all. tay reports every error it can find in one run, and starts nothing if there is any.
+- **Strict.** An unknown key, a wrong type, a duplicate name, or a reference to something that does not exist is an error with the file, line and column. So is a YAML tag, a second document in one file, and a file or folder under the units folder that defines nothing. A file or folder whose name begins with a dot is not read at all. Where every field of a mapping is optional, as in a profile, a choices file or a setting's declaration, nothing written is an empty one. tay reports every error it can find in one run, and starts nothing if there is any.
 - **Blind.** The planner knows units, their needs and their values. It never asks which module a unit uses. It hands each module that module's own settings to check, and asks every module the same two questions: where does this unit run, and is it something that runs or something that is made.
 
 Words used here: a **stack** is everything one `tay.yaml` describes. An **environment** is one running copy of a stack. A **unit** is one thing tay brings up. A **module** is the mechanism a unit uses. A **way** is one of several mechanisms a unit may be run by.

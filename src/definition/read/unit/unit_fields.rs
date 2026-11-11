@@ -20,7 +20,7 @@ pub fn args(node: &Node, d: &mut Diagnostics) -> Vec<Arg> {
     fields::keyed(node, "an argument", names::value_name_problem, d)
         .into_iter()
         .filter_map(|(name, decl)| {
-            let decl = Fields::of(decl, "an argument's declaration", &["default"], d)?;
+            let decl = Fields::all_optional(decl, "an argument's declaration", &["default"], d)?;
             let default = match decl.get("default") {
                 Some(default) => Some(fields::literal(default, "an argument's default", d)?),
                 None => None,
@@ -129,7 +129,7 @@ pub fn ready(node: &Node, d: &mut Diagnostics) -> Option<Ready> {
 }
 
 pub fn restart(node: &Node, d: &mut Diagnostics) -> Option<Restart> {
-    let fields = Fields::of(node, "`restart`", &["on", "attempts"], d)?;
+    let fields = Fields::all_optional(node, "`restart`", &["on", "attempts"], d)?;
     let [on, attempts] = [
         ("on", Want::OneOf(RestartOn::WORDS)),
         ("attempts", Want::Count),

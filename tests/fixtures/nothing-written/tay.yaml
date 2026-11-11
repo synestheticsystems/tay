@@ -1,0 +1,23 @@
+format: 1
+stack: nothing-written
+default_profile: dev
+run:
+up: [maker, service]
+settings:
+  images.server:
+units:
+  maker:
+    uses: command
+    restart:
+    with:
+      run: [make, "${settings.images.server}"]
+      produces:
+        token:
+    gives: { image: "${settings.images.server}" }
+  service: { from: served, params: { name: web } }
+  mint:
+    action: true
+    args:
+      user:
+    uses: command
+    with: { run: [mint, "${args.user}"] }

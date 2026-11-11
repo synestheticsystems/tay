@@ -1,7 +1,7 @@
 //! Reading definitions strictly: each error at its file, line and column, all
 //! of them in one run, and nothing skipped.
 
-use crate::support::plan;
+use crate::support::{fixture, given, plan, plan_with_home, unit};
 
 #[test]
 fn every_error_in_a_stack_is_reported_in_one_run_at_its_place() {
@@ -54,16 +54,46 @@ fn a_unit_file_that_does_not_parse_stops_the_plan_and_no_unit_is_skipped() {
 #[test]
 fn folders_and_files_that_define_no_unit_are_errors_rather_than_skipped() {
     // `.hidden.yaml`, which is not YAML, and the folder `.cache` are not
-    // read at all: a name beginning with a dot is no definition.
+    // read at all: a name beginning with a dot is no definition. A unit
+    // must be written, so a file that holds only a comment, and a unit's
+    // name with nothing after it, define none.
     let run = plan("undefined-entries", &[]);
     assert_eq!(run.code, 2);
     assert_eq!(
         run.errors(),
         [
             "stack/units/Bad_Unit/unit.yaml:1:1: the folder's name is the unit's name: `Bad_Unit` must start with a lower-case letter",
+            "stack/units/commented.yaml:1:1: this must be a mapping, each key a unit's name; this is empty",
             "stack/units/empty.yaml:1:1: this file defines no unit: its mapping is empty",
             "stack/units/extra.yml:1:1: this is not a definition: this folder holds `<name>/unit.yaml` and `<anything>.yaml` (tay reads `.yaml`, not `.yml`)",
+            "stack/units/hollow.yaml:1:7: a unit must be a mapping; this is empty",
             "stack/units/notes:1:1: this is not a definition: this folder holds `<name>/unit.yaml` and `<anything>.yaml`, and this folder has no `unit.yaml`",
+        ]
+    );
+}
+
+#[test]
+fn nothing_written_where_every_field_is_optional_is_an_empty_mapping() {
+    // The profile, the environment's file and this person's own file hold
+    // only comments, and `run`, a setting's declaration, a `restart`, a
+    // produced value's declaration, an action's argument and a template's
+    // parameter are each a key with nothing after it.
+    let home = fixture("homes/nothing-written");
+    let set = ["--set", "settings.images.server=7", "--json"];
+    let run = plan_with_home("nothing-written", &home, &set);
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    let plan = &run.json()["plan"];
+    assert_eq!(plan["profile"], "dev");
+    // A setting declared with nothing is text, with no default.
+    let image = given(unit(plan, "maker"), "image");
+    assert_eq!(image["from_host"]["value"], "7");
+    let run = plan_with_home("nothing-written", &home, &[]);
+    assert_eq!(
+        run.errors(),
+        [
+            "tay.yaml:7:3: setting `images.server` has no value and no default, and the plan uses it",
+            "  tay.yaml:13:20: it is used here",
+            "  tay.yaml:16:22: it is used here",
         ]
     );
 }

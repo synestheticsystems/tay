@@ -58,7 +58,7 @@ impl OnlyIn {
 }
 
 pub fn profile(name: NameAt, node: &Node, d: &mut Diagnostics) -> Option<Profile> {
-    let file = Fields::of(node, "a profile", FIELDS, d)?;
+    let file = Fields::all_optional(node, "a profile", FIELDS, d)?;
     ENVIRONMENT_ONLY.refuse(&file, d);
     let production = file
         .get("production")
@@ -79,7 +79,7 @@ pub fn profile(name: NameAt, node: &Node, d: &mut Diagnostics) -> Option<Profile
 /// says whether it is a production one and what it requires, and only the
 /// environment's file which profile is used.
 pub fn personal_file(node: &Node, d: &mut Diagnostics) -> Option<Choices> {
-    let file = Fields::of(node, "a choices file", FIELDS, d)?;
+    let file = Fields::all_optional(node, "a choices file", FIELDS, d)?;
     PROFILE_ONLY.refuse(&file, d);
     ENVIRONMENT_ONLY.refuse(&file, d);
     Some(choices(&file, d))
@@ -88,7 +88,7 @@ pub fn personal_file(node: &Node, d: &mut Diagnostics) -> Option<Choices> {
 /// The environment's file, `.tay/choices.yaml`: a profile's shape but for
 /// what only a profile says, and which profile is used.
 pub fn environment_file(node: &Node, d: &mut Diagnostics) -> Option<EnvironmentFile> {
-    let file = Fields::of(node, "a choices file", FIELDS, d)?;
+    let file = Fields::all_optional(node, "a choices file", FIELDS, d)?;
     PROFILE_ONLY.refuse(&file, d);
     Some(EnvironmentFile {
         profile: (file.get("profile")).and_then(|node| fields::name(node, "`profile`", d)),
@@ -150,7 +150,7 @@ fn up_list(node: &Node, d: &mut Diagnostics) -> Vec<NameAt> {
 /// `run`: `default`, one way's name or a list of them, and `units`, a way
 /// for each unit named.
 fn read_run(node: &Node, choices: &mut Choices, d: &mut Diagnostics) {
-    let Some(run) = Fields::of(node, "`run`", &["default", "units"], d) else {
+    let Some(run) = Fields::all_optional(node, "`run`", &["default", "units"], d) else {
         return;
     };
     choices.run_default = run.get("default").map(|node| match node.as_seq() {

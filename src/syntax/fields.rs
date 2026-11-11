@@ -61,6 +61,27 @@ impl<'n> Fields<'n> {
         })
     }
 
+    /// Opens `node` as [`Fields::of`] does, for a mapping none of whose
+    /// fields is required: nothing written there, as in a file that holds
+    /// only a comment or a key with nothing after it, is a mapping with no
+    /// field in it.
+    pub fn all_optional(
+        node: &'n Node,
+        what: &'static str,
+        allowed: &'static [&'static str],
+        d: &mut Diagnostics,
+    ) -> Option<Fields<'n>> {
+        match node.kind {
+            Kind::Scalar(Scalar::Null) => Some(Fields {
+                loc: node.loc,
+                what,
+                allowed,
+                entries: Vec::new(),
+            }),
+            _ => Fields::of(node, what, allowed, d),
+        }
+    }
+
     pub fn loc(&self) -> Loc {
         self.loc
     }

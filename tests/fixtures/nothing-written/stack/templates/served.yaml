@@ -1,0 +1,7 @@
+params:
+  name:
+unit:
+  uses: process
+  with:
+    command: [serve, "${params.name}"]
+    env: { TOKEN: "${maker.token}" }

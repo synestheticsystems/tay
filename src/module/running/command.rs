@@ -340,10 +340,11 @@ fn produced(node: &Node, d: &mut Diagnostics) -> Vec<(NameAt, bool)> {
         Some(_) => fields::keyed(node, WHAT, names::value_name_problem, d)
             .into_iter()
             .map(|(name, decl)| {
-                let secret = Fields::of(decl, "a produced value's declaration", &["secret"], d)
-                    .and_then(|decl| decl.get("secret"))
-                    .and_then(|node| fields::boolean(node, "`secret`", d))
-                    .unwrap_or(false);
+                let secret =
+                    Fields::all_optional(decl, "a produced value's declaration", &["secret"], d)
+                        .and_then(|decl| decl.get("secret"))
+                        .and_then(|node| fields::boolean(node, "`secret`", d))
+                        .unwrap_or(false);
                 (name, secret)
             })
             .collect(),

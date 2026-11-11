@@ -11,7 +11,7 @@ pub fn declarations(node: &Node, d: &mut Diagnostics) -> Vec<SettingDecl> {
     fields::keyed(node, "a setting", names::setting_name_problem, d)
         .into_iter()
         .filter_map(|(name, decl)| {
-            let decl = Fields::of(
+            let decl = Fields::all_optional(
                 decl,
                 "a setting's declaration",
                 &["default", "doc", "type", "secret"],
@@ -54,8 +54,8 @@ pub fn declarations(node: &Node, d: &mut Diagnostics) -> Vec<SettingDecl> {
                     ),
                 );
             }
-            // With neither a default nor a `type`, as in `images.server: {}`,
-            // the setting is text.
+            // With neither a default nor a `type`, as in `images.server: {}`
+            // or `images.server:` with nothing after it, the setting is text.
             let ty = written
                 .or(default.as_ref().map(|default| default.value.ty()))
                 .unwrap_or(Type::Text);
