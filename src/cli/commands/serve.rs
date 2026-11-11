@@ -31,6 +31,19 @@ pub const TAKES: Takes = Takes {
 const COMMAND: &str = "tay serve";
 
 pub fn run(args: Args) -> Exit {
+    let ended = block_on(COMMAND, serve(args));
+    match ended {
+        Ok(exit) | Err(exit) => exit,
+    }
+}
+
+async fn serve(args: Args) -> Exit {
+    // From its first moment, so that no signal it is sent ends it before
+    // it heeds them.
+    let signals = match daemon::Signals::new() {
+        Ok(signals) => signals,
+        Err(why) => return problem(COMMAND, Exit::Unreachable, &why.to_string()),
+    };
     let root = match stack::root(args.root.as_deref()) {
         Ok(root) => root,
         Err(message) => return no_stack(COMMAND, &message, false),
@@ -64,37 +77,36 @@ pub fn run(args: Args) -> Exit {
     print(Event::Units {
         units: plan.units.iter().map(|unit| unit.name.clone()).collect(),
     });
-    let ended = block_on(COMMAND, async {
-        let established = match forget_what_is_gone(&machine).await {
-            Ok(_) => Environment::establish(&Layout::of(&root), &machine),
-            Err(error) => Err(error),
-        };
-        let environment = match established {
-            Ok(environment) => environment,
-            Err(error) => return disk_problem(COMMAND, &error),
-        };
-        let lock = match Client::take_daemons_place(&environment).await {
-            Ok(lock) => lock,
-            Err(error) => return client_problem(COMMAND, &error),
-        };
-        let journal: Journal = Arc::new(print.clone());
-        match daemon::serve(environment.layout, lock, options.home, journal).await {
-            Ok(Served::Down(left)) => {
-                let exit = match &left {
-                    Ok(left) if left.is_empty() => Exit::Done,
-                    _ => Exit::Failed,
-                };
-                print(match left {
-                    Ok(left) => Event::Down { left },
-                    Err(problem) => Event::Problem { problem },
-                });
-                exit
-            }
-            Ok(Served::CannotGoOn(why)) => problem(COMMAND, Exit::Unreachable, &why),
-            Err(why) => problem(COMMAND, Exit::Unreachable, &why.to_string()),
+    // The place is taken before what takes time, so that a command started
+    // meanwhile, as an install script's `tay up`, waits for this daemon
+    // rather than start one of its own that this one would replace.
+    let environment = match Environment::establish(&Layout::of(&root), &machine) {
+        Ok(environment) => environment,
+        Err(error) => return disk_problem(COMMAND, &error),
+    };
+    let place = match Client::take_daemons_place(&environment).await {
+        Ok(place) => place,
+        Err(error) => return client_problem(COMMAND, &error),
+    };
+    // One that stays because whether anything of it is left cannot be told
+    // is said so by `tay ls`.
+    if let Err(error) = forget_what_is_gone(&machine).await {
+        return disk_problem(COMMAND, &error);
+    }
+    let journal: Journal = Arc::new(print.clone());
+    match daemon::serve(environment.layout, place, signals, options.home, journal).await {
+        Ok(Served::Down(left)) => {
+            let exit = match &left {
+                Ok(left) if left.is_empty() => Exit::Done,
+                _ => Exit::Failed,
+            };
+            print(match left {
+                Ok(left) => Event::Down { left },
+                Err(problem) => Event::Problem { problem },
+            });
+            exit
         }
-    });
-    match ended {
-        Ok(exit) | Err(exit) => exit,
+        Ok(Served::CannotGoOn(why)) => problem(COMMAND, Exit::Unreachable, &why),
+        Err(why) => problem(COMMAND, Exit::Unreachable, &why.to_string()),
     }
 }

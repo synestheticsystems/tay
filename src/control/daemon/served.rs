@@ -13,8 +13,9 @@ use tokio::signal::unix::{Signal, SignalKind, signal};
 use super::change::{Change, Kind};
 use super::down::Down;
 use super::{CannotStart, Daemon, Exiting, Journal, listen, log, start};
+use crate::control::client::Place;
 use crate::control::protocol::UpRequest;
-use crate::disk::{Asked, Layout, Lock};
+use crate::disk::{Asked, Layout};
 use crate::engine::Left;
 
 /// How `tay serve` ended, once it was the daemon.
@@ -27,18 +28,17 @@ pub enum Served {
     CannotGoOn(String),
 }
 
-/// Runs as the daemon of the environment at `layout`, whose lock `lock`
-/// is, until the daemon exits. What it brings up is chosen with the
-/// choices of whoever has `home`; `journal` is told each change of state,
-/// and what the bring-up it begins with says.
+/// Runs as the daemon of the environment at `layout`, in the `place` taken
+/// for it, until the daemon exits, heeding `signals`. What it brings up is
+/// chosen with the choices of whoever has `home`; `journal` is told each
+/// change of state, and what the bring-up it begins with says.
 pub async fn serve(
     layout: Layout,
-    lock: Lock,
+    place: Place,
+    signals: Signals,
     home: Option<PathBuf>,
     journal: Journal,
 ) -> Result<Served, CannotStart> {
-    // Told to stop while it starts, it stops once it has started.
-    let signals = Signals::new().map_err(CannotStart::Signals)?;
     super::log::in_own_file(layout.daemon_log())?;
     let (daemon, listener, socket) = match start(layout, Some(Arc::clone(&journal))).await {
         Ok(started) => started,
@@ -48,8 +48,11 @@ pub async fn serve(
         }
     };
     Arc::clone(&daemon).bring_up_served(home, journal);
+    // It answers from now on.
+    drop(place.bootstrap);
+    // Told to stop while it started, it stops now.
     let stopping = tokio::spawn(stop_when_told(Arc::clone(&daemon), signals));
-    let exiting = listen::listen(&daemon, listener, &lock, &socket).await;
+    let exiting = listen::listen(&daemon, listener, &place.daemon, &socket).await;
     stopping.abort();
     Ok(match exiting {
         Some(Exiting::TookDown {
@@ -70,14 +73,14 @@ pub async fn serve(
     })
 }
 
-/// The signals `tay serve` heeds: `SIGTERM`, which a service manager
-/// sends, and `SIGINT`, which a terminal sends when a person presses
-/// control-C, tell it to stop. `SIGHUP`, which a terminal sends when it
-/// closes, is no one asking for the stack to stop, and the daemon carries
-/// on; ended by it, the daemon would leave the stack running with no one to
+/// The signals `tay serve` heeds, from its first moment: `SIGTERM`, which
+/// a service manager sends, and `SIGINT`, which a terminal sends when a
+/// person presses control-C, tell it to stop. `SIGHUP`, which a terminal
+/// sends when it closes, is no one asking for the stack to stop, and it
+/// carries on; ended by it, it would leave the stack running with no one to
 /// look after it, and systemd, which takes that end for a clean one, would
 /// not start it again.
-struct Signals {
+pub struct Signals {
     terminate: Signal,
     interrupt: Signal,
     hangup: Signal,
@@ -85,12 +88,13 @@ struct Signals {
 
 impl Signals {
     /// Listens for the signals from now on, so that one that comes before
-    /// it is waited for is kept.
-    fn new() -> std::io::Result<Signals> {
+    /// the daemon has started is kept until it has.
+    pub fn new() -> Result<Signals, CannotStart> {
+        let listen = |kind| signal(kind).map_err(CannotStart::Signals);
         Ok(Signals {
-            terminate: signal(SignalKind::terminate())?,
-            interrupt: signal(SignalKind::interrupt())?,
-            hangup: signal(SignalKind::hangup())?,
+            terminate: listen(SignalKind::terminate())?,
+            interrupt: listen(SignalKind::interrupt())?,
+            hangup: listen(SignalKind::hangup())?,
         })
     }
 }

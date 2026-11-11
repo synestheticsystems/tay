@@ -48,7 +48,7 @@ use down::Down;
 use log::log;
 
 pub use log::open_log;
-pub use served::{Served, serve};
+pub use served::{Served, Signals, serve};
 
 /// What `tay serve` prints for as long as it runs: each change of state,
 /// and what the changes it makes itself say.
@@ -179,24 +179,7 @@ async fn start(
     let Identity::Own(environment) = Environment::identify(&layout, &machine)? else {
         return Err(CannotStart::NotIdentified);
     };
-    let path = environment.socket();
     machine.make_socket_folder(environment.id.as_str())?;
-    // The daemon holds the lock, so a socket file there is stale.
-    let _ = std::fs::remove_file(&path);
-    let listen_failed = |source| CannotStart::Socket {
-        path: path.clone(),
-        source,
-    };
-    let listener = UnixListener::bind(&path).map_err(listen_failed)?;
-    // Who may control the environment is decided by the socket's
-    // permissions alone.
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
-        .map_err(listen_failed)?;
-    let metadata = std::fs::symlink_metadata(&path).map_err(listen_failed)?;
-    let socket = Socket {
-        path,
-        identity: (metadata.dev(), metadata.ino()),
-    };
     let about = protocol::About {
         tay: THIS_TAY.to_string(),
         pid: std::process::id(),
@@ -235,7 +218,29 @@ async fn start(
         }
     });
     found_again(&daemon.supervisor).await;
+    // The socket is made once the daemon can answer on it: until then a
+    // command finds nothing listening, and waits for the daemon's lock
+    // rather than for an answer that would not come in time.
+    let (listener, socket) = listen_on(daemon.environment.socket())?;
     Ok((daemon, listener, socket))
+}
+
+/// Listens on the socket at `path`, which this account alone may use.
+fn listen_on(path: PathBuf) -> Result<(UnixListener, Socket), CannotStart> {
+    // The daemon holds the lock, so a socket file there is stale.
+    let _ = std::fs::remove_file(&path);
+    let listen_failed = |source| CannotStart::Socket {
+        path: path.clone(),
+        source,
+    };
+    let listener = UnixListener::bind(&path).map_err(listen_failed)?;
+    // Who may control the environment is decided by the socket's
+    // permissions alone.
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+        .map_err(listen_failed)?;
+    let metadata = std::fs::symlink_metadata(&path).map_err(listen_failed)?;
+    let identity = (metadata.dev(), metadata.ino());
+    Ok((listener, Socket { path, identity }))
 }
 
 /// Finds the units again as the daemon starts: those `tay plan` would

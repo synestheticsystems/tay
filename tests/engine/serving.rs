@@ -9,6 +9,8 @@
 //! not go on, saying why.
 
 use std::fs;
+use std::io::Write;
+use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::time::Duration;
 
@@ -225,6 +227,36 @@ fn it_takes_the_place_of_a_daemon_started_detached_and_nothing_restarts() {
     assert_eq!(machine.daemon_pid(&root), Some(served.pid()));
     assert_eq!(programs(&root, &["api", "web"]), programs_before);
     assert_found_as_they_run(&served);
+    served.signal(Signal::TERM);
+    assert_eq!(served.finish_within(ENDS).code, 0);
+}
+
+#[test]
+fn a_command_started_while_it_takes_the_place_of_a_daemon_waits_for_it_and_starts_none() {
+    let machine = Machine::new();
+    let root = machine.stack("waiting");
+    assert_eq!(machine.at(&root, "up", &[]).code, 0);
+    // An answer under way holds the daemon that is replaced for as long as
+    // it is given to finish, five seconds.
+    let mut under_way = UnixStream::connect(machine.socket(&root)).unwrap();
+    write!(under_way, "GET /v1/daemon HTTP/1.1\r\n").unwrap();
+    let mut served = machine.spawn(&root, "serve", &[]);
+    let log = root.join(".tay/logs/tay/daemon.log");
+    assert!(eventually(ENDS, || {
+        fs::read_to_string(&log)
+            .unwrap()
+            .contains("exiting: asked to, so that another daemon takes its place")
+    }));
+    let up = machine.spawn_up(&root, &[]).finish_within(ENDS);
+    assert_eq!(up.code, 0, "{}{}", up.stdout, up.stderr);
+    served.until(": it took ");
+    assert_eq!(machine.daemon_pid(&root), Some(served.pid()));
+    let started = fs::read_to_string(&log)
+        .unwrap()
+        .matches("  started: ")
+        .count();
+    assert_eq!(started, 2, "the first daemon and the served one");
+    drop(under_way);
     served.signal(Signal::TERM);
     assert_eq!(served.finish_within(ENDS).code, 0);
 }

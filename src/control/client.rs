@@ -36,6 +36,17 @@ const RETRY: Duration = Duration::from_millis(50);
 /// the daemon then has as long to start as one started detached.
 const SERVED_AGAIN: Duration = Duration::from_secs(30);
 
+/// What `tay serve` holds once it has taken the daemon's place.
+pub struct Place {
+    /// The daemon's lock, held for as long as it is the daemon.
+    pub daemon: Lock,
+    /// The lock a command holds while it starts a daemon, held until the
+    /// daemon answers: a command that finds no daemon meanwhile waits on
+    /// it, and then finds this one, rather than start one of its own that
+    /// this one would replace.
+    pub bootstrap: Lock,
+}
+
 /// A daemon that answers for an environment.
 pub struct Client {
     socket: PathBuf,
@@ -166,18 +177,18 @@ impl Client {
         }
     }
 
-    /// The daemon's lock of `environment`, for `tay serve`, which takes the
-    /// daemon's place: a daemon of this tay or an older one that answers is
-    /// asked to exit first, which leaves the stack as it is. A daemon of a
-    /// newer tay is left alone, and is an error.
-    pub async fn take_daemons_place(environment: &Environment) -> Result<Lock, ClientError> {
+    /// The place of the daemon of `environment`, for `tay serve`: a daemon
+    /// of this tay or an older one that answers is asked to exit first,
+    /// which leaves the stack as it is. A daemon of a newer tay is left
+    /// alone, and is an error.
+    pub async fn take_daemons_place(environment: &Environment) -> Result<Place, ClientError> {
         environment
             .machine
             .make_socket_folder(environment.id.as_str())?;
         // A command starts a daemon only while it holds this lock, so none
-        // is started between one daemon's exit and the taking of its lock.
+        // is started while this one takes the daemon's place.
         let bootstrap = environment.bootstrap_lock();
-        let _bootstrap = tokio::task::spawn_blocking(move || Lock::take(&bootstrap))
+        let bootstrap = tokio::task::spawn_blocking(move || Lock::take(&bootstrap))
             .await
             .expect("waiting for a lock does not panic")?;
         let until = Instant::now() + START;
@@ -190,8 +201,8 @@ impl Client {
                 }
                 client.exit().await?;
             }
-            if let Some(lock) = Lock::try_take(&environment.layout.daemon_lock())? {
-                return Ok(lock);
+            if let Some(daemon) = Lock::try_take(&environment.layout.daemon_lock())? {
+                return Ok(Place { daemon, bootstrap });
             }
             // A daemon that holds the lock and does not answer is starting
             // or ending.
