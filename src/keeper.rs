@@ -280,12 +280,12 @@ fn note(log: &Mutex<Adding>, text: &str) {
     written(log, Writer::Tay, text);
 }
 
-/// Writes a line to the log. A line that cannot be written is lost: the
-/// keeper's work is to keep the program and record how it ended, which it
-/// goes on doing however the log fares, and it has nowhere else to say so.
+/// Writes a line to the log, which loses one it cannot write: the keeper's
+/// work is to keep the program and record how it ended, which it goes on
+/// doing however the log fares.
 fn written(log: &Mutex<Adding>, writer: Writer, text: &str) {
     let mut log = log
         .lock()
         .expect("the log is written by one thread at a time");
-    let _ = log.write(writer, text);
+    log.write(writer, text);
 }

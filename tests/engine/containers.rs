@@ -12,6 +12,7 @@ mod commands;
 mod ending;
 mod environment;
 mod finding_again;
+mod logs;
 mod reaching;
 mod readiness;
 mod secrets;

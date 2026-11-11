@@ -122,7 +122,7 @@ pub async fn run_inside(
             "starting `{}` in the container of `{unit}`",
             step.argv.join(" ")
         ),
-    )?;
+    );
     if let Some(steps) = running {
         // The engine has stopped listening only once it has dropped the
         // attempt, which then goes no further.
@@ -138,11 +138,8 @@ pub async fn run_inside(
         workdir: step.workdir.as_deref(),
         stdin: step.stdin.as_deref(),
     };
-    // A line that cannot be written to the log is lost; the step goes on.
     let exited = docker
-        .exec(&container, &exec, &mut |line| {
-            let _ = log.write(Writer::Unit, line);
-        })
+        .exec(&container, &exec, &mut |line| log.write(Writer::Unit, line))
         .await;
     let ended = match exited {
         Ok(exited) => ContainerStepEnd::Exited {
@@ -155,7 +152,7 @@ pub async fn run_inside(
         },
         Err(error) => ContainerStepEnd::NotStarted(error.to_string()),
     };
-    note(&mut log, &step, &ended.how())?;
+    note(&mut log, &step, &ended.how());
     let fetched = fetch(&docker, &container, &inside, values).await;
     // What it wrote may be a secret, which is not left in another unit's
     // container, whether or not it could be fetched. An image with no `rm`
@@ -181,7 +178,7 @@ pub async fn run_inside(
             &format!(
                 "`{inside}`, which it wrote its values to, could not be removed from the container of `{unit}`: {why}"
             ),
-        )?;
+        );
     }
     fetched?;
     record::keep(place, step.attempt, step.step, &ended)?;
@@ -268,7 +265,7 @@ pub async fn run_own(
             "starting `{}` in `{name}` from `{image}`",
             step.argv.join(" ")
         ),
-    )?;
+    );
     let fed = match &step.stdin {
         Some(_) => Some(docker.feeding(&container).await?),
         None => None,
@@ -276,7 +273,7 @@ pub async fn run_own(
     if let Err(error) = docker.start(&container).await {
         docker.remove(container).await?;
         let ended = ContainerStepEnd::NotStarted(error.to_string());
-        note(&mut log, &step, &ended.how())?;
+        note(&mut log, &step, &ended.how());
         record::keep(place, step.attempt, step.step, &ended)?;
         return Ok(ended);
     }
@@ -298,7 +295,7 @@ pub async fn run_own(
         &mut log,
     )
     .await?;
-    note(&mut log, &step, &ended.how())?;
+    note(&mut log, &step, &ended.how());
     Ok(ended)
 }
 
@@ -439,9 +436,9 @@ impl ContainerStepEnd {
 
 /// Notes in the command's log what its step did, as the keeper of a step on
 /// the host notes it.
-fn note(log: &mut Adding, step: &CommandStep, what: &str) -> Result<(), Failure> {
-    Ok(log.write(
+fn note(log: &mut Adding, step: &CommandStep, what: &str) {
+    log.write(
         Writer::Tay,
         &format!("attempt {}, {}: {what}", step.attempt, step.step),
-    )?)
+    );
 }

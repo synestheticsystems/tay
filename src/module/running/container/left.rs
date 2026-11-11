@@ -113,8 +113,9 @@ pub async fn stop(place: &UnitPlace) -> Result<(), Failure> {
 
 /// Removes `container`, the unit's own at `place`, once it is stopped and
 /// what remains of its output, what it said as it stopped included, is
-/// copied into `log`. One whose output cannot be copied is left stopped,
-/// and said so, so that nothing it wrote is lost.
+/// copied into `log`. A line the log could not take was copied, and lost,
+/// as the log says. One whose output Docker cannot give is left stopped,
+/// and said so, so that nothing it wrote is lost while Docker holds it.
 pub async fn remove_copied(
     docker: &Docker,
     place: &UnitPlace,

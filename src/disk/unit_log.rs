@@ -7,11 +7,19 @@
 //! Each line is `TIME | TEXT` for what the unit wrote and `TIME # TEXT` for
 //! what tay noted, `TIME` being UTC to the millisecond, as long as any other,
 //! so that lines sort by time as their text does.
+//!
+//! A line that cannot be written, as when the disk is full, is lost, and
+//! whoever writes the unit's lines goes on, as the unit does: a log that
+//! cannot be written is no reason to stop what it is the log of. Once a
+//! line can be written again, a line of tay's own before it says how many
+//! were lost.
 
+use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use crate::clock;
 use crate::disk::DiskError;
@@ -29,6 +37,12 @@ const SET_ASIDE: u32 = 2;
 /// The longest line kept whole; a longer one is cut into lines this long,
 /// so that a unit that never ends a line cannot fill the keeper's memory.
 pub const LONGEST_LINE: usize = 64 * 1024;
+
+/// The lines each log, by its folder, lost to a writer that was dropped
+/// before it could say so, as one is when its unit is stopped while the
+/// disk is full: the next writer of that log in this process says them
+/// with its own.
+static UNSAID: Mutex<BTreeMap<PathBuf, u64>> = Mutex::new(BTreeMap::new());
 
 /// Who wrote a line.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -112,10 +126,12 @@ impl UnitLog {
         let path = self.current();
         let file = append(&path)?;
         let size = file.metadata().map_err(DiskError::io(&path, "read"))?.len();
+        let lost = unsaid().remove(&self.folder).unwrap_or(0);
         Ok(Adding {
             log: self.clone(),
             file,
             size,
+            lost,
         })
     }
 
@@ -207,30 +223,47 @@ pub struct Adding {
     log: UnitLog,
     file: File,
     size: u64,
+    /// The lines that could not be written since one last was.
+    lost: u64,
 }
 
 impl Adding {
-    /// Writes `text`, as `writer` wrote it, with the time now.
-    pub fn write(&mut self, writer: Writer, text: &str) -> Result<(), DiskError> {
-        self.write_at(clock::now_millis(), writer, text)
+    /// Writes `text`, as `writer` wrote it, with the time now, or loses it.
+    pub fn write(&mut self, writer: Writer, text: &str) {
+        self.write_at(clock::now_millis(), writer, text);
     }
 
     /// Writes `text`, as `writer` wrote it at `millis`, in milliseconds
     /// since 1970: what a container wrote, at the time Docker kept for it.
-    pub fn write_at(&mut self, millis: u64, writer: Writer, text: &str) -> Result<(), DiskError> {
-        let line = Line {
-            time: clock::stamp(millis),
-            writer,
-            text: text.to_string(),
-        };
-        let mut bytes = line.whole().into_bytes();
-        bytes.push(b'\n');
+    /// A line that cannot be written is lost; the first written after
+    /// lines were lost follows a line of tay's own, of the same time, that
+    /// says how many.
+    pub fn write_at(&mut self, millis: u64, writer: Writer, text: &str) {
+        if self.lost > 0 {
+            // A line that could not be written may have been written in
+            // part: the note begins a line of its own.
+            let mut note = vec![b'\n'];
+            note.extend(bytes_of(millis, Writer::Tay, &note_of_lost(self.lost)));
+            if self.put(&note).is_err() {
+                self.lost += 1;
+                return;
+            }
+            self.lost = 0;
+        }
+        if self.put(&bytes_of(millis, writer, text)).is_err() {
+            self.lost += 1;
+        }
+    }
+
+    /// Adds `bytes` to the file, setting it aside first if they would make
+    /// it too long.
+    fn put(&mut self, bytes: &[u8]) -> Result<(), DiskError> {
         if self.size > 0 && self.size + bytes.len() as u64 > ROTATE_AT {
             self.rotate()?;
         }
         let path = self.log.current();
         self.file
-            .write_all(&bytes)
+            .write_all(bytes)
             .map_err(DiskError::io(&path, "written"))?;
         self.size += bytes.len() as u64;
         Ok(())
@@ -247,12 +280,54 @@ impl Adding {
             }
         }
         let current = self.log.current();
-        fs::rename(&current, self.log.set_aside(1))
-            .map_err(DiskError::io(&current, "set aside"))?;
+        match fs::rename(&current, self.log.set_aside(1)) {
+            Ok(()) => {}
+            // Set aside already, by a setting aside that could not begin
+            // the new file, as on a full disk.
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(DiskError::io(current, "set aside")(error)),
+        }
         self.file = append(&current)?;
         self.size = 0;
         Ok(())
     }
+}
+
+impl Drop for Adding {
+    /// Leaves the lines it lost and has not said to the next writer of the
+    /// log.
+    fn drop(&mut self) {
+        if self.lost > 0 {
+            *unsaid().entry(self.log.folder.clone()).or_default() += self.lost;
+        }
+    }
+}
+
+/// The line `text`, as `writer` wrote it at `millis`, as the log holds it,
+/// with its end.
+fn bytes_of(millis: u64, writer: Writer, text: &str) -> Vec<u8> {
+    let line = Line {
+        time: clock::stamp(millis),
+        writer,
+        text: text.to_string(),
+    };
+    let mut bytes = line.whole().into_bytes();
+    bytes.push(b'\n');
+    bytes
+}
+
+/// What a log says of `lost` lines that could not be written to it.
+fn note_of_lost(lost: u64) -> String {
+    match lost {
+        1 => "1 line could not be written to this log, and is lost".to_string(),
+        lost => format!("{lost} lines could not be written to this log, and are lost"),
+    }
+}
+
+/// The lines lost and not said, by log, held. A count is whole whatever
+/// panicked while it was held.
+fn unsaid() -> MutexGuard<'static, BTreeMap<PathBuf, u64>> {
+    UNSAID.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 fn append(path: &Path) -> Result<File, DiskError> {
@@ -332,6 +407,8 @@ impl Following {
 
 #[cfg(test)]
 mod tests {
+    use std::os::unix::fs::PermissionsExt;
+
     use super::*;
 
     #[test]
@@ -361,9 +438,7 @@ mod tests {
         // Enough for the file to be set aside more often than files are kept.
         let lines = (ROTATE_AT as usize / LONGEST_LINE) * 4;
         for number in 0..lines {
-            adding
-                .write(Writer::Unit, &format!("{number} {long}"))
-                .unwrap();
+            adding.write(Writer::Unit, &format!("{number} {long}"));
         }
         let names = |folder: &Path| {
             let mut names: Vec<String> = fs::read_dir(folder)
@@ -400,12 +475,12 @@ mod tests {
         let folder = tempfile::tempdir().unwrap();
         let log = UnitLog::at(folder.path().join("web"));
         let mut adding = log.open().unwrap();
-        adding.write(Writer::Unit, "first").unwrap();
+        adding.write(Writer::Unit, "first");
         let (lines, mut following) = log.read_since("").unwrap();
         assert_eq!(lines.len(), 1);
-        adding.write(Writer::Unit, "second").unwrap();
+        adding.write(Writer::Unit, "second");
         adding.rotate().unwrap();
-        adding.write(Writer::Tay, "third").unwrap();
+        adding.write(Writer::Tay, "third");
         let mut more = Vec::new();
         following.read("", &mut more).unwrap();
         let texts: Vec<&str> = more.iter().map(|line| line.text.as_str()).collect();
@@ -422,9 +497,9 @@ mod tests {
         let log = UnitLog::at(folder.path().join("seed"));
         let mut new = log.follow_from_now().unwrap();
         let mut adding = log.open().unwrap();
-        adding.write(Writer::Unit, "first").unwrap();
+        adding.write(Writer::Unit, "first");
         let mut following = log.follow_from_now().unwrap();
-        adding.write(Writer::Unit, "second").unwrap();
+        adding.write(Writer::Unit, "second");
         let read = |following: &mut Following| {
             let mut lines = Vec::new();
             following.read("", &mut lines).unwrap();
@@ -451,5 +526,125 @@ mod tests {
         fs::create_dir_all(logs.join("tay")).unwrap();
         fs::write(logs.join("tay").join("daemon.log"), "").unwrap();
         assert_eq!(units_with_logs(&logs).unwrap(), ["api", "set-aside", "web"]);
+    }
+
+    /// A folder that takes no new file, as a full disk takes none, until
+    /// it is dropped.
+    struct Refusing<'a>(&'a Path);
+
+    impl Refusing<'_> {
+        fn of(folder: &Path) -> Refusing<'_> {
+            fs::set_permissions(folder, fs::Permissions::from_mode(0o555)).unwrap();
+            Refusing(folder)
+        }
+    }
+
+    impl Drop for Refusing<'_> {
+        fn drop(&mut self) {
+            let _ = fs::set_permissions(self.0, fs::Permissions::from_mode(0o755));
+        }
+    }
+
+    /// Who wrote each line of `log`, and its text.
+    fn lines(log: &UnitLog) -> Vec<(Writer, String)> {
+        let (lines, _) = log.read_since("").unwrap();
+        lines
+            .into_iter()
+            .map(|line| (line.writer, line.text))
+            .collect()
+    }
+
+    #[test]
+    fn a_line_that_cannot_be_written_is_lost_and_the_next_written_says_how_many_were() {
+        let folder = tempfile::tempdir().unwrap();
+        let log = UnitLog::at(folder.path().join("web"));
+        let mut adding = log.open().unwrap();
+        adding.write(Writer::Unit, "first");
+        // The file is as long as it may grow, so the next line sets it
+        // aside, which its folder refuses.
+        adding.size = ROTATE_AT;
+        let refusing = Refusing::of(log.folder());
+        adding.write(Writer::Unit, "second");
+        adding.write(Writer::Tay, "third");
+        drop(refusing);
+        adding.write(Writer::Unit, "fourth");
+        adding.write(Writer::Unit, "fifth");
+        let said = "2 lines could not be written to this log, and are lost";
+        assert_eq!(
+            lines(&log),
+            [
+                (Writer::Unit, "first".to_string()),
+                (Writer::Tay, said.to_string()),
+                (Writer::Unit, "fourth".to_string()),
+                (Writer::Unit, "fifth".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_setting_aside_that_could_not_begin_its_new_file_is_finished_by_the_next_line() {
+        let folder = tempfile::tempdir().unwrap();
+        let log = UnitLog::at(folder.path().join("web"));
+        let mut adding = log.open().unwrap();
+        adding.write(Writer::Unit, "first");
+        // As a full disk leaves it: the file set aside, and no new one.
+        fs::rename(log.current(), log.set_aside(1)).unwrap();
+        adding.size = ROTATE_AT;
+        adding.write(Writer::Unit, "second");
+        assert_eq!(
+            lines(&log),
+            [
+                (Writer::Unit, "first".to_string()),
+                (Writer::Unit, "second".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lines_lost_by_a_writer_dropped_before_it_could_say_so_are_said_by_the_next() {
+        let folder = tempfile::tempdir().unwrap();
+        let log = UnitLog::at(folder.path().join("web"));
+        let mut first = log.open().unwrap();
+        first.size = ROTATE_AT;
+        let refusing = Refusing::of(log.folder());
+        first.write(Writer::Unit, "lost");
+        drop(first);
+        drop(refusing);
+        log.open().unwrap().write(Writer::Unit, "written");
+        assert_eq!(
+            lines(&log),
+            [
+                (
+                    Writer::Tay,
+                    "1 line could not be written to this log, and is lost".to_string()
+                ),
+                (Writer::Unit, "written".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn what_was_written_of_a_lost_line_does_not_take_the_next_line_with_it() {
+        let folder = tempfile::tempdir().unwrap();
+        let log = UnitLog::at(folder.path().join("web"));
+        let mut adding = log.open().unwrap();
+        // As a full disk leaves a line it took only the start of.
+        adding
+            .file
+            .write_all(b"2026-11-10T06:42:51.005Z | the sta")
+            .unwrap();
+        adding.lost = 1;
+        adding.write(Writer::Unit, "next");
+        assert_eq!(
+            lines(&log),
+            [
+                (Writer::Unit, "the sta".to_string()),
+                (
+                    Writer::Tay,
+                    "1 line could not be written to this log, and is lost".to_string()
+                ),
+                (Writer::Unit, "next".to_string()),
+            ]
+        );
     }
 }

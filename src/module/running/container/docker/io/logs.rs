@@ -3,14 +3,21 @@
 //! the output, so a daemon that was away loses nothing Docker still has;
 //! and before a container is removed, what remains of it is copied.
 //!
+//! A line that the unit's log cannot take, as when the disk is full, is
+//! lost, as a host process's is, and counts as copied: the container goes
+//! on, and is removed when it is replaced, while the log says how many
+//! lines it lost once it can take one again. Docker going away is another
+//! matter, which fails the copying.
+//!
 //! Where the copying stopped is kept beside the unit's other files: the
 //! container, the time of the last line copied, to the nanosecond, and how
 //! many lines of that very time were copied, since Docker gives output only
 //! from a whole second on. It is written as each line is copied, but at
 //! most every so often while a container prints, and then once it has gone
 //! quiet for that long, and when the copying is dropped, as it is to stop
-//! the container; so only a daemon that is killed copies again, at most what
-//! was printed in that while.
+//! the container; one that cannot be written is tried again that much
+//! later. So only a daemon that is killed copies again, at most what was
+//! printed since it was last written.
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -83,7 +90,8 @@ impl Copied {
 
 /// Copies what `container` wrote that has not been copied into `log`, as
 /// `copied` keeps track: all that Docker holds now, or with `follow`, on
-/// until the container stops.
+/// until the container stops. A line the log cannot take is lost, and
+/// counts as copied.
 pub async fn copy_output(
     docker: &Docker,
     container: &OurContainer,
@@ -112,7 +120,7 @@ pub async fn copy_output(
         let said = tokio::select! {
             said = output.next() => said,
             () = tokio::time::sleep_until(copying.next_keep().into()), if copying.unkept => {
-                copying.keep()?;
+                copying.keep();
                 continue;
             }
         };
@@ -147,16 +155,16 @@ pub async fn copy_output(
             if copying.kept.has(at, nth) {
                 continue;
             }
-            log.write_at(at / 1_000_000, Writer::Unit, text.trim_end_matches('\r'))?;
+            log.write_at(at / 1_000_000, Writer::Unit, text.trim_end_matches('\r'));
             (copying.kept.at, copying.kept.lines) = (at, nth);
             copying.unkept = true;
         }
         if copying.unkept && Instant::now() >= copying.next_keep() {
-            copying.keep()?;
+            copying.keep();
         }
     }
     if copying.unkept {
-        copying.keep()?;
+        copying.keep();
     }
     Ok(())
 }
@@ -167,32 +175,34 @@ struct Copying<'a> {
     path: &'a Path,
     /// When where it had come to was last kept.
     last_kept: Option<Instant>,
-    /// Whether lines have been copied since.
+    /// Whether lines have been copied since where it had come to was last
+    /// written.
     unkept: bool,
 }
 
 impl Copying<'_> {
-    /// When where it has come to is kept next: at once, unless it was kept
-    /// a moment ago, and then once that moment has passed.
+    /// When where it has come to is kept next: at once, unless it was kept,
+    /// or tried to be, a moment ago, and then once that moment has passed.
     fn next_keep(&self) -> Instant {
         self.last_kept.map_or_else(Instant::now, |last| last + KEEP)
     }
 
-    fn keep(&mut self) -> Result<(), DiskError> {
-        self.kept.keep(self.path)?;
-        (self.last_kept, self.unkept) = (Some(Instant::now()), false);
-        Ok(())
+    /// Keeps where it has come to. Where that cannot be written, the lines
+    /// are copied all the same, and it is tried again a moment later: not
+    /// keeping it costs at most copying them again after a daemon is
+    /// killed, which is less than stopping the container would.
+    fn keep(&mut self) {
+        let kept = self.kept.keep(self.path).is_ok();
+        (self.last_kept, self.unkept) = (Some(Instant::now()), !kept);
     }
 }
 
 impl Drop for Copying<'_> {
     /// A copying dropped before it ends, as one is to stop its container,
-    /// keeps where it came to, so that the next copies on from there. If
-    /// that cannot be written, the next copies again at most a moment's
-    /// lines, which is all that is lost by not saying so.
+    /// keeps where it came to, so that the next copies on from there.
     fn drop(&mut self) {
         if self.unkept {
-            let _ = self.keep();
+            self.keep();
         }
     }
 }

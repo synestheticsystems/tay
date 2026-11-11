@@ -1,11 +1,14 @@
 //! The keeper: each program a unit runs on the host has one, which outlives
 //! the daemon, goes on writing the unit's log, and records how the program
 //! ended; and the order of a start leaves no moment at which a program runs
-//! that the next daemon does not know of.
+//! that the next daemon does not know of. A line the log cannot take is
+//! lost, the program goes on, and the log says how many were lost once it
+//! can take one again.
 
 use std::time::{Duration, Instant};
 
 use crate::harness::{Machine, alive, child, command_of, eventually, log};
+use crate::refused_log::{Refusing, lost_once_and_counted, nearly_full, said_lost};
 
 #[test]
 fn a_unit_outlives_its_daemon_goes_on_logging_and_is_found_again_without_starting_again() {
@@ -165,4 +168,30 @@ fn the_daemon_killed_at_any_point_of_a_start_leaves_nothing_the_next_daemon_does
             "killed {at}: something is left"
         );
     }
+}
+
+#[test]
+fn a_program_goes_on_while_its_log_cannot_be_written_and_the_log_then_says_how_many_lines_it_lost()
+{
+    let machine = Machine::new();
+    let root = machine.stack("services");
+    let folder = nearly_full(&root, "talker");
+    assert_eq!(machine.at(&root, "up", &["talker"]).code, 0);
+    let started = child(&root, "talker");
+    let refusing = Refusing::of(&folder);
+    std::fs::write(root.join(".tay/state/talk"), "").unwrap();
+    let talked = || {
+        std::fs::read_to_string(root.join(".tay/state/talked"))
+            .ok()
+            .and_then(|last| last.trim().parse::<u64>().ok())
+    };
+    // Lines well past the length at which the log is set aside.
+    assert!(eventually(Duration::from_secs(120), || {
+        talked().is_some_and(|last| last >= 40)
+    }));
+    drop(refusing);
+    lost_once_and_counted(&said_lost(&root, "talker"));
+    assert_eq!(child(&root, "talker"), started);
+    let state = Machine::state(&machine.at(&root, "status", &["--json"]).json(), "talker");
+    assert!(state.starts_with("ready attempt 1"), "{state}");
 }

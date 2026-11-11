@@ -21,6 +21,7 @@ mod harness;
 mod no_plan;
 mod one_change;
 mod ports;
+mod refused_log;
 mod restart;
 mod run;
 mod running;

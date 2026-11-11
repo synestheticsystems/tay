@@ -95,7 +95,7 @@ impl ContainerUnit {
                 "attempt {attempt}, container: starting `{name}` from `{}`",
                 image.name
             ),
-        )?;
+        );
         // The engine keeps what it was started from, unless it has stopped
         // listening, which it does only once it has dropped the attempt.
         let started = create::fingerprint(&self.settings, &self.opened, place, &image.id);
@@ -107,7 +107,7 @@ impl ContainerUnit {
                 note(
                     &mut log,
                     &format!("attempt {attempt}, container: could not be started: {why}"),
-                )?;
+                );
                 return Ok(Outcome::Failed(format!(
                     "its container could not be started: {why}"
                 )));
@@ -178,11 +178,7 @@ impl ContainerUnit {
                     args: &args,
                     platform,
                 };
-                // A line of the build that cannot be written to the log is
-                // lost; the build goes on, and says how it ended.
-                let mut line = |said: &str| {
-                    let _ = log.write(Writer::Tay, &format!("build: {said}"));
-                };
+                let mut line = |said: &str| log.write(Writer::Tay, &format!("build: {said}"));
                 docker.build(&build, &mut progress, &mut line).await?;
             }
         }
@@ -279,7 +275,7 @@ async fn watch(
     note(
         log,
         &format!("attempt {attempt}, container: {}", ended.how()),
-    )?;
+    );
     Ok(Outcome::Ended {
         failed: !ended.succeeded(),
         detail: ended.words(),
@@ -340,6 +336,6 @@ pub(super) fn gone() -> Outcome {
     }
 }
 
-fn note(log: &mut Adding, text: &str) -> Result<(), Failure> {
-    Ok(log.write(Writer::Tay, text)?)
+fn note(log: &mut Adding, text: &str) {
+    log.write(Writer::Tay, text);
 }

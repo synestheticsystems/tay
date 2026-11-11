@@ -37,6 +37,14 @@ units:
       mounts: [{ from: "${environment.state}/hungry", to: /signal }]
     restart: { on: never }
 
+  talker:
+    doc: Waits for its signal, then prints a numbered line five times a second, for ever.
+    uses: container
+    with:
+      image: busybox:1.36
+      command: [sh, -c, "trap 'exit 0' TERM; until [ -e /signal/talk ]; do sleep 0.2; done; i=0; while :; do i=$((i+1)); echo line $i; sleep 0.2; done"]
+      mounts: [{ from: "${environment.state}/talker", to: /signal }]
+
   keeper-data:
     doc: Keeps a count of its starts on its volume, and says it.
     uses: container
