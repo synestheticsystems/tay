@@ -2,7 +2,7 @@
 
 use std::fs;
 
-use crate::harness::Machine;
+use crate::harness::{Machine, kept_ports};
 
 #[test]
 fn units_that_are_made_come_up_ready_and_up_says_everything_asked_for_is() {
@@ -123,28 +123,27 @@ fn with_units_named_up_brings_up_those_and_what_they_need_and_leaves_the_rest() 
         .collect();
     assert!(units.contains(&"notes-port".to_string()));
     assert!(!units.contains(&"signing".to_string()), "{}", up.stdout);
-    let status = machine.at(&root, "status", &[]);
-    assert!(status.stdout.contains("signing"), "{}", status.stdout);
-    let signing = status
-        .stdout
-        .lines()
-        .find(|line| line.contains("signing"))
-        .unwrap();
-    assert!(signing.contains("stopped") && signing.contains("not asked for"));
+    assert!(!root.join(".tay/state/secrets/signing").exists());
+    // What the environment is asked for is what it shows.
+    let asked = ["notes-port", "notes-key", "notes-config"];
+    let mut shown = machine.state_order(&root);
+    shown.sort();
+    let mut sorted = asked.to_vec();
+    sorted.sort();
+    assert_eq!(shown, sorted);
     // Then the rest, which leaves what is up as it is.
+    let port = kept_ports(&root)["notes-port"].clone();
     let rest = machine.at(&root, "up", &["signing"]);
     assert_eq!(rest.code, 0, "{}", rest.stderr);
     let status = machine.at(&root, "status", &["--json"]).json();
-    for unit in ["notes-port", "notes-key", "notes-config", "signing"] {
-        assert!(
-            Machine::state(&status, unit).starts_with("ready "),
-            "{unit}: {status}"
-        );
-    }
-    assert_eq!(
-        Machine::state(&status, "notes-password"),
-        "stopped not asked for"
+    assert!(
+        Machine::state(&status, "signing").starts_with("ready "),
+        "{status}"
     );
+    assert_eq!(machine.state_order(&root), ["signing"]);
+    assert_eq!(kept_ports(&root)["notes-port"], port);
+    assert!(root.join(".tay/state/files/config/notes.conf").exists());
+    assert!(!root.join(".tay/state/secrets/notes-password").exists());
 }
 
 #[test]

@@ -64,6 +64,19 @@ fn status_of_one_unit_and_of_one_the_plan_does_not_have() {
 }
 
 #[test]
+fn a_group_or_a_unit_that_is_made_that_leaves_the_plan_leaves_the_status() {
+    let machine = Machine::new();
+    let root = machine.stack("ports");
+    let up = machine.at(&root, "up", &[]);
+    assert_eq!(up.code, 0, "{}{}", up.stdout, up.stderr);
+    // The group and every port but one leave the plan, and nothing of
+    // them runs to be stopped.
+    let up = machine.at(&root, "up", &["--set", "up=one"]);
+    assert_eq!(up.code, 0, "{}{}", up.stdout, up.stderr);
+    assert_eq!(machine.state_order(&root), ["one"]);
+}
+
+#[test]
 fn an_environment_never_brought_up_has_every_unit_stopped_and_no_daemon() {
     let machine = Machine::new();
     let root = machine.stack("waiting");

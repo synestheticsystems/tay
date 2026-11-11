@@ -1,6 +1,7 @@
-//! What the engine knows of an environment's units: each as it was last
-//! planned, its state, and the values it gives once it is made; and each
-//! that runs and that the plan does not have, until it is stopped.
+//! What the engine knows of an environment's units: each of the plan as it
+//! was last planned, its state, and the values it gives once it is made;
+//! and each that runs and that the plan does not have, until it is
+//! stopped.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -49,10 +50,10 @@ impl Units {
     /// Takes in the units of a plan, in its order: each replaces the unit
     /// of its name, keeping its state, and a unit new to the table is
     /// `stopped`, not having been asked for. A unit that runs and that the
-    /// plan does not have is set apart as unplanned, keeping its state; one
-    /// that is made, and a group, stay as they are, after them. Gives each
-    /// unit of the plan that was set apart, which is to be found again where
-    /// it runs.
+    /// plan does not have is set apart as unplanned, keeping its state, until
+    /// it is stopped; one that is made, and a group, are forgotten, as
+    /// nothing of them runs to be stopped. Gives each unit of the plan that
+    /// was set apart, which is to be found again where it runs.
     pub fn take_in(&mut self, plan: &[Arc<PlannedUnit>]) -> Vec<Arc<PlannedUnit>> {
         let mut before = std::mem::take(&mut self.known);
         let mut returned = Vec::new();
@@ -80,19 +81,14 @@ impl Units {
             self.known.push(known);
         }
         for known in before {
-            match known
-                .planned
-                .mechanism
-                .as_ref()
-                .map(|mechanism| &mechanism.kind)
-            {
-                Some(UnitKind::Runs(runs)) => self.unplanned.push(Unplanned {
+            let kind = (known.planned.mechanism.as_ref()).map(|mechanism| &mechanism.kind);
+            if let Some(UnitKind::Runs(runs)) = kind {
+                self.unplanned.push(Unplanned {
                     name: known.planned.name.clone(),
                     runs: runs.clone(),
                     state: known.state,
                     since: known.since,
-                }),
-                Some(UnitKind::Made) | None => self.known.push(known),
+                });
             }
         }
         returned
