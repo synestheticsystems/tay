@@ -4,7 +4,7 @@ A stack's definitions say what the stack is made of and what each part needs. ta
 
 Two rules run through all of it.
 
-- **Strict.** An unknown key, a wrong type, a duplicate name, or a reference to something that does not exist is an error with the file, line and column. So is a YAML tag, a second document in one file, and a file or folder under the units folder that defines nothing. A file or folder whose name begins with a dot is not read at all. Where every field of a mapping is optional, as in a profile, a choices file or a setting's declaration, nothing written is an empty one. tay reports every error it can find in one run, and starts nothing if there is any.
+- **Strict.** An unknown key, a wrong type, a duplicate name, or a reference to something that does not exist is an error with the file, line and column. So is a YAML tag, a second document in one file, and a file or folder under the units folder that defines nothing. A file or folder whose name begins with a dot is not read at all. Nothing written where a mapping may be empty is an empty one: a profile or a choices file that holds only comments, a setting declared with nothing after its name, `settings` with every line under it commented out. tay reports every error it can find in one run, and starts nothing if there is any.
 - **Blind.** The planner knows units, their needs and their values. It never asks which module a unit uses. It hands each module that module's own settings to check, and asks every module the same two questions: where does this unit run, and is it something that runs or something that is made.
 
 Words used here: a **stack** is everything one `tay.yaml` describes. An **environment** is one running copy of a stack. A **unit** is one thing tay brings up. A **module** is the mechanism a unit uses. A **way** is one of several mechanisms a unit may be run by.
@@ -410,7 +410,7 @@ settings:
 ```
 
 - `up` from a later place replaces the earlier list. `up_add` and `up_remove` adjust it instead. If no place gives `up`, that is an error: tay does not guess what a stack's whole is.
-- `run.default` is one name or a list of them, and from a later place replaces the earlier one. `run.units` is joined, later entries winning. A name in it that no unit of the stack has as a way is an error.
+- `run.default` is one name or a list of them, and from a later place replaces the earlier one. `run.units` is joined, later entries winning. A name in `run.default` that no unit of the stack has as a way is an error.
 - `settings` is joined, later values winning.
 - `label` sets the environment's label, in place of the one worked out from the folder's name. It may be empty.
 - `--set` takes a place in this shape and a value: `up`, `up_add`, `up_remove`, `run.default`, `run.units.<unit>`, `settings.<name>` or `label`. A list is written with commas.

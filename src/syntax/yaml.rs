@@ -91,6 +91,13 @@ impl Node {
         }
     }
 
+    /// Whether nothing is written here: a file that holds only comments,
+    /// or a key with nothing, or `null`, after it. Every line under the key
+    /// may have been commented out.
+    pub fn nothing_written(&self) -> bool {
+        matches!(self.kind, Kind::Scalar(Scalar::Null))
+    }
+
     /// What kind of thing this is, for messages: "a list", "text", ...
     pub fn describe(&self) -> &'static str {
         match &self.kind {

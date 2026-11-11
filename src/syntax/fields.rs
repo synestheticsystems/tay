@@ -71,14 +71,14 @@ impl<'n> Fields<'n> {
         allowed: &'static [&'static str],
         d: &mut Diagnostics,
     ) -> Option<Fields<'n>> {
-        match node.kind {
-            Kind::Scalar(Scalar::Null) => Some(Fields {
+        match node.nothing_written() {
+            true => Some(Fields {
                 loc: node.loc,
                 what,
                 allowed,
                 entries: Vec::new(),
             }),
-            _ => Fields::of(node, what, allowed, d),
+            false => Fields::of(node, what, allowed, d),
         }
     }
 
@@ -221,13 +221,17 @@ pub fn list<'n>(node: &'n Node, what: &str, d: &mut Diagnostics) -> Option<&'n [
 }
 
 /// A mapping from names (checked by `rule`) to nodes, in the order written.
-/// `what` says what each key is.
+/// `what` says what each key is. Nothing written there is a mapping of no
+/// names, as [`Fields::all_optional`] reads a mapping of no fields.
 pub fn keyed<'n>(
     node: &'n Node,
     what: &str,
     rule: fn(&str) -> Option<String>,
     d: &mut Diagnostics,
 ) -> Vec<(NameAt, &'n Node)> {
+    if node.nothing_written() {
+        return Vec::new();
+    }
     let Some(map) = node.as_map() else {
         d.error(
             node.loc,

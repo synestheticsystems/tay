@@ -189,7 +189,14 @@ impl<'a> Reader<'a> {
                     };
                     let defined =
                         fields::keyed(&node, "a unit's name", names::name_problem, self.d);
-                    if defined.is_empty() && node.as_map().is_some() {
+                    // A file that defines nothing is an error, not an empty
+                    // mapping of units: it was put there to define one.
+                    if node.nothing_written() {
+                        self.d.error(
+                            node.loc,
+                            "this file defines no unit: nothing is written in it",
+                        );
+                    } else if defined.is_empty() && node.as_map().is_some() {
                         self.d
                             .error(node.loc, "this file defines no unit: its mapping is empty");
                     }

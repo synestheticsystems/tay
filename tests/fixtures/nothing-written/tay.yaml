@@ -2,7 +2,7 @@ format: 1
 stack: nothing-written
 default_profile: dev
 run:
-up: [maker, service]
+up: [maker, service, spare]
 settings:
   images.server:
 units:
@@ -21,3 +21,7 @@ units:
       user:
     uses: command
     with: { run: [mint, "${args.user}"] }
+  spare:
+    uses: port
+    with:
+    #  prefer: 20100

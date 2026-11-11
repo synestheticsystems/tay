@@ -250,6 +250,11 @@ fn volume_settings(node: &Node, d: &mut Diagnostics) -> Vec<Volume<Slot>> {
 /// entry that is not opened uses nothing.
 fn publish_entries(node: &Node, d: &mut Diagnostics) -> Vec<PublishEntry> {
     const PUBLISHED: Destination = Destination::Readable("a published port");
+    // Nothing written publishes no port, as any mapping of names with
+    // nothing written names nothing.
+    if node.nothing_written() {
+        return Vec::new();
+    }
     let Some(map) = node.as_map() else {
         d.error(
             node.loc,

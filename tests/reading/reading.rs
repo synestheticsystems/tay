@@ -63,7 +63,7 @@ fn folders_and_files_that_define_no_unit_are_errors_rather_than_skipped() {
         run.errors(),
         [
             "stack/units/Bad_Unit/unit.yaml:1:1: the folder's name is the unit's name: `Bad_Unit` must start with a lower-case letter",
-            "stack/units/commented.yaml:1:1: this must be a mapping, each key a unit's name; this is empty",
+            "stack/units/commented.yaml:1:1: this file defines no unit: nothing is written in it",
             "stack/units/empty.yaml:1:1: this file defines no unit: its mapping is empty",
             "stack/units/extra.yml:1:1: this is not a definition: this folder holds `<name>/unit.yaml` and `<anything>.yaml` (tay reads `.yaml`, not `.yml`)",
             "stack/units/hollow.yaml:1:7: a unit must be a mapping; this is empty",
@@ -74,10 +74,12 @@ fn folders_and_files_that_define_no_unit_are_errors_rather_than_skipped() {
 
 #[test]
 fn nothing_written_where_every_field_is_optional_is_an_empty_mapping() {
-    // The profile, the environment's file and this person's own file hold
-    // only comments, and `run`, a setting's declaration, a `restart`, a
-    // produced value's declaration, an action's argument and a template's
-    // parameter are each a key with nothing after it.
+    // The profile and this person's own file hold only comments, and `run`,
+    // a setting's declaration, a `restart`, a produced value's declaration,
+    // an action's argument and a template's parameter are each a key with
+    // nothing after it. So are a port's `with` and, in the environment's
+    // file, `settings` and `run.units`, every line under them commented
+    // out.
     let home = fixture("homes/nothing-written");
     let set = ["--set", "settings.images.server=7", "--json"];
     let run = plan_with_home("nothing-written", &home, &set);

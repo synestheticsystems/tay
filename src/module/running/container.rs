@@ -378,6 +378,17 @@ mod tests {
     }
 
     #[test]
+    fn publish_and_volumes_with_nothing_written_name_nothing() {
+        // Every line under each is commented out.
+        let (description, errors) = check(
+            "container",
+            "image: db\npublish:\n#  5432: 15432\nvolumes:\n#  data: /data\n",
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+        assert!(description.unwrap().volumes.is_empty());
+    }
+
+    #[test]
     fn a_mount_is_a_host_path_or_another_units_volume_and_volumes_are_owned() {
         let (description, errors) = check(
             "container",

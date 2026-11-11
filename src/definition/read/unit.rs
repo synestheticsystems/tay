@@ -80,7 +80,10 @@ impl<'n> WayFields<'n> {
                 .unwrap_or_default()
         };
         WayFields {
-            with: fields.get("with"),
+            // A `with` with nothing written, every setting under it
+            // commented out, is one not written: the module then says
+            // what it cannot do without.
+            with: fields.get("with").filter(|with| !with.nothing_written()),
             needs: names("needs", d),
             after: names("after", d),
             gives: fields
@@ -204,7 +207,7 @@ fn ways(
         );
     }
     let listed = fields::keyed(run, "a way", names::name_problem, d);
-    if listed.is_empty() && run.as_map().is_some() {
+    if listed.is_empty() && (run.as_map().is_some() || run.nothing_written()) {
         d.error(run.loc, "`run` lists no ways");
     }
     // Every way is read, so that the errors of each are reported.
