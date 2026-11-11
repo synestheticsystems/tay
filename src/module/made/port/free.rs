@@ -13,8 +13,11 @@
 //! listened on is bound with `SO_REUSEADDR`, which macOS lets through
 //! beside a closed connection and refuses beside a program that listens on
 //! that very address: the address that holds every other, and each address
-//! of the machine. Linux, which refuses that bind beside a closed
-//! connection whose program did not set the option, could not be asked so.
+//! of the machine. macOS also refuses it, for a few milliseconds, beside a
+//! socket that has only just been closed, one of an earlier asking among
+//! them, so a refusal counts only once it has outlasted that. Linux, which
+//! refuses that bind beside a closed connection whose program did not set
+//! the option, could not be asked so.
 
 use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
@@ -82,10 +85,20 @@ fn listened_on(number: u16) -> io::Result<bool> {
     Ok(false)
 }
 
+/// How often an address that refuses to be bound is asked again, and how
+/// long apart, before the refusal is taken for a program listening. A
+/// socket that was only just closed has been seen to refuse for up to six
+/// milliseconds; a program that listens refuses every time.
+#[cfg(target_os = "macos")]
+const ASKED_AGAIN: u32 = 5;
+#[cfg(target_os = "macos")]
+const SETTLE: std::time::Duration = std::time::Duration::from_millis(10);
+
 /// Whether a program listens on `number` at an address of this machine,
 /// or at the address that holds every other: each is bound with
-/// `SO_REUSEADDR`, which is refused there alone. An address that cannot be
-/// bound at all, as one still being set up, has nothing listening on it.
+/// `SO_REUSEADDR`, which is refused there alone, and is refused still when
+/// asked again. An address that cannot be bound at all, as one still being
+/// set up, has nothing listening on it.
 #[cfg(target_os = "macos")]
 fn listened_on(number: u16) -> io::Result<bool> {
     use std::net::SocketAddr;
@@ -96,22 +109,36 @@ fn listened_on(number: u16) -> io::Result<bool> {
     ];
     for mut address in every.into_iter().chain(addresses()?) {
         address.set_port(number);
-        let family = match address {
-            SocketAddr::V4(_) => AddressFamily::INET,
-            SocketAddr::V6(_) => AddressFamily::INET6,
-        };
-        let probe = socket(family, SocketType::STREAM, None)?;
-        sockopt::set_socket_reuseaddr(&probe, true)?;
-        if address.is_ipv6() {
-            sockopt::set_ipv6_v6only(&probe, true)?;
-        }
-        match bind(&probe, &address) {
-            Ok(()) | Err(Errno::ADDRNOTAVAIL) => {}
-            Err(Errno::ADDRINUSE) => return Ok(true),
-            Err(errno) => return Err(errno.into()),
+        let mut refused = 0;
+        while refuses(&address)? {
+            if refused == ASKED_AGAIN {
+                return Ok(true);
+            }
+            refused += 1;
+            std::thread::sleep(SETTLE);
         }
     }
     Ok(false)
+}
+
+/// Whether `address` refuses, as held, a socket bound to it with
+/// `SO_REUSEADDR`.
+#[cfg(target_os = "macos")]
+fn refuses(address: &std::net::SocketAddr) -> io::Result<bool> {
+    let family = match address {
+        std::net::SocketAddr::V4(_) => AddressFamily::INET,
+        std::net::SocketAddr::V6(_) => AddressFamily::INET6,
+    };
+    let probe = socket(family, SocketType::STREAM, None)?;
+    sockopt::set_socket_reuseaddr(&probe, true)?;
+    if address.is_ipv6() {
+        sockopt::set_ipv6_v6only(&probe, true)?;
+    }
+    match bind(&probe, address) {
+        Ok(()) | Err(Errno::ADDRNOTAVAIL) => Ok(false),
+        Err(Errno::ADDRINUSE) => Ok(true),
+        Err(errno) => Err(errno.into()),
+    }
 }
 
 /// Each address of this machine's network interfaces, with no port.
@@ -205,6 +232,10 @@ mod tests {
         client.read_to_end(&mut rest).unwrap();
         drop(client);
         assert!(!nothing_has(number).unwrap());
-        assert!(is_free(number).unwrap());
+        // However often it is asked: each asking closes sockets of its own
+        // on the number, which the next must not take for a program.
+        for asked in 0..50 {
+            assert!(is_free(number).unwrap(), "asked {asked} times before");
+        }
     }
 }
