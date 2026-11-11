@@ -1,7 +1,8 @@
 //! What a program on the host runs with: the variables its definition
-//! gives, and those `inherit` names from the environment tay runs in, which
-//! are `PATH`, `HOME`, `USER`, `LANG` and `TMPDIR` when it does not say;
-//! nothing else. It runs in its `workdir`, or the stack's root.
+//! gives, and those `inherit` names from the environment tay runs in, the
+//! environment of the command that started the daemon, which are `PATH`,
+//! `HOME`, `USER`, `LANG` and `TMPDIR` when it does not say; nothing else.
+//! It runs in its `workdir`, or the stack's root.
 
 use std::time::Duration;
 
@@ -64,4 +65,35 @@ fn a_command_inherits_what_a_process_does_by_default_and_is_told_where_to_write_
         said.contains(&format!(" | in {}", root.display())),
         "{said}"
     );
+}
+
+#[test]
+fn a_command_on_the_host_inherits_in_its_check_and_its_run_what_inherit_names_and_nothing_else() {
+    let machine = Machine::new();
+    let root = machine.stack("services");
+    let mut up = machine.command(
+        &root,
+        &["up", "--root", root.to_str().unwrap(), "inheriting"],
+    );
+    // The command that starts the daemon has a variable the unit names, and
+    // one it does not.
+    up.env("AGENT_SOCKET", "/run/agent.sock")
+        .env("UNNAMED", "not passed on");
+    let up = machine.run(up);
+    assert_eq!(up.code, 0, "{}{}", up.stdout, up.stderr);
+    let said = log(&root, "inheriting");
+    let (check, run) = said
+        .split_once(" | checked\n")
+        .unwrap_or_else(|| panic!("its check said it was not done:\n{said}"));
+    for (step, said) in [("check", check), ("run", run)] {
+        assert_eq!(
+            variables(said),
+            ["AGENT_SOCKET", "MODE", "PATH", "TAY_VALUES"],
+            "{step}: {said}"
+        );
+        assert!(
+            said.contains(" | variable AGENT_SOCKET=/run/agent.sock\n"),
+            "{step}: {said}"
+        );
+    }
 }

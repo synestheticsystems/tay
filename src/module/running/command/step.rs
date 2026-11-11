@@ -46,6 +46,10 @@ pub struct StepSettings<V> {
     /// `None`: the stack's root on the host, the container's own in one.
     pub workdir: Option<V>,
     pub variables: Variables<V>,
+    /// On the host, the variables passed through from the environment tay
+    /// was started in. `None`: those a program on the host inherits when
+    /// `inherit` does not say.
+    pub inherit: Option<Vec<String>>,
 }
 
 impl<V> StepSettings<V> {
@@ -62,6 +66,7 @@ impl<V> StepSettings<V> {
             user: user?,
             workdir: workdir?,
             variables: variables?,
+            inherit: self.inherit.clone(),
         })
     }
 }
@@ -138,6 +143,9 @@ impl StepSettings<Filled> {
             }
         }
         self.variables.take(taking);
+        if let Some(inherit) = &self.inherit {
+            taking.setting("inherit", inherit);
+        }
     }
 
     pub fn where_it_runs(&self) -> Where<'_> {
@@ -213,7 +221,11 @@ impl StepSettings<Filled> {
         let values = produced::file(place).display().to_string();
         Ok(Program {
             argv,
-            env: host::environment(&self.variables, None, &[(VALUES, values)]),
+            env: host::environment(
+                &self.variables,
+                self.inherit.as_deref(),
+                &[(VALUES, values)],
+            ),
             workdir: host::workdir(self.workdir.as_ref(), place)?,
             stdin,
         })

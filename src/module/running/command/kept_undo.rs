@@ -4,9 +4,12 @@
 //! names of the units that run that the unit needed, which the `undo` waits
 //! for; and once it has been tried and has not run, why. A variable that
 //! holds a secret is kept with the secrets, readable by this account only;
-//! the rest in the unit's own folder. It is found and run by the unit's
-//! place alone, whatever the plan holds, so that whatever comes to run it,
-//! a plan that no longer has the unit or anything else, finds it.
+//! the rest in the unit's own folder. Of the variables an `undo` on the host
+//! inherits, the names are kept and not the values: those are taken when it
+//! runs, as for every step on the host, from the daemon that runs it. It is
+//! found and run by the unit's place alone, whatever the plan holds, so
+//! that whatever comes to run it, a plan that no longer has the unit or
+//! anything else, finds it.
 
 use std::collections::BTreeMap;
 use std::io;
@@ -42,7 +45,7 @@ enum KeptUndoError {
 }
 
 /// What an `undo` needs, but for the values of the variables that hold a
-/// secret.
+/// secret and of those it inherits.
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct Kept {
     /// The program and its arguments.
@@ -53,6 +56,12 @@ struct Kept {
     env: Vec<(String, String)>,
     /// The names of the variables that hold a secret.
     secret_env: Vec<String>,
+    /// On the host, the names of the variables passed through from the
+    /// environment tay runs in. An `undo` kept by a tay that kept none is
+    /// read as inheriting what a program on the host does when `inherit`
+    /// does not say, which is what that tay ran it with.
+    #[serde(default)]
+    inherit: Option<Vec<String>>,
     /// The units that run that the unit needed, which the `undo` waits
     /// for. An `undo` kept by a tay that kept none is read as needing
     /// none, and so runs at once, as that tay would have run it: it is
@@ -113,6 +122,7 @@ impl Kept {
                 .transpose()?,
             env,
             secret_env: secrets.keys().cloned().collect(),
+            inherit: steps.inherit.clone(),
             needs: needs.to_vec(),
         };
         Ok((kept, secrets))
@@ -151,6 +161,7 @@ impl Kept {
                     .collect(),
                 secret_env,
             },
+            inherit: self.inherit.clone(),
         };
         let undo = RunForm::Argv(self.undo.iter().map(Filled::text).collect());
         Ok((undo, steps))
@@ -321,6 +332,7 @@ mod tests {
                 env: vec![("MODE".to_string(), Filled::text("fast"))],
                 secret_env: vec![("TOKEN".to_string(), Filled::secret("hunter2"))],
             },
+            inherit: None,
         }
     }
 
@@ -357,6 +369,33 @@ mod tests {
         written.as_object_mut().unwrap().remove("needs").unwrap();
         let read: Kept = serde_json::from_value(written).unwrap();
         assert_eq!(read, kept);
+    }
+
+    #[test]
+    fn an_undo_on_the_host_keeps_the_names_it_inherits_or_else_inherits_the_default() {
+        let names = vec!["PATH".to_string(), "AGENT_SOCKET".to_string()];
+        let on_host = StepSettings {
+            inside: None,
+            image: None,
+            mounts: Vec::new(),
+            user: None,
+            workdir: None,
+            variables: Variables {
+                env: Vec::new(),
+                secret_env: Vec::new(),
+            },
+            inherit: Some(names.clone()),
+        };
+        let undo = RunForm::Argv(vec![Filled::text("true")]);
+        let (kept, _) = Kept::of(&undo, &on_host, &[]).unwrap();
+        let mut written: serde_json::Value = serde_json::from_str(&json(&kept)).unwrap();
+        let read: Kept = serde_json::from_value(written.clone()).unwrap();
+        let (_, steps) = read.filled(&Secrets::new()).unwrap();
+        assert_eq!(steps.inherit, Some(names));
+        written.as_object_mut().unwrap().remove("inherit").unwrap();
+        let older: Kept = serde_json::from_value(written).unwrap();
+        let (_, steps) = older.filled(&Secrets::new()).unwrap();
+        assert_eq!(steps.inherit, None);
     }
 
     #[test]

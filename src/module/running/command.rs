@@ -17,6 +17,7 @@ use crate::syntax::yaml::Node;
 use crate::value::Filled;
 
 use super::command_line::{RunForm, run_form};
+use super::host;
 use super::mounts::{self, mounts};
 use super::variables::variables;
 use crate::module::description::{
@@ -44,6 +45,7 @@ const FIELDS: &[&str] = &[
     "workdir",
     "env",
     "secret_env",
+    "inherit",
     "stdin",
     "produces",
     "outputs",
@@ -262,6 +264,17 @@ fn read(
         Slot::read(workdir, want, Destination::Readable("a working folder"), d)
     });
     let variables = variables(&settings, d);
+    let inherit = match settings.entry("inherit") {
+        Some((_, inherit)) if !in_container => Some(host::inherit(inherit, d)),
+        Some((key, _)) => {
+            d.error(
+                key.loc,
+                "`inherit` goes with a command run on the host: with `in` or `image` there is no environment of tay's to inherit from",
+            );
+            None
+        }
+        None => None,
+    };
     let stdin = settings
         .get("stdin")
         .and_then(|stdin| Slot::read(stdin, Want::Path(PathUse::Named), FILE_PATH, d));
@@ -301,6 +314,7 @@ fn read(
             user,
             workdir,
             variables,
+            inherit,
         },
         stdin,
         produces,
@@ -473,6 +487,45 @@ mod tests {
                 "2:1: `user` goes with `in` or `image`: it is the user a command runs as in a container"
             ]
         );
+    }
+
+    #[test]
+    fn inherit_goes_with_a_command_on_the_host_and_is_read_as_a_process_reads_it() {
+        assert_eq!(
+            settings("run: [x]\ninherit: [PATH, AGENT_SOCKET]\n")
+                .steps
+                .inherit,
+            Some(vec!["PATH".to_string(), "AGENT_SOCKET".to_string()])
+        );
+        assert_eq!(settings("run: [x]\n").steps.inherit, None);
+        for with in [
+            "run: [x]\nin: db\ninherit: [PATH]\n",
+            "run: [x]\nimage: alpine\ninherit: [PATH]\n",
+        ] {
+            let (_, errors) = check("command", with);
+            assert_eq!(
+                errors,
+                [
+                    "3:1: `inherit` goes with a command run on the host: with `in` or `image` there is no environment of tay's to inherit from"
+                ],
+                "{with}"
+            );
+        }
+        for (inherit, error) in [
+            (
+                "inherit: PATH\n",
+                "2:10: a variable to inherit must be a list; this is text",
+            ),
+            (
+                "inherit: [1X]\n",
+                "2:11: a variable to inherit: `1X` is not an environment variable name: letters, digits and underscores, not starting with a digit",
+            ),
+        ] {
+            let (_, errors) = check("command", &format!("run: [x]\n{inherit}"));
+            assert_eq!(errors, [error]);
+            let (_, errors) = check("process", &format!("command: [x]\n{inherit}"));
+            assert_eq!(errors, [error]);
+        }
     }
 
     #[test]

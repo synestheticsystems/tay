@@ -215,6 +215,7 @@ A mount's `from` under `.tay/` (the state and log folders) or in the shared fold
 | `image` | Run as a one-off container from this image, on the environment's network. `run` is then the whole command, in place of the image's entrypoint. With it: `mounts` as for `container` |
 | `user` | With `in` or `image`: the user to run as |
 | `env`, `secret_env`, `workdir` | As for `process` |
+| `inherit` | For a command run on the host: names of variables to pass through from the environment tay was started in. Default: `PATH`, `HOME`, `USER`, `LANG`, `TMPDIR`. Nothing else is inherited. With `in` or `image` it is an error |
 | `stdin` | A file fed to `run` on standard input |
 | `produces` | The values the command writes out when it runs (see Values): a list of names, or a mapping from a name to `{ secret: true }` where a value is a credential |
 | `outputs` | A mapping from a name to a file the command builds, as a path on the host |

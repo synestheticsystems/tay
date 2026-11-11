@@ -23,3 +23,12 @@ units:
       when_removed: undo
       env: { MODE: "${settings.mode}", ROOT: "${environment.root}", STATE: "${environment.state}" }
       secret_env: { TOKEN: "${token.value}" }
+  inheriting:
+    doc: Does nothing, and once it leaves the plan writes beside the stack the agent's socket its `undo` inherited.
+    uses: command
+    with:
+      run: ["true"]
+      undo: { shell: "echo \"$AGENT_SOCKET\" > \"$ROOT/inherited\"" }
+      when_removed: undo
+      env: { ROOT: "${environment.root}" }
+      inherit: [PATH, AGENT_SOCKET]

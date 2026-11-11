@@ -4,14 +4,13 @@ mod attempt;
 
 use std::sync::Arc;
 
-use crate::syntax::fields::{self, Fields};
-use crate::syntax::names;
+use crate::syntax::fields::Fields;
 use crate::syntax::yaml::Node;
 use crate::value::{Filled, Placeholder, Unfilled, Value};
 
 use super::command_line::{COMMAND_LINE, argv, argv_list};
 use super::variables::{Variables, variables};
-use super::{RECORD, remove_record};
+use super::{RECORD, host, remove_record};
 use crate::module::description::{Description, ReadyWithoutCheck, RestartOn, Runs, UnitKind};
 use crate::module::operations::{Keeping, Operations, PartlyRemoved, Removing, UnitPlace};
 use crate::module::settings::{
@@ -141,17 +140,9 @@ fn read(with: Option<&Node>, cx: &mut Cx<'_>) -> Option<ProcessSettings<Slot>> {
         )
     });
     let variables = variables(&settings, d);
-    let inherit = settings.get("inherit").map(|inherit| {
-        fields::name_list(
-            inherit,
-            "a variable to inherit",
-            names::variable_name_problem,
-            d,
-        )
-        .into_iter()
-        .map(|name| name.name)
-        .collect()
-    });
+    let inherit = settings
+        .get("inherit")
+        .map(|inherit| host::inherit(inherit, d));
     let prepare = settings
         .get("prepare")
         .and_then(|prepare| argv_list(prepare, "each command in `prepare`", d))

@@ -1,14 +1,15 @@
 //! A command with `when_removed: undo` keeps, once it has run, what its
 //! `undo` needs: the command, where it runs and its environment, the
-//! secrets with the secrets, and the units it needed. At a `tay up` whose
-//! plan no longer has it, its `undo` runs with what it last ran with, once
-//! the units it needed that the plan has are ready, and before anything
-//! else the plan no longer has is stopped; then it is forgotten. A unit it
-//! needed that is neither up nor in the plan is not waited for: the `undo`
-//! runs without it and says so. One that fails is said, `tay up` exits
-//! with 1, and it is kept and tried again at the next `tay up`;
-//! `tay status` lists it with why while it waits. `tay wipe --all` runs
-//! none.
+//! secrets with the secrets, and the units it needed; of the variables it
+//! inherits on the host, the names, whose values the daemon that runs the
+//! `undo` gives it. At a `tay up` whose plan no longer has it, its `undo`
+//! runs with what it last ran with, once the units it needed that the plan
+//! has are ready, and before anything else the plan no longer has is
+//! stopped; then it is forgotten. A unit it needed that is neither up nor
+//! in the plan is not waited for: the `undo` runs without it and says so.
+//! One that fails is said, `tay up` exits with 1, and it is kept and tried
+//! again at the next `tay up`; `tay status` lists it with why while it
+//! waits. `tay wipe --all` runs none.
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -281,4 +282,34 @@ fn a_command_done_again_with_when_removed_keep_is_not_undone() {
     assert_eq!(up.code, 0, "{}{}", up.stdout, up.stderr);
     assert!(root.join("made").exists());
     assert!(!root.join("undone").exists());
+}
+
+#[test]
+fn an_undo_on_the_host_inherits_its_variables_by_name_from_the_daemon_that_runs_it() {
+    let machine = Machine::new();
+    let root = machine.stack("undoing");
+    // `tay up`, run in a session whose agent listens at `socket`.
+    let up_in_session = |socket: &str, unit: &str| {
+        let mut up = machine.command(&root, &["up", "--root", root.to_str().unwrap(), unit]);
+        up.env("AGENT_SOCKET", socket);
+        machine.run(up)
+    };
+    let up = up_in_session("/run/agent-first.sock", "inheriting");
+    assert_eq!(up.code, 0, "{}{}", up.stdout, up.stderr);
+    let kept = fs::read_to_string(root.join(".tay/state/units/inheriting/undo.json")).unwrap();
+    assert!(
+        kept.contains("AGENT_SOCKET") && !kept.contains("agent-first"),
+        "{kept}"
+    );
+    let down = machine.at(&root, "down", &[]);
+    assert_eq!(down.code, 0, "{}{}", down.stdout, down.stderr);
+    // It leaves the plan in another session, whose `tay up` starts the
+    // daemon that runs the `undo`.
+    let up = up_in_session("/run/agent-second.sock", "token");
+    assert_eq!(up.code, 0, "{}{}", up.stdout, up.stderr);
+    assert_eq!(up.last_change("inheriting"), UNDONE);
+    assert_eq!(
+        fs::read_to_string(root.join("inherited")).unwrap(),
+        "/run/agent-second.sock\n"
+    );
 }

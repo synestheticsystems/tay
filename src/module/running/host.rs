@@ -1,7 +1,7 @@
 //! What the units that run on the host share, a process and a command run
-//! there: the program and environment they are given, running each step
-//! under a keeper and waiting for it to end, finding a step again, stopping
-//! one, and running a readiness command.
+//! there: the variables they inherit, the program and environment they are
+//! given, running each step under a keeper and waiting for it to end,
+//! finding a step again, stopping one, and running a readiness command.
 //!
 //! A program on the host runs with only the environment its definition
 //! gives it and the variables `inherit` names from the environment tay runs
@@ -13,9 +13,12 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use crate::clock;
+use crate::diagnostic::Diagnostics;
 use crate::disk::{DiskError, Layout};
 use crate::keeper::{Ended, Ending, Look, Program, StepFiles};
 use crate::module::operations::{Failure, Outcome, Step, Steps, UnitPlace};
+use crate::syntax::yaml::Node;
+use crate::syntax::{fields, names};
 use crate::value::Filled;
 
 use super::command_line::shown;
@@ -66,6 +69,21 @@ pub fn found_running(layout: &Layout) -> Result<Vec<String>, Failure> {
     }
     running.sort();
     Ok(running)
+}
+
+/// `inherit`, as it is written at `node`: the names of the variables a
+/// program on the host is passed from the environment tay runs in, in
+/// place of those it inherits when `inherit` does not say.
+pub fn inherit(node: &Node, d: &mut Diagnostics) -> Vec<String> {
+    fields::name_list(
+        node,
+        "a variable to inherit",
+        names::variable_name_problem,
+        d,
+    )
+    .into_iter()
+    .map(|name| name.name)
+    .collect()
 }
 
 /// The environment a program runs with: each variable `inherit` names that

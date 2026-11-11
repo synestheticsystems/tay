@@ -59,6 +59,14 @@ units:
     doc: The same, run once as a command, which inherits what a process does when `inherit` does not say.
     uses: command
     with: { run: ["${environment.root}/services/report.sh", "once"] }
+  inheriting:
+    doc: The same, said by its check and then by its run, which inherit a variable that a program on the host does not by default, and not `HOME`, which one does.
+    uses: command
+    with:
+      check: ["${environment.root}/services/report.sh", "check"]
+      run: ["${environment.root}/services/report.sh", "once"]
+      env: { MODE: fast }
+      inherit: [PATH, AGENT_SOCKET]
   watcher:
     doc: Watches its scripts, which tay does not do yet.
     uses: process
