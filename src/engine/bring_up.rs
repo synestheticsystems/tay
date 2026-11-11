@@ -342,8 +342,8 @@ impl Bringing<'_> {
                 }
                 let planned = Arc::clone(&self.units[index]);
                 let standing = self.settled.standing(&planned);
-                if let Standing::Blocked(failed) = &standing {
-                    self.settled.blocked(&planned.name, failed.clone());
+                if let Standing::Blocked(lost) = &standing {
+                    self.settled.blocked(&planned.name, lost.clone());
                 }
                 // A unit that runs already is compared once what it needs
                 // has settled, so that how those came out is said: it is
@@ -474,9 +474,9 @@ impl Bringing<'_> {
                     self.started[index] = false;
                 }
                 // Its task ended without it ready or failed: a need of it
-                // failed before it could start again.
+                // was lost before it could start again.
                 _ => match self.settled.standing(&planned) {
-                    Standing::Blocked(failed) => self.settled.blocked(&planned.name, failed),
+                    Standing::Blocked(lost) => self.settled.blocked(&planned.name, lost),
                     Standing::Clear | Standing::Waiting(_) => {
                         self.settled.record(&planned.name, State::Failed);
                     }
@@ -543,7 +543,7 @@ impl Bringing<'_> {
         }
         let mut failed = match ready {
             true => Vec::new(),
-            false => self.failed_under(asked),
+            false => self.lost_under(asked),
         };
         failed.extend(not_undone.iter().map(|not_undone| FailedUnit {
             unit: not_undone.unit.clone(),
@@ -561,33 +561,31 @@ impl Bringing<'_> {
         })
     }
 
-    /// Each unit that failed that one of `asked` waits on, or that is one.
-    fn failed_under(&self, asked: &[String]) -> Vec<FailedUnit> {
-        let failed: BTreeSet<String> = asked
+    /// Each unit that failed or stayed unready that one of `asked` waits
+    /// on, or that is one.
+    fn lost_under(&self, asked: &[String]) -> Vec<FailedUnit> {
+        let lost: BTreeSet<String> = asked
             .iter()
-            .flat_map(|unit| self.settled.failures_under(unit))
+            .flat_map(|unit| self.settled.lost_under(unit))
             .collect();
         self.units
             .iter()
-            .filter(|planned| failed.contains(&planned.name))
+            .filter(|planned| lost.contains(&planned.name))
             .filter_map(|planned| Some((planned, self.supervisor.state(&planned.name)?)))
-            .map(|(planned, failure)| FailedUnit {
+            .map(|(planned, now)| FailedUnit {
                 unit: planned.name.clone(),
-                state: match self.settled.stayed_unready_is(&planned.name) {
+                state: match self.settled.is_unready(&planned.name) {
                     true => State::Unready,
                     false => State::Failed,
                 },
-                reason: failure.detail,
+                reason: now.detail,
                 lines: self.supervisor.last_lines(&planned.name),
                 waiting: self
                     .units
                     .iter()
                     .filter(|other| {
                         other.name != planned.name
-                            && self
-                                .settled
-                                .failures_under(&other.name)
-                                .contains(&planned.name)
+                            && self.settled.lost_under(&other.name).contains(&planned.name)
                     })
                     .map(|other| other.name.clone())
                     .collect(),

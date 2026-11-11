@@ -102,7 +102,7 @@ impl Settled {
     }
 
     /// Whether `unit` is lost to this pass because it stayed unready.
-    pub fn stayed_unready_is(&self, unit: &str) -> bool {
+    pub fn is_unready(&self, unit: &str) -> bool {
         matches!(self.units.get(unit), Some(Settles::Unready))
     }
 
@@ -119,7 +119,7 @@ impl Settled {
     }
 
     /// The units that are lost that `unit` waits on, itself if it is lost.
-    pub fn failures_under(&self, unit: &str) -> BTreeSet<String> {
+    pub fn lost_under(&self, unit: &str) -> BTreeSet<String> {
         match self.units.get(unit) {
             Some(Settles::Failed | Settles::Unready) => BTreeSet::from([unit.to_string()]),
             Some(Settles::Blocked(by)) => by.names(),
@@ -237,10 +237,10 @@ mod tests {
         );
         settled.record("web-port", State::Ready);
         settled.record("database", State::Failed);
-        let Standing::Blocked(failed) = settled.standing(named(&units, "api")) else {
+        let Standing::Blocked(lost) = settled.standing(named(&units, "api")) else {
             panic!("`api` needs `database`, which failed");
         };
-        settled.blocked("api", failed);
+        settled.blocked("api", lost);
         // `web` waits on `api`, which waits on `database`: what failed is
         // named, not the unit in between.
         assert_eq!(
@@ -249,7 +249,7 @@ mod tests {
         );
         assert!(settled.is_lost("api"));
         assert_eq!(
-            settled.failures_under("api"),
+            settled.lost_under("api"),
             BTreeSet::from(["database".to_string()])
         );
     }

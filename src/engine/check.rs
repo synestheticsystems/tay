@@ -127,8 +127,8 @@ impl Pass {
     /// The unit's state when a need of it is not ready.
     fn blocked(&mut self, planned: &PlannedUnit) -> Option<UnitState> {
         let standing = self.settled.standing(planned);
-        if let Standing::Blocked(failed) = &standing {
-            self.settled.blocked(&planned.name, failed.clone());
+        if let Standing::Blocked(lost) = &standing {
+            self.settled.blocked(&planned.name, lost.clone());
         }
         standing.waiting()
     }
@@ -176,9 +176,9 @@ impl Pass {
     ) -> Option<(UnitState, Option<Values>)> {
         let place = supervisor.place(&planned.name);
         let blocked = match self.settled.standing(planned) {
-            Standing::Blocked(failed) => {
-                self.settled.blocked(&planned.name, failed.clone());
-                Standing::Blocked(failed).waiting()
+            Standing::Blocked(lost) => {
+                self.settled.blocked(&planned.name, lost.clone());
+                Standing::Blocked(lost).waiting()
             }
             Standing::Clear | Standing::Waiting(_) => None,
         };
