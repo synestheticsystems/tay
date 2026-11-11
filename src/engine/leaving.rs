@@ -5,23 +5,26 @@
 //! are still up, one unit after another, the last kept first; then the unit
 //! is forgotten. One whose `undo` fails, or cannot run because a unit it
 //! needed has failed or is neither up nor in the plan any more, is said so,
-//! and its `undo` is kept and tried again at the next `tay up`. Once every
-//! `undo` has come to its end, what runs of the units the plan no longer
-//! has is stopped. Until then only the units the `undo`s wait for start,
-//! with what those need in turn, so that nothing else the plan brings up
-//! meets what the plan no longer has.
+//! with why noted for `tay status`, and its `undo` is kept and tried again
+//! at the next `tay up`, which fails. Once every `undo` has come to its
+//! end, what runs of the units the plan no longer has is stopped. Until
+//! then only the units the `undo`s wait for start, with what those need in
+//! turn, so that nothing else the plan brings up meets what the plan no
+//! longer has.
 
 use std::collections::{HashSet, VecDeque};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
+use super::check::CheckedState;
 use super::settled::{Settled, Standing, have_failed};
 use super::state::{State, UnitState};
 use super::supervisor::Supervisor;
 use super::unplanned::stop_unplanned;
 use crate::diagnostic::quoted_list;
-use crate::module;
+use crate::disk::Environment;
+use crate::module::{self, UnitPlace};
 use crate::plan::PlannedUnit;
 
 /// A unit the plan no longer has that keeps an `undo` to run, with the
@@ -34,8 +37,7 @@ pub struct Owed {
 /// The units that keep an `undo` to run and that `plan`, the units of the
 /// plan, does not have, the last kept first, each with what it needed.
 pub fn undos_owed(supervisor: &Supervisor, plan: &[Arc<PlannedUnit>]) -> Result<Vec<Owed>, String> {
-    let kept = module::units_keeping_an_undo(&supervisor.environment)
-        .map_err(|failure| failure.to_string())?;
+    let kept = units_keeping_an_undo(&supervisor.environment)?;
     Ok(kept
         .into_iter()
         .filter(|unit| !plan.iter().any(|planned| planned.name == *unit))
@@ -45,6 +47,55 @@ pub fn undos_owed(supervisor: &Supervisor, plan: &[Arc<PlannedUnit>]) -> Result<
             Owed { unit, needs }
         })
         .collect())
+}
+
+/// Each unit of `environment` that keeps an `undo` and that `listed` does
+/// not have, as `tay status` reports it while the `undo` waits: `failed`,
+/// with why it last did not run, or `stopped` until a `tay up` first runs
+/// it. `listed` has the units of the plan, whose `undo` waits for nothing.
+pub fn undos_waiting(
+    environment: &Arc<Environment>,
+    listed: impl Fn(&str) -> bool,
+) -> Result<Vec<CheckedState>, String> {
+    let kept = units_keeping_an_undo(environment)?;
+    Ok(kept
+        .into_iter()
+        .filter(|unit| !listed(unit))
+        .map(|unit| {
+            let place = UnitPlace {
+                unit: unit.clone(),
+                environment: Arc::clone(environment),
+            };
+            let state = match module::undo_waiting(&place) {
+                Ok(Some(why)) => UnitState::new(State::Failed, why),
+                Ok(None) => UnitState::new(
+                    State::Stopped,
+                    "it is not in the plan any more: the next `tay up` runs its `undo`",
+                ),
+                Err(failure) => UnitState::new(
+                    State::Failed,
+                    format!("it is not in the plan any more, and why its `undo` waits cannot be read: {failure}"),
+                ),
+            };
+            CheckedState { unit, state }
+        })
+        .collect())
+}
+
+/// The units of `environment` that keep an `undo` to run, the last kept
+/// first; why they cannot be told, when they cannot.
+fn units_keeping_an_undo(environment: &Environment) -> Result<Vec<String>, String> {
+    module::units_keeping_an_undo(environment).map_err(|failure| {
+        format!("what the units the plan does not have keep to undo cannot be told: {failure}")
+    })
+}
+
+/// An `undo` owed that did not run: its unit, what it was said with, and
+/// whether it ran, so that the last lines it wrote tell why.
+pub struct NotUndone {
+    pub unit: String,
+    pub reason: String,
+    pub ran: bool,
 }
 
 /// What a bring-up does first with the units the plan no longer has, and
@@ -60,6 +111,8 @@ pub struct Leaving {
     /// Whether the first `undo` owed has been said to wait.
     waiting_said: bool,
     stage: Stage,
+    /// Each `undo` owed that did not run.
+    not_undone: Vec<NotUndone>,
 }
 
 enum Stage {
@@ -70,8 +123,9 @@ enum Stage {
     Over,
 }
 
-/// What is under way of it: an `undo`, or the stop of what is left.
-pub type Step = Pin<Box<dyn Future<Output = ()> + Send>>;
+/// What is under way of it: an `undo`, which gives how it did not run when
+/// it did not, or the stop of what is left.
+pub type Step = Pin<Box<dyn Future<Output = Option<NotUndone>> + Send>>;
 
 /// How the next `undo` owed stands.
 enum Judged {
@@ -102,6 +156,7 @@ impl Leaving {
             first,
             waiting_said: false,
             stage: Stage::Undoing,
+            not_undone: Vec::new(),
         }
     }
 
@@ -114,6 +169,11 @@ impl Leaving {
     /// the units the plan no longer has has been stopped.
     pub fn is_over(&self) -> bool {
         matches!(self.stage, Stage::Over)
+    }
+
+    /// Each `undo` owed that has come to its end without running.
+    pub fn not_undone(&self) -> &[NotUndone] {
+        &self.not_undone
     }
 
     /// The next step, once the one before it has ended, as the units of the
@@ -145,17 +205,23 @@ impl Leaving {
                 }
                 Judged::Cannot(why) => {
                     self.waiting_said = false;
-                    not_undone(supervisor, &owed.unit, &why);
+                    let not_undone = not_undone(supervisor, &owed.unit, &why, false);
+                    self.not_undone.push(not_undone);
                 }
             }
         }
         self.stage = Stage::Stopping;
         let supervisor = Arc::clone(supervisor);
-        Some(Box::pin(async move { stop_unplanned(&supervisor).await }))
+        Some(Box::pin(async move {
+            stop_unplanned(&supervisor).await;
+            None
+        }))
     }
 
-    /// The step under way has ended.
-    pub fn ended(&mut self) {
+    /// The step under way has ended, as `came` says of an `undo` that did
+    /// not run.
+    pub fn ended(&mut self, came: Option<NotUndone>) {
+        self.not_undone.extend(came);
         if matches!(self.stage, Stage::Stopping) {
             self.stage = Stage::Over;
         }
@@ -192,14 +258,15 @@ impl Leaving {
 /// Runs the `undo` `unit` keeps, saying what came of it; once it has run,
 /// the unit is forgotten. What of the unit still runs, as of a command that
 /// was running when it left the plan, is stopped first, so that nothing of
-/// it goes on after its work is undone.
-async fn undo(supervisor: Arc<Supervisor>, unit: String) {
+/// it goes on after its work is undone. How it did not run, when it did
+/// not.
+async fn undo(supervisor: Arc<Supervisor>, unit: String) -> Option<NotUndone> {
     let running = (supervisor.snapshot().unplanned(&unit)).map(|unplanned| unplanned.runs.clone());
     if let Some(runs) = running
         && let Err(why) = supervisor.stop(&unit, &runs).await
     {
         let why = format!("it could not be stopped for its `undo` to run: {why}");
-        return not_undone(&supervisor, &unit, &why);
+        return Some(not_undone(&supervisor, &unit, &why, false));
     }
     let undoing = "it is not in the plan any more, so its `undo` runs";
     supervisor.say(&unit, UnitState::new(State::Starting, undoing));
@@ -207,14 +274,26 @@ async fn undo(supervisor: Arc<Supervisor>, unit: String) {
         Ok(()) => {
             let undone = "it is not in the plan any more, and its `undo` has run";
             supervisor.say(&unit, UnitState::new(State::Stopped, undone));
+            None
         }
-        Err(why) => not_undone(&supervisor, &unit, &why.to_string()),
+        Err(why) => Some(not_undone(&supervisor, &unit, &why.to_string(), true)),
     }
 }
 
-/// Says that the `undo` of `unit` did not run, as `why` says, and is kept.
-fn not_undone(supervisor: &Supervisor, unit: &str, why: &str) {
-    let detail =
+/// Says that the `undo` of `unit` did not run, as `why` says, and is kept,
+/// noting why for `tay status`; `ran` is whether it ran.
+fn not_undone(supervisor: &Supervisor, unit: &str, why: &str, ran: bool) -> NotUndone {
+    let mut reason =
         format!("it is not in the plan any more, and {why}; the next `tay up` tries it again");
-    supervisor.say(unit, UnitState::new(State::Failed, detail));
+    if let Err(failure) = module::note_undo_waiting(&supervisor.place(unit), &reason) {
+        reason.push_str(&format!(
+            "; why it waits could not be kept for `tay status`: {failure}"
+        ));
+    }
+    supervisor.say(unit, UnitState::new(State::Failed, reason.clone()));
+    NotUndone {
+        unit: unit.to_string(),
+        reason,
+        ran,
+    }
 }

@@ -5,7 +5,8 @@
 //! the units it needed that the plan has are ready, and before anything
 //! else the plan no longer has is stopped; then it is forgotten. One that
 //! fails, or cannot run because a unit it needed is neither up nor in the
-//! plan, is said, kept, and tried again at the next `tay up`.
+//! plan, is said, `tay up` exits with 1, and it is kept and tried again at
+//! the next `tay up`; `tay status` lists it with why while it waits.
 //! `tay wipe --all` runs none.
 
 use std::fs;
@@ -80,13 +81,21 @@ fn a_command_that_leaves_the_plan_is_undone_with_what_it_ran_with_before_anythin
     assert!(!again.stdout.contains("made"), "{}", again.stdout);
 }
 
+/// The state and detail `tay status` gives `unit` of the environment at
+/// `root`, as `state detail`, once it has said that it failed.
+fn failed_in_status(machine: &Machine, root: &Path, unit: &str) -> String {
+    let status = machine.at(root, "status", &["--json"]);
+    assert_eq!(status.code, 1, "{}{}", status.stdout, status.stderr);
+    Machine::state(&status.json(), unit)
+}
+
 #[test]
 fn an_undo_that_fails_is_said_kept_and_tried_again_at_the_next_up() {
     let machine = Machine::new();
     let root = brought_up(&machine);
     fs::write(root.join("refuse"), "").unwrap();
     let up = machine.at(&root, "up", &["--set", "up=token"]);
-    assert_eq!(up.code, 0, "{}{}", up.stdout, up.stderr);
+    assert_eq!(up.code, 1, "{}{}", up.stdout, up.stderr);
     let failed = up.last_change("made");
     assert!(
         failed.starts_with("failed it is not in the plan any more, and its `undo` exited with 1"),
@@ -96,13 +105,24 @@ fn an_undo_that_fails_is_said_kept_and_tried_again_at_the_next_up() {
         failed.ends_with("; the next `tay up` tries it again"),
         "{failed}"
     );
+    // `tay up` says so as it ends, with what the `undo` wrote, and
+    // `tay status` while it waits.
+    let reason = failed.strip_prefix("failed ").unwrap();
+    assert!(
+        up.stdout
+            .contains(&format!("tay up: `made` failed: {reason}\n")),
+        "{}",
+        up.stdout
+    );
+    assert!(up.stdout.contains("| refused"), "{}", up.stdout);
+    assert_eq!(failed_in_status(&machine, &root, "made"), failed);
     assert!(root.join("made").exists());
     assert!(root.join(".tay/state/units/made/undo.json").exists());
     // `holder` was stopped once the `undo` had come to its end, so the
     // next `tay up` finds it neither up nor in the plan.
     fs::remove_file(root.join("refuse")).unwrap();
     let again = machine.at(&root, "up", &[]);
-    assert_eq!(again.code, 0, "{}{}", again.stdout, again.stderr);
+    assert_eq!(again.code, 1, "{}{}", again.stdout, again.stderr);
     assert_eq!(again.last_change("made"), CANNOT);
     assert!(root.join("made").exists());
     let holder_back = machine.at(&root, "up", &["--set", "up=token,holder"]);
@@ -152,11 +172,33 @@ fn an_undo_that_needed_a_unit_neither_up_nor_in_the_plan_cannot_run_and_is_kept(
     let down = machine.at(&root, "down", &[]);
     assert_eq!(down.code, 0, "{}{}", down.stdout, down.stderr);
     let up = machine.at(&root, "up", &["--set", "up=token"]);
-    assert_eq!(up.code, 0, "{}{}", up.stdout, up.stderr);
+    assert_eq!(up.code, 1, "{}{}", up.stdout, up.stderr);
     assert_eq!(up.last_change("made"), CANNOT);
     assert!(root.join("made").exists());
     assert!(!root.join("undone").exists());
     assert!(root.join(".tay/state/units/made/undo.json").exists());
+    // `tay status` says why it waits, whether a daemon runs or not.
+    assert_eq!(failed_in_status(&machine, &root, "made"), CANNOT);
+    let down = machine.at(&root, "down", &[]);
+    assert_eq!(down.code, 0, "{}{}", down.stdout, down.stderr);
+    assert_eq!(machine.daemon(&root), None);
+    assert_eq!(failed_in_status(&machine, &root, "made"), CANNOT);
+}
+
+#[test]
+fn an_undo_that_has_not_been_tried_waits_stopped_in_status() {
+    let machine = Machine::new();
+    let root = brought_up(&machine);
+    let down = machine.at(&root, "down", &[]);
+    assert_eq!(down.code, 0, "{}{}", down.stdout, down.stderr);
+    let set = machine.at(&root, "set", &["up=token"]);
+    assert_eq!(set.code, 0, "{}{}", set.stdout, set.stderr);
+    let status = machine.at(&root, "status", &["--json"]);
+    assert_eq!(status.code, 0, "{}{}", status.stdout, status.stderr);
+    assert_eq!(
+        Machine::state(&status.json(), "made"),
+        "stopped it is not in the plan any more: the next `tay up` runs its `undo`"
+    );
 }
 
 #[test]

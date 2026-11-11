@@ -125,6 +125,18 @@ pub fn kept_undo_needs(place: &UnitPlace) -> Result<Vec<String>, Failure> {
     command::kept_undo::needs(place)
 }
 
+/// Notes why the `undo` the unit at `place` keeps did not run, as `why`
+/// says it to a person, for whoever asks while it waits.
+pub fn note_undo_waiting(place: &UnitPlace, why: &str) -> Result<(), Failure> {
+    command::kept_undo::note_waiting(place, why)
+}
+
+/// Why the `undo` the unit at `place` keeps last did not run, as it was
+/// noted; `None` when nothing is, as before it has been tried.
+pub fn undo_waiting(place: &UnitPlace) -> Result<Option<String>, Failure> {
+    command::kept_undo::waiting(place)
+}
+
 /// Runs the `undo` the unit at `place` keeps, where it ran and with what it
 /// last ran with; once it has run, the unit is forgotten.
 pub async fn run_kept_undo(place: &UnitPlace) -> Result<(), Failure> {

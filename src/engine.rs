@@ -20,7 +20,7 @@ mod watching;
 
 pub use bring_up::{Decision, Outdated, Telling, bring_up};
 pub use check::{check_now, find_again};
-pub use leaving::{Leaving, undos_owed};
+pub use leaving::{Leaving, undos_owed, undos_waiting};
 pub use state::{State, UnitState};
 pub use supervisor::{Supervisor, Told, runs};
 pub use take_down::{Left, take_down};

@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 use tokio::task::JoinSet;
 
-use super::leaving::{Leaving, Step};
+use super::leaving::{Leaving, NotUndone, Step};
 use super::settled::{Settled, Standing};
 use super::started_from;
 use super::state::{State, UnitState};
@@ -29,19 +29,20 @@ use super::supervisor::{Begin, Supervisor};
 use crate::module::{Exists, Made, Operations, Running, UnitKind};
 use crate::plan::PlannedUnit;
 
-/// What bringing a plan up comes to for the units it was asked for,
-/// decided as soon as it can be.
+/// What bringing a plan up comes to for the units it was asked for, and
+/// for `tay up` for the `undo`s owed, decided as soon as it can be.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "decision", rename_all = "lowercase")]
 pub enum Decision {
-    /// Every unit asked for is ready.
+    /// Every unit asked for is ready, and every `undo` owed has run.
     Ready,
-    /// A unit asked for can no longer become ready, because these failed.
+    /// A unit asked for can no longer become ready, or an `undo` owed did
+    /// not run, because these failed.
     Failed { failed: Vec<FailedUnit> },
 }
 
-/// A unit that failed, why, the last lines it wrote, and every unit that
-/// was waiting on it.
+/// A unit that failed, or whose `undo` did not run, why, the last lines it
+/// wrote, and every unit that was waiting on it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FailedUnit {
     pub unit: String,
@@ -193,10 +194,11 @@ pub async fn bring_up(
             Some(joined) = leaving_step.join_next() => {
                 // A step that panicked is a fault in tay, which is said
                 // rather than left to hold up the rest.
-                if let Err(error) = joined {
+                let came = joined.unwrap_or_else(|error| {
                     told(Telling::Notice(format!("tay failed while undoing or stopping what the plan no longer has: {error}")));
-                }
-                bringing.left();
+                    None
+                });
+                bringing.left(came);
             }
             changed = changes.changed(), if waits_on_running => if changed.is_err() {
                 break;
@@ -377,10 +379,11 @@ impl Bringing<'_> {
         self.leaving.as_mut()?.next(self.supervisor, &self.settled)
     }
 
-    /// The step of leaving under way has ended.
-    fn left(&mut self) {
+    /// The step of leaving under way has ended, as `came` says of an
+    /// `undo` that did not run.
+    fn left(&mut self, came: Option<NotUndone>) {
         if let Some(leaving) = &mut self.leaving {
-            leaving.ended();
+            leaving.ended(came);
         }
     }
 
@@ -502,23 +505,43 @@ impl Bringing<'_> {
     }
 
     /// The decision, once it can be made: once what the plan no longer has
-    /// has left, too.
+    /// has left, too, an `undo` of which that did not run failing it.
     fn decided(&self, asked: &[String]) -> Option<Decision> {
-        if (self.leaving.as_ref()).is_some_and(|leaving| !leaving.is_over()) {
+        let not_undone = match &self.leaving {
+            Some(leaving) if !leaving.is_over() => return None,
+            Some(leaving) => leaving.not_undone(),
+            None => &[],
+        };
+        let ready = asked.iter().all(|unit| self.settled.is_ready(unit));
+        if !ready && !asked.iter().any(|unit| self.settled.is_lost(unit)) {
             return None;
         }
-        if asked.iter().all(|unit| self.settled.is_ready(unit)) {
-            return Some(Decision::Ready);
-        }
-        if !asked.iter().any(|unit| self.settled.is_lost(unit)) {
-            return None;
-        }
+        let mut failed = match ready {
+            true => Vec::new(),
+            false => self.failed_under(asked),
+        };
+        failed.extend(not_undone.iter().map(|not_undone| FailedUnit {
+            unit: not_undone.unit.clone(),
+            reason: not_undone.reason.clone(),
+            lines: match not_undone.ran {
+                true => self.supervisor.last_lines(&not_undone.unit),
+                false => Vec::new(),
+            },
+            waiting: Vec::new(),
+        }));
+        Some(match ready && failed.is_empty() {
+            true => Decision::Ready,
+            false => Decision::Failed { failed },
+        })
+    }
+
+    /// Each unit that failed that one of `asked` waits on, or that is one.
+    fn failed_under(&self, asked: &[String]) -> Vec<FailedUnit> {
         let failed: BTreeSet<String> = asked
             .iter()
             .flat_map(|unit| self.settled.failures_under(unit))
             .collect();
-        let failed = self
-            .units
+        self.units
             .iter()
             .filter(|planned| failed.contains(&planned.name))
             .filter_map(|planned| Some((planned, self.supervisor.state(&planned.name)?)))
@@ -539,7 +562,6 @@ impl Bringing<'_> {
                     .map(|other| other.name.clone())
                     .collect(),
             })
-            .collect();
-        Some(Decision::Failed { failed })
+            .collect()
     }
 }

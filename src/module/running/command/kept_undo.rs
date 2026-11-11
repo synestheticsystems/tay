@@ -2,11 +2,11 @@
 //! its `undo` can run when the unit is no longer in the plan, with what the
 //! unit last ran with: the `undo`, where it runs, its environment, and the
 //! names of the units that run that the unit needed, which the `undo` waits
-//! for. A variable that holds a secret is kept with the secrets, readable
-//! by this account only; the rest in the unit's own folder. It is found and
-//! run by the unit's place alone, whatever the plan holds, so that whatever
-//! comes to run it, a plan that no longer has the unit or anything else,
-//! finds it.
+//! for; and once it has been tried and has not run, why. A variable that
+//! holds a secret is kept with the secrets, readable by this account only;
+//! the rest in the unit's own folder. It is found and run by the unit's
+//! place alone, whatever the plan holds, so that whatever comes to run it,
+//! a plan that no longer has the unit or anything else, finds it.
 
 use std::collections::BTreeMap;
 use std::io;
@@ -27,6 +27,9 @@ use crate::value::Filled;
 
 /// The file it is kept in, in the unit's own folder.
 const KEPT: &str = "undo.json";
+
+/// The file that says why it last did not run, in the unit's own folder.
+const WAITS: &str = "undo-waits.txt";
 
 /// What the file of its secrets is named, after the unit's name, in the
 /// secrets folder: a unit's name has no dot, so it is no unit's own.
@@ -181,14 +184,35 @@ pub fn keep(
     if let Some(folder) = path.parent() {
         std::fs::create_dir_all(folder).map_err(DiskError::io(folder, "made"))?;
     }
-    Ok(write_whole(&path, json(&kept).as_bytes(), 0o644)?)
+    write_whole(&path, json(&kept).as_bytes(), 0o644)?;
+    // What is kept now has not been tried.
+    Ok(remove_if_there(&waits_path(place))?)
 }
 
 /// Forgets what was kept for the `undo` of the unit at `place`, if
 /// anything was.
 pub fn forget(place: &UnitPlace) -> Result<(), Failure> {
     remove_if_there(&kept_path(place))?;
+    remove_if_there(&waits_path(place))?;
     Ok(remove_if_there(&secrets_path(place))?)
+}
+
+/// Notes why the `undo` kept for the unit at `place` did not run, as `why`
+/// says it to a person, for whoever asks while it waits.
+pub fn note_waiting(place: &UnitPlace, why: &str) -> Result<(), Failure> {
+    let note = format!("{why}\n");
+    Ok(write_whole(&waits_path(place), note.as_bytes(), 0o644)?)
+}
+
+/// Why the `undo` kept for the unit at `place` last did not run, as it was
+/// noted; `None` when nothing is, as before it has been tried.
+pub fn waiting(place: &UnitPlace) -> Result<Option<String>, Failure> {
+    let path = waits_path(place);
+    match std::fs::read_to_string(&path) {
+        Ok(why) => Ok(Some(why.trim_end().to_string())),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(DiskError::io(path, "read")(error).into()),
+    }
 }
 
 /// The units of `environment` for which what an `undo` needs is kept, the
@@ -239,6 +263,10 @@ pub async fn run(place: &UnitPlace) -> Result<(), Failure> {
 
 fn kept_path(place: &UnitPlace) -> PathBuf {
     place.environment.layout.unit_state(&place.unit).join(KEPT)
+}
+
+fn waits_path(place: &UnitPlace) -> PathBuf {
+    place.environment.layout.unit_state(&place.unit).join(WAITS)
 }
 
 fn secrets_path(place: &UnitPlace) -> PathBuf {

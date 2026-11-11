@@ -60,10 +60,7 @@ impl Daemon {
         let owed = match engine::undos_owed(&self.supervisor, &units) {
             Ok(owed) => owed,
             Err(why) => {
-                let reason = format!(
-                    "what the units the plan does not have keep to undo cannot be told: {why}"
-                );
-                self.fail(change, &reason);
+                self.fail(change, &why);
                 return;
             }
         };

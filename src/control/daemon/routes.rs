@@ -241,8 +241,9 @@ fn down(daemon: &Arc<Daemon>) -> Response<Body> {
 }
 
 /// Each unit the daemon knows, from a check made now, and after them each
-/// the plan does not have of which something runs. A unit the check finds
-/// in the state recorded keeps the time it took it.
+/// the plan does not have of which something runs, and each whose `undo`
+/// waits. A unit the check finds in the state recorded keeps the time it
+/// took it.
 async fn status(daemon: &Arc<Daemon>) -> Response<Body> {
     let units = daemon.supervisor.snapshot();
     let environment = Arc::clone(&daemon.environment);
@@ -264,6 +265,13 @@ async fn status(daemon: &Arc<Daemon>) -> Response<Body> {
         }
     };
     found.extend(engine::check_unplanned(&daemon.supervisor).await);
+    let listed = |unit: &str| found.iter().any(|found| found.unit == unit);
+    match engine::undos_waiting(&daemon.environment, listed) {
+        Ok(waiting) => found.extend(waiting),
+        Err(problem) => {
+            return json(StatusCode::INTERNAL_SERVER_ERROR, &Problem { problem });
+        }
+    }
     let units = found
         .into_iter()
         .map(|found| {

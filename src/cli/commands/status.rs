@@ -1,9 +1,11 @@
-//! `tay status [UNIT]`: each unit's state, from a check. The daemon makes
-//! the checks; with none running, an environment meant to be up, or with
+//! `tay status [UNIT]`: each unit's state, from a check, and each unit the
+//! plan no longer has whose `undo` waits, with why. The daemon makes the
+//! checks; with none running, an environment meant to be up, or with
 //! anything of it left, has one started to find its units, and any other
 //! has every unit stopped.
 
 use std::path::Path;
+use std::sync::Arc;
 
 use serde_json::json;
 
@@ -14,7 +16,7 @@ use crate::cli::stack;
 use crate::control::client::{Client, ClientError};
 use crate::definition::read::THIS_TAY;
 use crate::disk::{Asked, Environment, Identity, Intent, Layout};
-use crate::engine::State;
+use crate::engine::{self, State};
 use crate::module;
 use crate::print::out;
 
@@ -143,8 +145,15 @@ fn from_daemon(environment: &Environment, args: &Args) -> Result<Report, Exit> {
                 })
                 .collect(),
         }),
-        // No daemon runs and the environment is down: nothing runs.
-        Ok(None) => stopped(root, id, "down", "the environment is down", args),
+        // No daemon runs and the environment is down: nothing runs, and
+        // the units whose `undo` waits are told from what they keep.
+        Ok(None) => {
+            let mut report = stopped(root, id, "down", "the environment is down", args)?;
+            report
+                .units
+                .extend(undos_waiting(environment, &report.units)?);
+            Ok(report)
+        }
         Err(Unreached::Client(error)) => Err(client_problem(COMMAND, &error)),
         Err(Unreached::Left(why)) => Err(problem(COMMAND, Exit::Unreachable, &why)),
     }
@@ -191,6 +200,23 @@ fn stopped(
         asked: Asked::default(),
         units,
     })
+}
+
+/// Each unit of `environment` whose `undo` waits and that `listed` does not
+/// have, as what it keeps tells it.
+fn undos_waiting(environment: &Environment, listed: &[Line]) -> Result<Vec<Line>, Exit> {
+    let listed = |unit: &str| listed.iter().any(|line| line.unit == unit);
+    let waiting = engine::undos_waiting(&Arc::new(environment.clone()), listed)
+        .map_err(|why| problem(COMMAND, Exit::Unreachable, &why))?;
+    Ok(waiting
+        .into_iter()
+        .map(|waiting| Line {
+            unit: waiting.unit,
+            state: waiting.state.state,
+            detail: waiting.state.detail,
+            since: None,
+        })
+        .collect())
 }
 
 /// What was asked, as the plain `tay up` it now stands for.
