@@ -16,7 +16,7 @@ impl Keeps for CommandSettings<Value> {
         if self.undo.is_some() {
             what.push("what its `undo` undoes".to_string());
         }
-        if self.keeps && !self.produces.is_empty() {
+        if self.keeps_values && !self.produces.is_empty() {
             what.push("the values it produced".to_string());
         }
         what.push(RECORD.to_string());
@@ -36,7 +36,7 @@ impl Keeps for CommandSettings<Value> {
             Some(_) => Some(filled(self, fill)?),
             None => None,
         };
-        let values_kept = self.keeps && !self.produces.is_empty();
+        let values_kept = self.keeps_values && !self.produces.is_empty();
         Ok(Box::pin(async move {
             let mut removed = 0;
             if let Some(undoing) = undoing

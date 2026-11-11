@@ -273,8 +273,6 @@ Production profiles refuse a unit with `watch`, so none of this happens on a ser
 
 **A command with `when_removed: undo`** keeps, once it has run, what its `undo` needs: the command, where it runs, its environment, the secrets with the secrets, and the names of the units it needed. At a `tay up` whose plan no longer has the unit, tay runs that `undo` once the units it needed that are still in the plan are ready, and before it stops anything else the plan no longer has; then it forgets the unit. If the `undo` fails, or a unit it needed is neither up nor in the plan any more, `tay up` says so, exits with code 1, keeps the `undo` and tries again at the next `tay up`; `tay status` lists every unit whose `undo` is still waiting. `tay wipe --all` runs none of them. An action cannot have `when_removed: undo`: it is never part of what `tay up` brings up, so it never leaves.
 
-*Not built yet: waiting for the units an `undo` needed; exit code 1 and the line in `tay status` for an `undo` that failed; refusing the setting on an action.*
-
 ## Not in this document yet
 
 Running on a server under a service manager. Written when it is built.

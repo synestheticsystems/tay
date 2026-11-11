@@ -346,10 +346,10 @@ impl CommandSettings<Filled> {
             }
         }
         let values = match (produced::written(place), kept) {
-            (false, Kept::Given) if self.keeps && !self.produces.is_empty() => {
+            (false, Kept::Given) if self.keeps_values && !self.produces.is_empty() => {
                 produced::kept(place, &self.produces)
             }
-            _ => produced::take(place, &self.produces, self.keeps),
+            _ => produced::take(place, &self.produces, self.keeps_values),
         };
         let values = match values {
             Ok(values) => values,
@@ -372,7 +372,7 @@ impl CommandSettings<Filled> {
     /// when `when_removed` was changed to `keep`.
     fn keep_undo(&self, place: &UnitPlace) -> Result<(), Failure> {
         match (&self.undo, self.when_removed) {
-            (Some(undo), WhenRemoved::Undo) if self.keeps => {
+            (Some(undo), WhenRemoved::Undo) => {
                 kept_undo::keep(place, undo, &self.steps, &self.needs_that_run)
             }
             _ => kept_undo::forget(place),

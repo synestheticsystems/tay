@@ -13,3 +13,7 @@ units:
     action: true
     args: { user: {} }
     with: { run: [mint, "${args.nobody}"] }
+  retire:
+    uses: command
+    action: true
+    with: { run: [retire], undo: [restore], when_removed: undo }

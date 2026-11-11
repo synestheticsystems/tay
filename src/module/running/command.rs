@@ -67,11 +67,10 @@ struct CommandSettings<V> {
     stdin: Option<V>,
     /// The values the command writes out, each with whether it is secret.
     produces: Vec<(NameAt, bool)>,
-    /// Whether what it does is kept, so that a daemon started afresh has
-    /// it too: the values it writes out, and what its `undo` needs. It is,
-    /// unless it is an action, whose values go to whoever runs it and
-    /// which leaves no work behind for a plan to undo.
-    keeps: bool,
+    /// Whether the values it writes out are kept, so that a daemon started
+    /// afresh gives them too: they are, unless it is an action, whose
+    /// values go to whoever runs it.
+    keeps_values: bool,
     /// The files the command builds, by name.
     outputs: Vec<(NameAt, V)>,
     /// The units that run that the unit needs, which the plan gives once
@@ -109,7 +108,7 @@ impl<V> MapValues for CommandSettings<V> {
             steps: steps?,
             stdin: stdin?,
             produces: self.produces.clone(),
-            keeps: self.keeps,
+            keeps_values: self.keeps_values,
             outputs: outputs?,
             needs_that_run: self.needs_that_run.clone(),
         })
@@ -182,6 +181,7 @@ fn read(
         return None;
     };
     let errors_before = cx.d.len();
+    let is_action = cx.is_action;
     let d = &mut *cx.d;
     let settings = Fields::of(with, "the settings of a `command` unit", FIELDS, d)?;
     let runs = runs(&settings, d);
@@ -207,6 +207,12 @@ fn read(
                     d.error(
                         when_removed.loc,
                         "`when_removed: undo` runs `undo`, and this command has none",
+                    );
+                }
+                if is_action {
+                    d.error(
+                        when_removed.loc,
+                        "an action cannot have `when_removed: undo`: it is never part of what `tay up` brings up, so it never leaves the plan",
                     );
                 }
                 WhenRemoved::Undo
@@ -298,7 +304,7 @@ fn read(
         },
         stdin,
         produces,
-        keeps: !cx.is_action,
+        keeps_values: !cx.is_action,
         outputs,
         needs_that_run: Vec::new(),
     };

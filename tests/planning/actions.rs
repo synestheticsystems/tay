@@ -15,7 +15,7 @@ fn an_actions_arguments_print_as_placeholders() {
 }
 
 #[test]
-fn args_go_only_with_an_action_and_a_reference_names_one_it_declares() {
+fn args_go_only_with_an_action_and_an_action_is_never_undone_for_leaving_the_plan() {
     let run = plan("action-errors", &[]);
     assert_eq!(run.code, 2);
     assert_eq!(
@@ -24,6 +24,7 @@ fn args_go_only_with_an_action_and_a_reference_names_one_it_declares() {
             "tay.yaml:7:5: `args` goes with `action: true`: only an action is asked for with arguments",
             "tay.yaml:10:18: `${args.x}` is an action's argument, and unit `other` is not an action",
             "tay.yaml:15:26: `${args.nobody}`: action `mint` declares no argument `nobody`",
+            "tay.yaml:19:59: an action cannot have `when_removed: undo`: it is never part of what `tay up` brings up, so it never leaves the plan",
         ]
     );
 }
