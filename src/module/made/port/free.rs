@@ -18,6 +18,11 @@
 //! them, so a refusal counts only once it has outlasted that. Linux, which
 //! refuses that bind beside a closed connection whose program did not set
 //! the option, could not be asked so.
+//!
+//! An ordinary user may not bind a number below 1024 on Linux. tay never
+//! holds such a number itself, since Docker publishes it, so a bind
+//! refused for want of permission leaves the tables alone to say whether
+//! it is free. macOS lets an ordinary user bind any number.
 
 use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
@@ -27,7 +32,26 @@ use rustix::net::{AddressFamily, SocketType, bind, socket, sockopt};
 
 /// Whether no program on this machine listens on `number`.
 pub fn is_free(number: u16) -> io::Result<bool> {
-    Ok(nothing_has(number)? || !listened_on(number)?)
+    match nothing_has(number) {
+        Ok(true) => Ok(true),
+        Ok(false) => Ok(!listened_on(number)?),
+        Err(error) if may_not_bind(&error) => Ok(!listened_on(number)?),
+        Err(error) => Err(error),
+    }
+}
+
+/// Whether a bind was refused because this user may not bind the number
+/// at all, as an ordinary user may not bind one below 1024.
+#[cfg(not(target_os = "macos"))]
+fn may_not_bind(error: &io::Error) -> bool {
+    error.raw_os_error() == Some(Errno::ACCESS.raw_os_error())
+}
+
+/// macOS lets an ordinary user bind any number, and what it says of a
+/// number is learnt by binding alone: a bind it refuses is an error.
+#[cfg(target_os = "macos")]
+fn may_not_bind(_: &io::Error) -> bool {
+    false
 }
 
 /// Whether no socket on this machine has `number`. Each test binds every
@@ -237,5 +261,28 @@ mod tests {
         for asked in 0..50 {
             assert!(is_free(number).unwrap(), "asked {asked} times before");
         }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn a_number_this_user_may_not_bind_is_free_unless_a_program_listens_on_it() {
+        // A number below 1024 that a program listens on, found by connecting
+        // to it, which owes nothing to the tables, and one nothing answers on.
+        let answers = |number: &u16| TcpStream::connect(("127.0.0.1", *number)).is_ok();
+        let (Some(listened), Some(unlistened)) =
+            ((1..1024).find(answers), (1..1024).find(|n| !answers(n)))
+        else {
+            eprintln!("skipped: nothing listens below 1024 on the loopback address");
+            return;
+        };
+        for number in [listened, unlistened] {
+            let bound = TcpListener::bind(("0.0.0.0", number)).map_err(|error| error.kind());
+            if bound.err() != Some(io::ErrorKind::PermissionDenied) {
+                eprintln!("skipped: this system does not refuse this user {number}");
+                return;
+            }
+        }
+        assert!(!is_free(listened).unwrap(), "{listened}");
+        assert!(is_free(unlistened).unwrap(), "{unlistened}");
     }
 }

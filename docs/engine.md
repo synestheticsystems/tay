@@ -131,7 +131,7 @@ An environment leaves the machine's list when a check finds nothing of it left: 
 - The preferred number is tried once, the first time. After that the environment keeps what it got: kept beats preferred.
 - Other numbers come from a range the system does not hand out by itself.
 - Choosing goes through one lock and the machine's list, so two environments starting at once cannot get the same number.
-- A number is free when no program listens on it, on any address of the machine. A number an ordinary user may not take, as one below 1024 on Linux, is judged by the system's tables of what listens alone: tay never holds such a port itself, Docker does. *Not built yet: today such a port fails its unit for an ordinary user.* A connection that a stopped program left closing holds nothing, so a unit started again finds its number free.
+- A number is free when no program listens on it, on any address of the machine. A number an ordinary user may not take, as one below 1024 on Linux, is judged by the system's tables of what listens alone: tay never holds such a port itself, Docker does. A connection that a stopped program left closing holds nothing, so a unit started again finds its number free.
 - A kept port is the environment's own for as long as a unit of the environment that uses it runs, whatever the change being made: `tay restart` of another unit, `tay run`, and the bring-up after a `tay wipe` never choose a new number for it.
 - If a kept port turns out to be taken, by something that is not this environment, when the stack comes up: a `fixed` port fails its unit and names the holder as well as tay can; any other port is chosen again, and `tay up` says so.
 
