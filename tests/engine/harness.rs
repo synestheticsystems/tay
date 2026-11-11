@@ -7,7 +7,7 @@
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdout, Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
@@ -134,14 +134,33 @@ impl Machine {
     }
 
     /// `command`, a command of this machine, started, with its standard
-    /// output read a line at a time.
+    /// output read a line at a time. Both its outputs are read as they
+    /// come, whether or not the test reads them yet: on a machine short of
+    /// memory for pipes, a pipe holds only a few hundred bytes, and a
+    /// command that fills one waits until it is read.
     pub fn follow(&self, mut command: Command) -> Following {
         command.stdout(Stdio::piped()).stderr(Stdio::piped());
         let mut child = command.spawn().expect("the tay binary runs");
         let stdout = BufReader::new(child.stdout.take().unwrap());
+        let (said, lines) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            for line in stdout.lines() {
+                let Ok(line) = line else { return };
+                if said.send(line).is_err() {
+                    return;
+                }
+            }
+        });
+        let mut stderr = child.stderr.take().unwrap();
+        let stderr = std::thread::spawn(move || {
+            let mut written = String::new();
+            let _ = std::io::Read::read_to_string(&mut stderr, &mut written);
+            written
+        });
         Following {
             child,
-            stdout,
+            lines,
+            stderr,
             read: String::new(),
         }
     }
@@ -410,8 +429,11 @@ fn wait_for(child: &mut Child, limit: Duration) {
 /// A command under way, read as it prints.
 pub struct Following {
     child: Child,
-    stdout: BufReader<ChildStdout>,
-    /// What it has printed so far.
+    /// Each line it prints, as it prints it.
+    lines: std::sync::mpsc::Receiver<String>,
+    /// All it writes on its standard error, once it has ended.
+    stderr: std::thread::JoinHandle<String>,
+    /// What the test has read of what it printed so far.
     pub read: String,
 }
 
@@ -419,14 +441,14 @@ impl Following {
     /// Reads what it prints until a line contains `text`.
     pub fn until(&mut self, text: &str) {
         loop {
-            let mut line = String::new();
-            let read = self.stdout.read_line(&mut line).unwrap();
-            assert!(
-                read > 0,
-                "the command ended before it printed `{text}`:\n{}",
-                self.read
-            );
+            let Ok(line) = self.lines.recv() else {
+                panic!(
+                    "the command ended before it printed `{text}`:\n{}",
+                    self.read
+                );
+            };
             self.read.push_str(&line);
+            self.read.push('\n');
             if line.contains(text) {
                 return;
             }
@@ -475,14 +497,15 @@ impl Following {
 
     /// Waits for it to end, and gives all it printed.
     pub fn finish(mut self) -> Run {
-        let mut rest = String::new();
-        std::io::Read::read_to_string(&mut self.stdout, &mut rest).unwrap();
-        self.read.push_str(&rest);
-        let output = self.child.wait_with_output().unwrap();
+        for line in self.lines.iter() {
+            self.read.push_str(&line);
+            self.read.push('\n');
+        }
+        let status = self.child.wait().unwrap();
         Run {
-            code: output.status.code().expect("tay exits with a code"),
+            code: status.code().expect("tay exits with a code"),
             stdout: self.read,
-            stderr: String::from_utf8(output.stderr).unwrap(),
+            stderr: self.stderr.join().unwrap(),
         }
     }
 }
