@@ -249,6 +249,32 @@ impl Units {
             .collect()
     }
 
+    /// The units that use the values of `unit`, directly or through units
+    /// that are made from them, as a process does that reads a port from a
+    /// file written with it. A unit that runs is where the chain stops:
+    /// what needs it holds nothing of `unit`'s.
+    pub fn users(&self, unit: &str) -> Vec<&str> {
+        let mut through = vec![unit];
+        let mut users: Vec<&str> = Vec::new();
+        while let Some(used) = through.pop() {
+            for known in &self.known {
+                let user = &known.planned;
+                if users.contains(&user.name.as_str())
+                    || !user.needs.iter().any(|need| need.unit == used)
+                {
+                    continue;
+                }
+                users.push(&user.name);
+                let made = (user.mechanism.as_ref())
+                    .is_some_and(|mechanism| matches!(mechanism.kind, UnitKind::Made));
+                if made {
+                    through.push(&user.name);
+                }
+            }
+        }
+        users
+    }
+
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = &Known> {
         self.known.iter()
     }

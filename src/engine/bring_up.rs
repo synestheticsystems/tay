@@ -26,7 +26,7 @@ use super::settled::{Settled, Standing};
 use super::started_from;
 use super::state::{State, UnitState};
 use super::supervisor::{Begin, Supervisor};
-use crate::module::{Exists, Made, Operations, Running, UnitKind};
+use crate::module::{Exists, Made, Operations, Running};
 use crate::plan::PlannedUnit;
 
 /// What bringing a plan up comes to for the units it was asked for, and
@@ -357,9 +357,11 @@ impl Bringing<'_> {
                     Err(why) => self.record(index, UnitState::new(State::Failed, why.to_string())),
                     Ok(Operations::Made(operations)) => {
                         self.record(index, UnitState::new(State::Starting, "making it"));
-                        started
-                            .made
-                            .push((index, operations, self.in_use(&planned.name)));
+                        started.made.push((
+                            index,
+                            operations,
+                            self.supervisor.in_use(&planned.name),
+                        ));
                     }
                     Ok(Operations::Running(running)) => {
                         self.supervisor.tend(&planned, running, Begin::Fresh, true);
@@ -410,36 +412,6 @@ impl Bringing<'_> {
                 self.record(index, UnitState::new(State::Failed, reason));
             }
         }
-    }
-
-    /// Whether a unit that runs and uses `unit`'s values runs now, directly
-    /// or through units that are made from them, as a process does that
-    /// reads a port from a file written with it. A unit that runs is where
-    /// the chain stops: what needs it holds nothing of `unit`'s.
-    fn in_use(&self, unit: &str) -> bool {
-        let made = |name: &str| {
-            self.units.iter().any(|planned| {
-                planned.name == name
-                    && planned
-                        .mechanism
-                        .as_ref()
-                        .is_some_and(|mechanism| matches!(mechanism.kind, UnitKind::Made))
-            })
-        };
-        let mut through = vec![unit.to_string()];
-        let mut users = Vec::new();
-        while let Some(used) = through.pop() {
-            for user in self.units.iter() {
-                if !user.needs.iter().any(|need| need.unit == used) || users.contains(&user.name) {
-                    continue;
-                }
-                users.push(user.name.clone());
-                if made(&user.name) {
-                    through.push(user.name.clone());
-                }
-            }
-        }
-        users.iter().any(|user| self.supervisor.is_tended(user))
     }
 
     /// Settles each unit that runs that has become ready or failed, or can

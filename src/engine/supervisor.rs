@@ -190,6 +190,17 @@ impl Supervisor {
             .is_some_and(UnitTask::is_live)
     }
 
+    /// Whether a unit of the environment that uses the values of `unit`, a
+    /// unit that is made, runs now, as [`Units::users`] finds them: any of
+    /// its units, whether or not the change under way touches it. What it
+    /// made, as a port held, may be held by that unit.
+    pub fn in_use(&self, unit: &str) -> bool {
+        let users: Vec<String> = (self.units().users(unit).into_iter())
+            .map(str::to_string)
+            .collect();
+        users.iter().any(|user| self.is_tended(user))
+    }
+
     /// Whether a task looks after any unit, planned or not.
     pub fn tends_any(&self) -> bool {
         self.tending

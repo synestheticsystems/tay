@@ -234,3 +234,24 @@ fn a_port_the_environments_own_process_holds_through_a_file_is_not_taken_from_it
     );
     assert_eq!(kept_ports(&root)["conf-port"], number);
 }
+
+#[test]
+fn a_change_that_brings_up_part_keeps_a_port_another_unit_of_the_environment_listens_on() {
+    let machine = Machine::new();
+    let root = machine.stack("held-ports");
+    let up = machine.at(&root, "up", &[]);
+    assert_eq!(up.code, 0, "{}{}", up.stdout, up.stderr);
+    let kept = number(&root, "shared-port");
+    // `client` uses the number, and does not need `server`, which listens
+    // on it and which neither change touches.
+    let restart = machine.at(&root, "restart", &["client"]);
+    assert_eq!(restart.code, 0, "{}{}", restart.stdout, restart.stderr);
+    assert_eq!(
+        restart.last_change("shared-port"),
+        format!("ready {kept}, kept")
+    );
+    let run = machine.at(&root, "run", &["show"]);
+    assert_eq!(run.code, 0, "{}{}", run.stdout, run.stderr);
+    assert_eq!(run.stdout, format!("{kept}\n"));
+    assert_eq!(number(&root, "shared-port"), kept);
+}

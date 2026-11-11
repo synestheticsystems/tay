@@ -1,0 +1,19 @@
+format: 1
+stack: held-ports
+up: [server, client]
+units:
+  shared-port: { uses: port }
+  server:
+    doc: Listens on the shared port.
+    uses: process
+    with: { command: [python3, "${environment.root}/listen.py", "${shared-port.number}"] }
+    ready: { log: listening, within: 1m }
+  client:
+    doc: Uses the shared port's number, and does not need the server.
+    uses: process
+    with: { command: [sleep, "3600"], env: { PORT: "${shared-port.number}" } }
+  show:
+    doc: Prints the shared port's number, and does nothing more.
+    action: true
+    uses: command
+    with: { run: [echo, "${shared-port.number}"] }
