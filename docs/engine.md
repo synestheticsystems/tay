@@ -294,7 +294,7 @@ A server has to bring its stack back after a reboot with no one logged in, resta
 - **If a daemon already runs** for the environment, started by a plain `tay up` in someone's session, `tay serve` asks it to exit, which leaves the stack running, and takes its place.
 - **Every other command works as always**, through the socket: `tay status`, `tay up` (which joins and returns when the stack is ready, so an install script can wait on it), `tay restart`, `tay logs`. Who may use them is decided by the socket's permissions: the account `tay serve` runs as.
 - **A newer tay.** A command newer than a daemon that is being served does not start a daemon of its own in the person's session. It asks the old one to exit, waits up to thirty seconds for the service manager to start the new one from the same path, and says so if that does not happen (exit code 5).
-- **It tells the service manager when it answers.** `tay serve` reports itself ready to systemd once its socket answers, so that `systemctl start` returns only then, and a `tay up` run right after it joins the bring-up instead of starting a daemon of its own. *Not built yet: today the unit is `Type=simple`, and a `tay up` run in the same instant can be cancelled.*
+- **It tells the service manager when it answers.** `tay serve` reports itself ready to systemd once its socket answers, so that `systemctl start` returns only then, and a `tay up` run right after it joins the bring-up instead of starting a daemon of its own.
 
 With systemd, the whole of it is:
 

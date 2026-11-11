@@ -1,7 +1,8 @@
 //! `tay serve`: the environment's daemon in the foreground, for a service
 //! manager. It brings up what the environment remembers being asked for,
-//! whatever was recorded of whether it is meant to be up, prints each
-//! change of state, and takes everything down when told to stop by
+//! whatever was recorded of whether it is meant to be up, tells a service
+//! manager that waits for it once it answers, prints each change of
+//! state, and takes everything down when told to stop by
 //! `SIGTERM` or `SIGINT`, or by `tay down` through its socket, exiting with
 //! 0. A hang-up does not stop it. Killed, it leaves the stack running, and
 //! the next daemon adopts it. It takes the place of a daemon that runs, and
@@ -10,7 +11,7 @@
 
 use std::fs;
 use std::io::Write;
-use std::os::unix::net::UnixStream;
+use std::os::unix::net::{UnixDatagram, UnixStream};
 use std::path::Path;
 use std::time::Duration;
 
@@ -53,6 +54,56 @@ fn assert_found_as_they_run(served: &Following) {
 
 fn intent(root: &Path) -> String {
     fs::read_to_string(root.join(".tay/state/intent")).unwrap()
+}
+
+#[test]
+fn it_tells_a_service_manager_that_waits_for_it_once_it_answers_and_not_before() {
+    let machine = Machine::new();
+    let root = machine.stack("waiting");
+    // A socket of the test's own stands in for systemd's.
+    let notify = machine.path("notify");
+    let systemd = UnixDatagram::bind(&notify).unwrap();
+    // While the machine's list is held, it cannot make the environment its
+    // own, let alone answer for it.
+    fs::create_dir_all(machine.path("state/tay")).unwrap();
+    let list = machine.hold_the_list();
+    let mut command = machine.command(&root, &["serve", "--root", root.to_str().unwrap()]);
+    command.env("NOTIFY_SOCKET", &notify);
+    let mut served = machine.follow(command);
+    let mut notice = [0; 64];
+    systemd
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    assert!(
+        systemd.recv(&mut notice).is_err(),
+        "a notice before it answers"
+    );
+    drop(list);
+    systemd.set_read_timeout(Some(ENDS)).unwrap();
+    let read = systemd.recv(&mut notice).expect("the notice comes");
+    assert_eq!(&notice[..read], b"READY=1");
+    // It answers already, where it wrote that it listens.
+    let socket = fs::read_to_string(root.join(".tay/daemon.socket")).unwrap();
+    let mut stream = UnixStream::connect(socket.trim_end()).unwrap();
+    write!(
+        stream,
+        "GET /v1/daemon HTTP/1.1\r\nHost: tay\r\nConnection: close\r\n\r\n"
+    )
+    .unwrap();
+    let mut answer = String::new();
+    std::io::Read::read_to_string(&mut stream, &mut answer).unwrap();
+    assert!(answer.starts_with("HTTP/1.1 200 OK\r\n"), "{answer}");
+    let about: serde_json::Value =
+        serde_json::from_str(answer.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    assert_eq!(about["pid"], served.pid());
+    served.until(": it took ");
+    // It is told once.
+    systemd
+        .set_read_timeout(Some(Duration::from_secs(1)))
+        .unwrap();
+    assert!(systemd.recv(&mut notice).is_err(), "a second notice");
+    served.signal(Signal::TERM);
+    assert_eq!(served.finish_within(ENDS).code, 0);
 }
 
 #[test]

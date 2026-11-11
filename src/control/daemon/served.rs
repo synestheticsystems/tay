@@ -1,9 +1,12 @@
 //! The daemon as `tay serve` runs it: in the foreground, for a service
 //! manager to start, restart and stop. Being started is being asked to be
 //! up, so it brings up what the environment remembers being asked for,
-//! whatever was recorded of whether it is meant to be up. Its journal is
-//! told each change of state for as long as it runs. Told to stop, it takes
-//! the environment down as `tay down` does.
+//! whatever was recorded of whether it is meant to be up, and tells a
+//! service manager that waits for it once it answers. Its journal is told
+//! each change of state for as long as it runs. Told to stop, it takes the
+//! environment down as `tay down` does.
+
+mod notify;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -14,7 +17,7 @@ use super::change::{Change, Kind};
 use super::down::Down;
 use super::{CannotStart, Daemon, Exiting, Journal, listen, log, start};
 use crate::control::client::Place;
-use crate::control::protocol::UpRequest;
+use crate::control::protocol::{Event, UpRequest};
 use crate::disk::{Asked, Layout};
 use crate::engine::Left;
 
@@ -47,9 +50,16 @@ pub async fn serve(
             return Err(why);
         }
     };
-    Arc::clone(&daemon).bring_up_served(home, journal);
-    // It answers from now on.
+    Arc::clone(&daemon).bring_up_served(home, Arc::clone(&journal));
+    // It answers from now on, and its bring-up is the change under way: a
+    // command that waited for it goes on, and a service manager that waits
+    // for it is told, so that a `tay up` run next joins that bring-up.
     drop(place.bootstrap);
+    if let Err(error) = notify::ready() {
+        let notice = format!("systemd cannot be told that the daemon answers: {error}");
+        log(&notice);
+        journal(Event::Notice { notice });
+    }
     // Told to stop while it started, it stops now.
     let stopping = tokio::spawn(stop_when_told(Arc::clone(&daemon), signals));
     let exiting = listen::listen(&daemon, listener, &place.daemon, &socket).await;

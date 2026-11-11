@@ -130,7 +130,12 @@ impl Machine {
     pub fn spawn(&self, root: &Path, command: &str, args: &[&str]) -> Following {
         let mut all = vec![command, "--root", root.to_str().unwrap()];
         all.extend(args);
-        let mut command = self.command(root, &all);
+        self.follow(self.command(root, &all))
+    }
+
+    /// `command`, a command of this machine, started, with its standard
+    /// output read a line at a time.
+    pub fn follow(&self, mut command: Command) -> Following {
         command.stdout(Stdio::piped()).stderr(Stdio::piped());
         let mut child = command.spawn().expect("the tay binary runs");
         let stdout = BufReader::new(child.stdout.take().unwrap());
