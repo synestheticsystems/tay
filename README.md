@@ -4,9 +4,89 @@ Topology Automation via YAML.
 
 tay brings a whole stack up from one command and then keeps telling the truth about it: what is building, what is ready, what failed and why. A stack is described as units (host processes, containers, one-off commands, ports, files, secrets) with the dependencies between them, in YAML kept in the project's own repository. tay runs many copies of a stack on one machine at once, one per folder, and the same definitions on a server.
 
+## A first stack
+
+Put this in an empty folder as `tay.yaml`:
+
+```yaml
+format: 1
+stack: hello
+up: [web]
+
+units:
+  cache:
+    doc: A Redis container, ready once it answers a ping.
+    uses: container
+    with:
+      image: redis:7-alpine
+    ready: { command: ["redis-cli", "ping"], within: 30s }
+
+  web-port:
+    doc: A free port on this machine, kept for this folder from then on.
+    uses: port
+
+  web:
+    doc: A web server on the host, started once the cache is ready.
+    uses: process
+    needs: [cache]
+    with:
+      command: ["python3", "-m", "http.server", "${web-port.number}", "--bind", "127.0.0.1"]
+    ready: { http: "http://127.0.0.1:${web-port.number}/", within: 30s }
+```
+
+Then, in that folder:
+
+```
+$ tay up
+  web-port  starting  making it
+  cache     starting  attempt 1, starting
+  web       waiting   for `cache`, `web-port`
+  web-port  ready     28470
+  web       waiting   for `cache`
+  cache     starting  attempt 1, waiting to be ready: command `redis-cli ping`
+  cache     ready     attempt 1, command `redis-cli ping` passes
+  web       starting  attempt 1, starting
+  web       starting  attempt 1, waiting to be ready: http http://127.0.0.1:28470/
+  web       ready     attempt 1, http http://127.0.0.1:28470/ passes
+tay up: everything asked for is ready.
+tay up: it took 0.5s.
+```
+
+`tay up` returns when everything asked for is ready, or when something can no longer become ready, and says which. What it started keeps running.
+
+| Command | What it does |
+|---|---|
+| `tay plan` | Checks the definitions and prints what would come up, in order, and why. Starts nothing |
+| `tay up` | Brings the stack up and returns when it is ready |
+| `tay status` | Each unit's state, checked now |
+| `tay logs web --follow` | What a unit wrote, with the time of each line |
+| `tay restart web` | Stops a unit and starts it again |
+| `tay down` | Stops everything. Ports, secrets, files and volumes are kept |
+| `tay wipe --all --yes` | Removes everything the folder's environment keeps |
+
+## What it is for
+
+- **One command from a fresh checkout.** Builds, containers, databases, set-up steps and the services that need them come up in the order they need each other, and a step that is already done is not done again.
+- **The truth about state.** Every unit is `waiting`, `starting`, `ready`, `unready`, `failed` or `stopped`, with the reason, and a failure names the unit, shows the last lines it wrote, and names what was waiting on it.
+- **Many environments on one machine.** Each folder that holds a stack is an environment of its own, with its own ports, secrets, containers, network and volumes, so two checkouts of one project run side by side.
+- **Strict definitions.** A mistake in the YAML is an error with its file, line and column, found by `tay plan` before anything starts. All of a stack's errors are reported in one run.
+- **Nothing lost when tay stops.** One daemon per environment starts on demand. If it dies, the stack keeps running, and the next command starts a daemon that finds everything again.
+- **Rebuild on save.** A unit that watches its sources is built again when one changes, and only what uses the result is restarted.
+- **The same definitions on a server.** A profile chooses what comes up and how: from source on a developer's machine, from images on a server, where `tay serve` runs under systemd.
+
+## Installing
+
+tay runs on macOS and Linux. Container units need Docker; nothing else does.
+
+```
+cargo install --git https://github.com/synestheticsystems/tay --locked
+```
+
+builds it from source, and needs Rust 1.93 or later.
+
 ## Status
 
-tay reads a stack's definitions and plans it: `tay plan` checks the definitions strictly, works out every value known before anything starts, and prints the units that would come up in an order they could start in. `tay up` brings a plan up through the environment's daemon: it makes ports, secrets and files, runs processes and commands on the host, each under a keeper that outlives the daemon, and runs containers, and commands in them, through Docker. `tay down`, `tay status`, `tay logs` and `tay ls` are built. The definitions are written as [docs/definition-format.md](docs/definition-format.md) describes, and the engine as [docs/engine.md](docs/engine.md) does.
+tay is young: version 0.1. It was written to replace a product's own development tool, and brings that product's stack of about a hundred units up on a developer's Mac and on a Linux server. Its two contracts are [docs/definition-format.md](docs/definition-format.md), what a stack's definitions may say, and [docs/engine.md](docs/engine.md), what tay does with them. A sentence in either that says something is not built yet means exactly that.
 
 ## Licence
 
