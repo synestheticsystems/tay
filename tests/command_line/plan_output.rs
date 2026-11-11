@@ -18,14 +18,16 @@ fn printed(args: &[&str]) -> String {
 /// The output expected, as this system prints it: the files are written
 /// as a Mac prints them, where a host process is at 127.0.0.1 from the
 /// host, and elsewhere it is where `${host.listen}` prints. The shop's host
-/// processes listen on these ports.
+/// processes listen on these ports. The files name no version of tay:
+/// where one writes `<this tay>`, the version under test is expected.
 fn expected(name: &str) -> String {
     let written = fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/expected")
             .join(name),
     )
-    .unwrap();
+    .unwrap()
+    .replace("<this tay>", env!("CARGO_PKG_VERSION"));
     ["api-port", "web-port"].iter().fold(written, |text, port| {
         text.replace(
             &format!("127.0.0.1:<port: {port}>"),
