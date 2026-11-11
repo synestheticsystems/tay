@@ -41,7 +41,7 @@ use crate::definition::read::THIS_TAY;
 use crate::diagnostic::Diagnostics;
 use crate::diagnostic::source::Sources;
 use crate::disk::{
-    self, Asked, Counts, DiskError, Environment, Identity, Intent, Layout, Lock, Machine,
+    self, Asked, Asking, Counts, DiskError, Environment, Identity, Intent, Layout, Lock, Machine,
     daemon_socket,
 };
 use crate::engine::{self, Left, Supervisor, Told, UnitState};
@@ -269,6 +269,7 @@ async fn found_again(supervisor: &Arc<Supervisor>) {
             return;
         }
     };
+    let asked = asked.asking(Asked::default());
     let options = options(asked, std::env::var_os("HOME").map(PathBuf::from));
     let planned = match planned(layout.root(), &options) {
         Ok(plan) => plan,
@@ -315,7 +316,7 @@ struct Unplanned {
 
 /// What the daemon plans with: `asked`, with the choices of whoever has
 /// `home`, and this machine's folder of shared folders.
-fn options(asked: Asked, home: Option<PathBuf>) -> Options {
+fn options(asked: Asking, home: Option<PathBuf>) -> Options {
     Options {
         asked,
         home,

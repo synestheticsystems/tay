@@ -149,6 +149,7 @@ impl Daemon {
                 return;
             }
         };
+        let remembered = remembered.asking(Asked::default());
         if let Some(plan) = self.plan(&change, options(remembered, wiping.home)).await {
             self.bring_up_plan(&change, plan).await;
         }

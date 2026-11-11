@@ -1,10 +1,12 @@
 //! `tay unset PLACE...`: forgets what the environment remembers being asked
 //! for in each place, so that the profile's or the stack's value holds
-//! again, or for `profile`, the remembered profile, so that the
-//! environment's file or the stack's default chooses it again; and touches
-//! no unit until the next `tay up`. A place with nothing
-//! remembered is an error, and nothing is forgotten. What is remembered is
-//! listed afterwards, as `tay set` lists it.
+//! again; for `profile`, the remembered profile, so that the environment's
+//! file or the stack's default chooses it again; and for `units`, the units
+//! named on an earlier `tay up`, so that what the choices list under `up`
+//! comes up again. It touches no unit until the next `tay up`, and does not
+//! plan, so it forgets a choice that no longer fits the stack. A place with
+//! nothing remembered is an error, and nothing is forgotten. What is
+//! remembered is listed afterwards, as `tay set` lists it.
 
 use crate::cli::Exit;
 use crate::cli::args::{Args, Takes, Words};
@@ -36,7 +38,7 @@ pub fn run(args: Args) -> Exit {
         return problem(
             COMMAND,
             Exit::Errors,
-            "name each place to forget, as `settings.NAME` or `profile`",
+            "name each place to forget, as `settings.NAME`, `profile` or `units`",
         );
     }
     let remembered = match Asked::read(&Layout::of(&root)) {

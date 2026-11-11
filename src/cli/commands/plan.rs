@@ -46,7 +46,7 @@ pub fn run(args: Args) -> Exit {
 }
 
 /// What a command that plans as `tay plan` does plans with: what the
-/// environment at `root` remembers being asked for, with the profile, the
+/// environment at `root` remembers being asked for, and the profile, the
 /// `--set`s and the units the command adds.
 pub fn options(
     root: &Path,
@@ -55,8 +55,13 @@ pub fn options(
     units: &[String],
 ) -> Result<Options, DiskError> {
     let remembered = Asked::read(&Layout::of(root))?;
+    let adds = Asked {
+        profile,
+        sets: sets.to_vec(),
+        units: units.to_vec(),
+    };
     Ok(Options {
-        asked: remembered.with(profile, sets, units),
+        asked: remembered.asking(adds),
         home: std::env::var_os("HOME").map(PathBuf::from),
         shared_folders: disk::shared_folders(),
         action: None,

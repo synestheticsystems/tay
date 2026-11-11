@@ -12,7 +12,7 @@ use std::path::PathBuf;
 
 use super::Machine;
 
-pub use asked::Asked;
+pub use asked::{Asked, Asking};
 pub use counts::{Count, Counts};
 pub use identity::{Id, Identity};
 pub use intent::Intent;

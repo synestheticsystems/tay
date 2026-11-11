@@ -15,7 +15,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 pub use environment::{
-    Asked, Count, Counts, Environment, Id, Identity, Intent, Layout, daemon_socket,
+    Asked, Asking, Count, Counts, Environment, Id, Identity, Intent, Layout, daemon_socket,
 };
 pub use lock::Lock;
 pub use machine::{List, Listed, Machine, shared_folder, shared_folders, socket_fits};

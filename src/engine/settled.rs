@@ -153,7 +153,7 @@ mod tests {
             format!("format: 1\nstack: settling\nup: [web, notice, search]\nunits:\n{units}");
         std::fs::write(root.path().join("tay.yaml"), stack).unwrap();
         let options = Options {
-            asked: crate::disk::Asked::default(),
+            asked: crate::disk::Asking::default(),
             home: None,
             shared_folders: None,
             action: None,

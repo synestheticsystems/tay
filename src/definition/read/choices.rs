@@ -5,6 +5,7 @@
 use crate::definition::{Choices, EnvironmentFile, Profile, SettingValue, Written};
 use crate::diagnostic::Diagnostics;
 use crate::diagnostic::source::{Loc, Sources};
+use crate::disk::{Asked, Asking};
 use crate::syntax::fields::{self, Fields};
 use crate::syntax::names::{self, NameAt};
 use crate::syntax::yaml::Node;
@@ -175,19 +176,54 @@ fn label(node: &Node, d: &mut Diagnostics) -> Option<String> {
     Some(text.to_string())
 }
 
+/// Whose a choice made on a command line is: the command at hand's, or an
+/// earlier command's, which the environment remembers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Origin {
+    ThisCommand,
+    /// A person may not know of a remembered choice, so an error in one
+    /// says that it is remembered, and what forgets it.
+    Remembered,
+}
+
+impl Origin {
+    /// Where a choice written on a command line as `written` is, in errors:
+    /// on this command, there; on an earlier one, remembered, with
+    /// `forgotten_by` saying how to forget it.
+    pub fn place(self, written: &str, forgotten_by: &str, sources: &mut Sources) -> Loc {
+        let source = match self {
+            Origin::ThisCommand => sources.add_argument(written),
+            Origin::Remembered => sources.add_remembered(written, forgotten_by),
+        };
+        Loc::new(source, 1, 1)
+    }
+}
+
+/// What `asked` holds, each part with whose it is, in the order the parts
+/// are layered: what the environment remembers, then what this command
+/// adds, which replaces it place by place.
+pub fn command_lines(asked: &Asking) -> [(&Asked, Origin); 2] {
+    [
+        (&asked.remembered, Origin::Remembered),
+        (&asked.adds, Origin::ThisCommand),
+    ]
+}
+
 /// The units `tay up` names, as a place of choices that gives `up`; `None`
 /// when it names none.
 pub fn named_units(
     units: &[String],
+    origin: Origin,
     sources: &mut Sources,
     d: &mut Diagnostics,
 ) -> Option<Choices> {
     if units.is_empty() {
         return None;
     }
+    let forgotten_by = format!("`tay unset {}` forgets the units named then", Asked::UNITS);
     let mut up = Vec::new();
     for unit in units {
-        let loc = Loc::new(sources.add_argument(&format!("tay up {unit}")), 1, 1);
+        let loc = origin.place(&format!("tay up {unit}"), &forgotten_by, sources);
         match names::name_problem(unit) {
             None => up.push(NameAt {
                 name: unit.clone(),
@@ -206,9 +242,15 @@ pub fn named_units(
 /// The place is a path in the shape the files use: `up`, `up_add`,
 /// `up_remove`, `run.default`, `run.units.UNIT`, `settings.NAME` or
 /// `label`; lists are written with commas.
-pub fn assignment(argument: &str, sources: &mut Sources, d: &mut Diagnostics) -> Option<Choices> {
+pub fn assignment(
+    argument: &str,
+    origin: Origin,
+    sources: &mut Sources,
+    d: &mut Diagnostics,
+) -> Option<Choices> {
     let (place, value) = argument.split_once('=').unwrap_or((argument, ""));
-    let loc = Loc::new(sources.add_argument(&format!("--set {place}")), 1, 1);
+    let forgotten_by = format!("`tay unset {place}` forgets it");
+    let loc = origin.place(&format!("--set {place}"), &forgotten_by, sources);
     if !argument.contains('=') {
         d.error(loc, "`--set` is written PLACE=VALUE");
         return None;
@@ -276,7 +318,7 @@ mod tests {
     fn set(argument: &str) -> (Option<Choices>, Vec<String>) {
         let mut sources = Sources::default();
         let mut d = Diagnostics::default();
-        let choices = assignment(argument, &mut sources, &mut d);
+        let choices = assignment(argument, Origin::ThisCommand, &mut sources, &mut d);
         let errors = d.into_sorted().iter().map(|e| e.render(&sources)).collect();
         (choices, errors)
     }

@@ -32,7 +32,7 @@ impl Daemon {
     pub async fn run_action(self: Arc<Self>, change: Arc<Change>, request: RunRequest) {
         log(&format!("change: {}", change.describe()));
         let remembered = match Asked::read(&self.environment.layout) {
-            Ok(remembered) => remembered,
+            Ok(remembered) => remembered.asking(Asked::default()),
             Err(error) => {
                 self.fail(&change, &error.to_string());
                 return;

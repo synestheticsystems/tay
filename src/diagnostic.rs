@@ -5,7 +5,7 @@
 
 pub mod source;
 
-use source::{Loc, Sources};
+use source::{Loc, Source, Sources};
 
 /// One error: where it is, what is wrong, and the other places involved.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -43,15 +43,37 @@ impl Diagnostic {
     /// The error as a person reads it: `file:line:column: what is wrong`, then
     /// one indented line for each other place involved.
     pub fn render(&self, sources: &Sources) -> String {
-        let mut text = format!("{}: {}", self.loc.render(sources), self.message);
+        let mut text = format!("{}: {}", self.loc.render(sources), self.told(sources));
         for related in &self.related {
             text.push_str(&format!(
                 "\n  {}: {}",
                 related.loc.render(sources),
-                related.message
+                related.told(sources)
             ));
         }
         text
+    }
+
+    /// What is wrong, as a person is told it: the message, ending, where
+    /// its place is a choice the environment remembers, with what forgets
+    /// it.
+    pub fn told(&self, sources: &Sources) -> String {
+        told(&self.message, self.loc, sources)
+    }
+}
+
+impl Related {
+    /// What this place has to do with the error, as [`Diagnostic::told`]
+    /// tells a message.
+    pub fn told(&self, sources: &Sources) -> String {
+        told(&self.message, self.loc, sources)
+    }
+}
+
+fn told(message: &str, loc: Loc, sources: &Sources) -> String {
+    match sources.get(loc.source) {
+        Source::Remembered { forgotten_by, .. } => format!("{message}; {forgotten_by}"),
+        Source::File { .. } | Source::Argument { .. } => message.to_string(),
     }
 }
 
@@ -111,5 +133,34 @@ impl Diagnostics {
             }
         }
         merged
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_remembered_place_is_said_to_be_remembered_and_what_forgets_it_ends_its_message() {
+        let mut sources = Sources::default();
+        let typed = Loc::new(sources.add_argument("--set up"), 1, 1);
+        let forgotten_by = "`tay unset settings.old` forgets it";
+        let remembered = Loc::new(
+            sources.add_remembered("--set settings.old", forgotten_by),
+            1,
+            1,
+        );
+        let error = Diagnostic::new(remembered, "no setting `old` is declared")
+            .with(typed, "`up` is set here");
+        assert_eq!(
+            error.render(&sources),
+            "remembered `--set settings.old`: no setting `old` is declared; `tay unset settings.old` forgets it\n  --set up: `up` is set here"
+        );
+        let error =
+            Diagnostic::new(typed, "there is no unit `gone`").with(remembered, "it was set here");
+        assert_eq!(
+            error.render(&sources),
+            "--set up: there is no unit `gone`\n  remembered `--set settings.old`: it was set here; `tay unset settings.old` forgets it"
+        );
     }
 }

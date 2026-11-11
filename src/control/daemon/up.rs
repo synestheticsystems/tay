@@ -22,18 +22,19 @@ impl Daemon {
         // so that a daemon started after this one dies finds its units
         // again, and every later command sees the same stack.
         let layout = &self.environment.layout;
-        let asked = match Asked::read(layout) {
-            Ok(remembered) => request.joined(remembered),
+        let asking = match Asked::read(layout) {
+            Ok(remembered) => request.asking(remembered),
             Err(error) => {
                 self.fail(&change, &error.to_string());
                 return;
             }
         };
+        let asked = asking.clone().joined();
         if let Err(error) = Intent::Up.write(layout).and_then(|()| asked.write(layout)) {
             self.fail(&change, &error.to_string());
             return;
         }
-        let options = options(asked, request.home);
+        let options = options(asking, request.home);
         if let Some(plan) = self.plan(&change, options).await {
             self.bring_up_plan(&change, plan).await;
         }

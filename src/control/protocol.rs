@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::disk::{Asked, DiskError, Layout};
+use crate::disk::{Asked, Asking, DiskError, Layout};
 use crate::engine::{Decision, Left, State, Took};
 use crate::plan::ActionRun;
 
@@ -72,11 +72,11 @@ pub struct UpRequest {
 }
 
 impl UpRequest {
-    /// What is asked once this request is joined with what is
-    /// `remembered`.
-    pub fn joined(&self, remembered: Asked) -> Asked {
-        let adds = &self.adds;
-        remembered.with(adds.profile.clone(), &adds.sets, &adds.units)
+    /// What the daemon plans with once it takes this request: what is
+    /// `remembered` that the request leaves in force, and what the request
+    /// adds, kept apart.
+    pub fn asking(&self, remembered: Asked) -> Asking {
+        remembered.asking(self.adds.clone())
     }
 }
 
@@ -93,7 +93,8 @@ pub enum Remember {
         profile: Option<String>,
         sets: Vec<String>,
     },
-    /// `tay unset`: what is remembered for each place is forgotten.
+    /// `tay unset`: what is remembered for each place is forgotten, the
+    /// units named on an earlier `tay up` among them.
     Unset { places: Vec<String> },
 }
 

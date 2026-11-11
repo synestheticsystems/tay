@@ -8,6 +8,8 @@
 //! with what is remembered when it takes the change, so a `tay set` made
 //! meanwhile is not lost.
 
+mod forgetting;
+
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::fs::PermissionsExt;

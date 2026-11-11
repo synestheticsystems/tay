@@ -36,10 +36,10 @@ pub fn errors(outcome: &str, errors: &[Diagnostic], sources: &Sources) -> Value 
         "outcome": outcome,
         "errors": errors.iter().map(|error| json!({
             "at": at(error.loc, sources),
-            "message": error.message,
+            "message": error.told(sources),
             "related": error.related.iter().map(|related| json!({
                 "at": at(related.loc, sources),
-                "message": related.message,
+                "message": related.told(sources),
             })).collect::<Vec<_>>(),
         })).collect::<Vec<_>>(),
     })
@@ -60,7 +60,9 @@ fn at(loc: Loc, sources: &Sources) -> Value {
         Source::File { shown, .. } => {
             json!({ "file": shown, "line": loc.line, "column": loc.column })
         }
-        Source::Argument { shown } => json!({ "argument": shown }),
+        Source::Argument { .. } | Source::Remembered { .. } => {
+            json!({ "argument": loc.render(sources) })
+        }
     }
 }
 

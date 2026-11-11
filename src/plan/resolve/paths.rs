@@ -17,7 +17,7 @@ impl Resolver<'_> {
         let root = PathBuf::from(&self.environment.root);
         let folder = match value.written_in.map(|source| self.sources.get(source)) {
             Some(Source::File { path, .. }) => path.parent().map(Path::to_path_buf),
-            Some(Source::Argument { .. }) | None => None,
+            Some(Source::Argument { .. } | Source::Remembered { .. }) | None => None,
         };
         let Value::Text(bits) = &mut value.value else {
             return value;

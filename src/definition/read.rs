@@ -14,12 +14,13 @@ use std::path::Path;
 use crate::definition::{Choices, EnvironmentFile, Places, Profile, Stack, Unit};
 use crate::diagnostic::source::{Loc, Sources};
 use crate::diagnostic::{Diagnostic, Diagnostics, quoted_list};
-use crate::disk::{Asked, Layout};
+use crate::disk::{Asking, Layout};
 use crate::syntax::fields::{self, Fields};
 use crate::syntax::names::{self, NameAt, RESERVED_UNIT_NAMES};
 
 use files::Reader;
 
+pub use choices::{Origin, command_lines};
 use choices::{assignment, named_units};
 pub use files::discover::{STACK_FILE, find_root};
 pub use version::{THIS_TAY, parse_version};
@@ -124,13 +125,14 @@ pub fn environment_file(
 /// order they are layered: this person's own file in `home`, read unless
 /// the profile is a production one, the environment's choices, each `--set`
 /// that is asked, what the environment remembers first, and the units
-/// named. Gives whether every file read parsed.
+/// named, by this command or, remembered, by an earlier one. Gives whether
+/// every file read parsed.
 pub fn places<'s>(
     stack: &'s Stack,
     profile: Option<&'s Profile>,
     home: Option<&Path>,
     environment: Option<Choices>,
-    asked: &Asked,
+    asked: &Asking,
     sources: &mut Sources,
     d: &mut Diagnostics,
 ) -> (Places<'s>, bool) {
@@ -145,12 +147,17 @@ pub fn places<'s>(
         _ => None,
     };
     let every_file_parsed = reader.every_file_parsed;
-    let sets = asked
-        .sets
-        .iter()
-        .filter_map(|set| assignment(set, sources, d))
+    let sets = command_lines(asked)
+        .into_iter()
+        .flat_map(|(asked, origin)| asked.sets.iter().map(move |set| (set, origin)))
+        .filter_map(|(set, origin)| assignment(set, origin, sources, d))
         .collect();
-    let named = named_units(&asked.units, sources, d);
+    // Units this command names replace the ones remembered, so at most one
+    // of the two names any.
+    let named = command_lines(asked)
+        .into_iter()
+        .filter_map(|(asked, origin)| named_units(&asked.units, origin, sources, d))
+        .last();
     let places = Places {
         defaults: &stack.defaults,
         profile,

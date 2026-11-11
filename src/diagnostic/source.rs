@@ -15,6 +15,14 @@ pub enum Source {
     /// A command-line argument, kept as it is shown in errors: a `--set` is
     /// shown by its key only, since its value may be a secret.
     Argument { shown: String },
+    /// An argument of an earlier command that the environment remembers:
+    /// as that command wrote it, a `--set` by its key only, and what forgets
+    /// it. The person did not write it on this command, and may not know
+    /// that it is remembered at all.
+    Remembered {
+        written: String,
+        forgotten_by: String,
+    },
 }
 
 /// Every source read in one run. Errors refer to sources by [`SourceId`].
@@ -40,6 +48,16 @@ impl Sources {
     pub fn add_argument(&mut self, shown: &str) -> SourceId {
         self.push(Source::Argument {
             shown: shown.to_string(),
+        })
+    }
+
+    /// Registers an argument of an earlier command that the environment
+    /// remembers: `written` as that command wrote it, and `forgotten_by`,
+    /// what a message about it ends with, saying how to forget it.
+    pub fn add_remembered(&mut self, written: &str, forgotten_by: &str) -> SourceId {
+        self.push(Source::Remembered {
+            written: written.to_string(),
+            forgotten_by: forgotten_by.to_string(),
         })
     }
 
@@ -80,11 +98,13 @@ impl Loc {
         }
     }
 
-    /// Writes `file:line:column`, or the argument as it is shown.
+    /// Writes `file:line:column`, or the argument as it is shown, or a
+    /// remembered one as remembered.
     pub fn render(&self, sources: &Sources) -> String {
         match sources.get(self.source) {
             Source::File { shown, .. } => format!("{shown}:{}:{}", self.line, self.column),
             Source::Argument { shown } => shown.clone(),
+            Source::Remembered { written, .. } => format!("remembered `{written}`"),
         }
     }
 }

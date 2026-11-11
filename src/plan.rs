@@ -15,11 +15,11 @@ mod resolve;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::definition::read;
+use crate::definition::read::{self, Origin};
 use crate::definition::{Profile, Stack};
 use crate::diagnostic::source::{Loc, Sources};
 use crate::diagnostic::{Diagnostic, Diagnostics};
-use crate::disk::Asked;
+use crate::disk::{Asked, Asking};
 use crate::module::HOST_LISTEN_BEFORE_START;
 use crate::syntax::expr::Expr;
 use crate::syntax::names::NameAt;
@@ -39,8 +39,8 @@ use resolve::{EnvironmentFacts, Resolver};
 pub struct Options {
     /// The profile, each `--set` in the order it applies, and the units
     /// named in place of `up`: what the environment remembers being asked
-    /// for, with what this command adds.
-    pub asked: Asked,
+    /// for, and what this command adds, kept apart.
+    pub asked: Asking,
     /// The home folder, where this person's own file of choices is.
     pub home: Option<PathBuf>,
     /// The folder that holds each stack's shared folder, when it is known.
@@ -83,7 +83,11 @@ pub fn plan(root: &Path, options: &Options, sources: &mut Sources, d: &mut Diagn
         Some(file) => (file.profile, Some(file.choices)),
         None => (None, None),
     };
-    let asked_profile = options.asked.profile.as_deref();
+    // The profile this command names replaces the one remembered.
+    let asked_profile = read::command_lines(&options.asked)
+        .into_iter()
+        .rev()
+        .find_map(|(asked, origin)| Some((asked.profile.as_deref()?, origin)));
     let profile = choose_profile(&stack, asked_profile, written_profile.as_ref(), sources, d)
         .map(|(profile, _)| profile);
     let production = profile.and_then(|profile| profile.production);
@@ -238,27 +242,29 @@ pub enum ChosenBy {
     StackDefault,
 }
 
-/// The profile a plan of `stack` is made with when `asked` is the profile
-/// asked for, now or remembered, and what chose it, as `tay status` names
-/// it; `None` when the stack has no profile to choose, or the one chosen
-/// is none of its profiles, which planning reports.
+/// The profile a plan of `stack` is made with when `remembered` is the
+/// profile the environment remembers being asked for, and what chose it,
+/// as `tay status` names it; `None` when the stack has no profile to
+/// choose, or the one chosen is none of its profiles, which planning
+/// reports.
 pub fn profile_in_force<'s>(
     stack: &'s Stack,
-    asked: Option<&str>,
+    remembered: Option<&str>,
 ) -> Option<(&'s Profile, ChosenBy)> {
     let mut sources = Sources::default();
     let mut d = Diagnostics::default();
     let (file, _) = read::environment_file(stack, &mut sources, &mut d);
     let written = file.and_then(|file| file.profile);
+    let asked = remembered.map(|name| (name, Origin::Remembered));
     choose_profile(stack, asked, written.as_ref(), &mut sources, &mut d)
 }
 
-/// `--profile`, now or remembered, or the profile this environment's file
-/// names, or the stack's default profile, or its only one, with which of
-/// these chose it.
+/// `--profile`, now or remembered, as `asked` says, or the profile this
+/// environment's file names, or the stack's default profile, or its only
+/// one, with which of these chose it.
 fn choose_profile<'s>(
     stack: &'s Stack,
-    asked: Option<&str>,
+    asked: Option<(&str, Origin)>,
     written: Option<&NameAt>,
     sources: &mut Sources,
     d: &mut Diagnostics,
@@ -280,10 +286,11 @@ fn choose_profile<'s>(
         profile
     });
     let (profile, by) = match (asked, written, &stack.default_profile) {
-        (Some(asked), _, _) => {
+        (Some((asked, origin)), _, _) => {
             let profile = find(asked);
             if profile.is_none() {
-                let loc = Loc::new(sources.add_argument(&format!("--profile {asked}")), 1, 1);
+                let forgotten_by = format!("`tay unset {}` forgets it", Asked::PROFILE);
+                let loc = origin.place(&format!("--profile {asked}"), &forgotten_by, sources);
                 d.error(loc, none_called(asked));
             }
             (profile, ChosenBy::CommandLine)
@@ -307,9 +314,12 @@ mod tests {
         let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
         let root = fixtures.join(name).canonicalize().unwrap();
         let options = Options {
-            asked: Asked {
-                sets: sets.iter().map(|set| set.to_string()).collect(),
-                ..Asked::default()
+            asked: Asking {
+                adds: Asked {
+                    sets: sets.iter().map(|set| set.to_string()).collect(),
+                    ..Asked::default()
+                },
+                ..Asking::default()
             },
             home: Some(fixtures.join("homes/none")),
             shared_folders: Some(fixtures.join("homes/none/.local/share/tay")),
