@@ -3,11 +3,12 @@
 //! secrets with the secrets, and the units it needed. At a `tay up` whose
 //! plan no longer has it, its `undo` runs with what it last ran with, once
 //! the units it needed that the plan has are ready, and before anything
-//! else the plan no longer has is stopped; then it is forgotten. One that
-//! fails, or cannot run because a unit it needed is neither up nor in the
-//! plan, is said, `tay up` exits with 1, and it is kept and tried again at
-//! the next `tay up`; `tay status` lists it with why while it waits.
-//! `tay wipe --all` runs none.
+//! else the plan no longer has is stopped; then it is forgotten. A unit it
+//! needed that is neither up nor in the plan is not waited for: the `undo`
+//! runs without it and says so. One that fails is said, `tay up` exits
+//! with 1, and it is kept and tried again at the next `tay up`;
+//! `tay status` lists it with why while it waits. `tay wipe --all` runs
+//! none.
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -18,9 +19,10 @@ use crate::harness::Machine;
 /// What `made` has once its `undo` has run.
 const UNDONE: &str = "stopped it is not in the plan any more, and its `undo` has run";
 
-/// What `made` has when its `undo` cannot run, `holder` having left the
-/// plan and stopped.
-const CANNOT: &str = "failed it is not in the plan any more, and its `undo` cannot run: it needed `holder`, which is neither up nor in the plan any more; the next `tay up` tries it again";
+/// What is said of an `undo` of `made` that runs once `holder` has left
+/// the plan and stopped.
+const WITHOUT: &str =
+    " without `holder`, which it needed and which is neither up nor in the plan any more";
 
 /// The stack `undoing`, brought up, with `made` done.
 fn brought_up(machine: &Machine) -> PathBuf {
@@ -93,6 +95,7 @@ fn failed_in_status(machine: &Machine, root: &Path, unit: &str) -> String {
 fn an_undo_that_fails_is_said_kept_and_tried_again_at_the_next_up() {
     let machine = Machine::new();
     let root = brought_up(&machine);
+    let token = token(&root);
     fs::write(root.join("refuse"), "").unwrap();
     let up = machine.at(&root, "up", &["--set", "up=token"]);
     assert_eq!(up.code, 1, "{}{}", up.stdout, up.stderr);
@@ -119,20 +122,17 @@ fn an_undo_that_fails_is_said_kept_and_tried_again_at_the_next_up() {
     assert!(root.join("made").exists());
     assert!(root.join(".tay/state/units/made/undo.json").exists());
     // `holder` was stopped once the `undo` had come to its end, so the
-    // next `tay up` finds it neither up nor in the plan.
+    // next `tay up` runs it without `holder`.
     fs::remove_file(root.join("refuse")).unwrap();
     let again = machine.at(&root, "up", &[]);
-    assert_eq!(again.code, 1, "{}{}", again.stdout, again.stderr);
-    assert_eq!(again.last_change("made"), CANNOT);
-    assert!(root.join("made").exists());
-    let holder_back = machine.at(&root, "up", &["--set", "up=token,holder"]);
+    assert_eq!(again.code, 0, "{}{}", again.stdout, again.stderr);
+    assert_eq!(again.last_change("made"), UNDONE);
     assert_eq!(
-        holder_back.code, 0,
-        "{}{}",
-        holder_back.stdout, holder_back.stderr
+        fs::read_to_string(root.join("undone")).unwrap(),
+        format!("one {token} stopped\n")
     );
-    assert_eq!(holder_back.last_change("made"), UNDONE);
     assert!(!root.join("made").exists());
+    assert!(!root.join(".tay/state/units/made").exists());
 }
 
 #[test]
@@ -166,23 +166,51 @@ fn an_undo_on_an_environment_that_was_down_waits_for_the_units_it_needed() {
 }
 
 #[test]
-fn an_undo_that_needed_a_unit_neither_up_nor_in_the_plan_cannot_run_and_is_kept() {
+fn an_undo_runs_without_a_unit_it_needed_that_is_neither_up_nor_in_the_plan() {
+    let machine = Machine::new();
+    let root = brought_up(&machine);
+    let token = token(&root);
+    let down = machine.at(&root, "down", &[]);
+    assert_eq!(down.code, 0, "{}{}", down.stdout, down.stderr);
+    // `made` and `holder` leave the plan together, on an environment that
+    // is down: nothing would bring `holder` up for the `undo` to wait for.
+    let up = machine.at(&root, "up", &["--set", "up=token"]);
+    assert_eq!(up.code, 0, "{}{}", up.stdout, up.stderr);
+    let runs = format!("made starting it is not in the plan any more, so its `undo` runs{WITHOUT}");
+    assert!(up.changes().contains(&runs), "{}", up.stdout);
+    assert_eq!(up.last_change("made"), UNDONE);
+    assert_eq!(
+        fs::read_to_string(root.join("undone")).unwrap(),
+        format!("one {token} stopped\n")
+    );
+    assert!(!root.join("made").exists());
+    assert!(!root.join(".tay/state/units/made").exists());
+}
+
+#[test]
+fn an_undo_that_fails_without_a_unit_it_needed_says_so_and_is_kept() {
     let machine = Machine::new();
     let root = brought_up(&machine);
     let down = machine.at(&root, "down", &[]);
     assert_eq!(down.code, 0, "{}{}", down.stdout, down.stderr);
+    fs::write(root.join("refuse"), "").unwrap();
     let up = machine.at(&root, "up", &["--set", "up=token"]);
     assert_eq!(up.code, 1, "{}{}", up.stdout, up.stderr);
-    assert_eq!(up.last_change("made"), CANNOT);
+    let failed = up.last_change("made");
+    assert!(
+        failed.starts_with("failed it is not in the plan any more, and its `undo` exited with 1"),
+        "{failed}"
+    );
+    let ending = format!(", having run{WITHOUT}; the next `tay up` tries it again");
+    assert!(failed.ends_with(&ending), "{failed}");
     assert!(root.join("made").exists());
-    assert!(!root.join("undone").exists());
     assert!(root.join(".tay/state/units/made/undo.json").exists());
     // `tay status` says why it waits, whether a daemon runs or not.
-    assert_eq!(failed_in_status(&machine, &root, "made"), CANNOT);
+    assert_eq!(failed_in_status(&machine, &root, "made"), failed);
     let down = machine.at(&root, "down", &[]);
     assert_eq!(down.code, 0, "{}{}", down.stdout, down.stderr);
     assert_eq!(machine.daemon(&root), None);
-    assert_eq!(failed_in_status(&machine, &root, "made"), CANNOT);
+    assert_eq!(failed_in_status(&machine, &root, "made"), failed);
 }
 
 #[test]

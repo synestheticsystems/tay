@@ -2,15 +2,17 @@
 //! that keeps an `undo` to run, as a command done with `when_removed: undo`
 //! does, has it run once the units that run that it needed and that the
 //! plan has are ready, while those it needed that the plan no longer has
-//! are still up, one unit after another, the last kept first; then the unit
-//! is forgotten. One whose `undo` fails, or cannot run because a unit it
-//! needed has failed or is neither up nor in the plan any more, is said so,
-//! with why noted for `tay status`, and its `undo` is kept and tried again
-//! at the next `tay up`, which fails. Once every `undo` has come to its
-//! end, what runs of the units the plan no longer has is stopped. Until
-//! then only the units the `undo`s wait for start, with what those need in
-//! turn, so that nothing else the plan brings up meets what the plan no
-//! longer has.
+//! and that are up are still up, one unit after another, the last kept
+//! first; then the unit is forgotten. A unit it needed that the plan no
+//! longer has and that is not up is not waited for, as nothing would bring
+//! it up: the `undo` runs without it, and says so. One whose `undo` fails,
+//! or cannot run because a unit it needed that the plan has has failed, is
+//! said so, with why noted for `tay status`, and its `undo` is kept and
+//! tried again at the next `tay up`, which fails. Once every `undo` has
+//! come to its end, what runs of the units the plan no longer has is
+//! stopped. Until then only the units the `undo`s wait for start, with
+//! what those need in turn, so that nothing else the plan brings up meets
+//! what the plan no longer has.
 
 use std::collections::{HashSet, VecDeque};
 use std::future::Future;
@@ -129,8 +131,9 @@ pub type Step = Pin<Box<dyn Future<Output = Option<NotUndone>> + Send>>;
 
 /// How the next `undo` owed stands.
 enum Judged {
-    /// It runs now.
-    Runs,
+    /// It runs now, without these units it needed, which the plan no
+    /// longer has and which are not up.
+    Runs(Vec<String>),
     /// It waits for these units of the plan.
     Waits(Vec<String>),
     /// It cannot run, as this says.
@@ -187,9 +190,10 @@ impl Leaving {
         }
         while let Some(owed) = self.owed.pop_front() {
             match self.judged(supervisor, settled, &owed) {
-                Judged::Runs => {
+                Judged::Runs(without) => {
                     self.waiting_said = false;
-                    return Some(Box::pin(undo(Arc::clone(supervisor), owed.unit)));
+                    let undo = undo(Arc::clone(supervisor), owed.unit, without);
+                    return Some(Box::pin(undo));
                 }
                 Judged::Waits(waiting) => {
                     if !self.waiting_said {
@@ -243,24 +247,43 @@ impl Leaving {
                 return Judged::Cannot(format!("its `undo` cannot run: {}", have_failed(&failed)));
             }
         }
-        let down = elsewhere
+        let without = elsewhere
             .into_iter()
-            .find(|need| (supervisor.state(need)).is_none_or(|state| state.state != State::Ready));
-        match down {
-            None => Judged::Runs,
-            Some(down) => Judged::Cannot(format!(
-                "its `undo` cannot run: it needed `{down}`, which is neither up nor in the plan any more"
-            )),
-        }
+            .filter(|need| (supervisor.state(need)).is_none_or(|state| state.state != State::Ready))
+            .cloned()
+            .collect();
+        Judged::Runs(without)
     }
 }
 
-/// Runs the `undo` `unit` keeps, saying what came of it; once it has run,
-/// the unit is forgotten. What of the unit still runs, as of a command that
-/// was running when it left the plan, is stopped first, so that nothing of
-/// it goes on after its work is undone. How it did not run, when it did
-/// not.
-async fn undo(supervisor: Arc<Supervisor>, unit: String) -> Option<NotUndone> {
+/// What is said of an `undo` that runs without `without`, the units it
+/// needed that are neither up nor in the plan any more; nothing when it has
+/// them all.
+fn said_without(without: &[String]) -> String {
+    match without {
+        [] => String::new(),
+        [_] => format!(
+            " without {}, which it needed and which is neither up nor in the plan any more",
+            quoted_list(without)
+        ),
+        _ => format!(
+            " without {}, which it needed and which are neither up nor in the plan any more",
+            quoted_list(without)
+        ),
+    }
+}
+
+/// Runs the `undo` `unit` keeps, saying what came of it, and that it runs
+/// without `without`, the units it needed that are neither up nor in the
+/// plan any more; once it has run, the unit is forgotten. What of the unit
+/// still runs, as of a command that was running when it left the plan, is
+/// stopped first, so that nothing of it goes on after its work is undone.
+/// How it did not run, when it did not.
+async fn undo(
+    supervisor: Arc<Supervisor>,
+    unit: String,
+    without: Vec<String>,
+) -> Option<NotUndone> {
     let running = (supervisor.snapshot().unplanned(&unit)).map(|unplanned| unplanned.runs.clone());
     if let Some(runs) = running
         && let Err(why) = supervisor.stop(&unit, &runs).await
@@ -268,7 +291,8 @@ async fn undo(supervisor: Arc<Supervisor>, unit: String) -> Option<NotUndone> {
         let why = format!("it could not be stopped for its `undo` to run: {why}");
         return Some(not_undone(&supervisor, &unit, &why, false));
     }
-    let undoing = "it is not in the plan any more, so its `undo` runs";
+    let without = said_without(&without);
+    let undoing = format!("it is not in the plan any more, so its `undo` runs{without}");
     supervisor.say(&unit, UnitState::new(State::Starting, undoing));
     match module::run_kept_undo(&supervisor.place(&unit)).await {
         Ok(()) => {
@@ -276,7 +300,13 @@ async fn undo(supervisor: Arc<Supervisor>, unit: String) -> Option<NotUndone> {
             supervisor.say(&unit, UnitState::new(State::Stopped, undone));
             None
         }
-        Err(why) => Some(not_undone(&supervisor, &unit, &why.to_string(), true)),
+        Err(why) if without.is_empty() => {
+            Some(not_undone(&supervisor, &unit, &why.to_string(), true))
+        }
+        Err(why) => {
+            let why = format!("{why}, having run{without}");
+            Some(not_undone(&supervisor, &unit, &why, true))
+        }
     }
 }
 
