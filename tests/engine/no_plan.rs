@@ -1,10 +1,12 @@
 //! A daemon started while the definitions have errors cannot plan. It
 //! still finds what runs of the environment, and looks after none of it
-//! until the definitions plan again: nothing that ends is started again,
-//! and the next `tay up` that plans takes everything up from there. Until
-//! then `tay status` shows the errors with each unit found running and
-//! exits with code 2, `tay restart` and `tay wipe` of a unit are refused
-//! with the same errors, and `tay down` stops everything it finds.
+//! while it has no plan: nothing that ends is started again. It plans again
+//! each time a command asks it anything, so what it says is true of the
+//! definitions as they are then, and once they plan it goes on as a daemon
+//! started at that moment would. Until then `tay status` shows the errors
+//! with each unit found running and exits with code 2, `tay restart` and
+//! `tay wipe` of a unit are refused with the same errors, and `tay down`
+//! stops everything it finds.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -15,12 +17,12 @@ use serde_json::json;
 use crate::harness::{Machine, alive, child, eventually, record};
 
 /// A unit a daemon with no plan found running, as `tay status` shows it.
-const FOUND: &str = "failed something of it is left, and the daemon has no plan, so nothing looks after it until `tay up` plans";
+const FOUND: &str = "failed something of it is left, and the daemon has no plan, so nothing looks after it until the definitions plan";
 
 /// What `tay COMMAND` closes the errors with while the daemon has no plan.
 fn closing(command: &str) -> String {
     format!(
-        "tay {command}: 1 error in the definitions; the daemon has no plan, so it looks after nothing until `tay up` plans.\n"
+        "tay {command}: 1 error in the definitions; the daemon has no plan, so it looks after nothing until they plan.\n"
     )
 }
 
@@ -94,7 +96,7 @@ fn status_shows_the_errors_with_each_unit_found_running_and_restart_and_wipe_are
 }
 
 #[test]
-fn nothing_that_ends_is_started_again_and_the_next_up_that_plans_takes_everything_up_from_there() {
+fn what_it_says_is_true_of_the_definitions_as_they_are_and_once_they_plan_it_goes_on_from_there() {
     let machine = Machine::new();
     let (root, stack) = found_without_plan(&machine);
     let staying = child(&root, "staying");
@@ -115,17 +117,28 @@ fn nothing_that_ends_is_started_again_and_the_next_up_that_plans_takes_everythin
     let ended = record(&root, "leaving");
     assert_eq!(ended["attempt"], 1, "{ended}");
     assert!(!ended["ended"].is_null(), "{ended}");
-    // The definitions plan again, and the daemon that could not plan is
-    // the one `tay up` asks.
+    // Errors that change are said as they are now.
+    let other = stack.replace("up: [staying, leaving]", "up: [staying, leaving, someone]");
+    fs::write(root.join("tay.yaml"), other).unwrap();
+    let errors: String = (as_plan_prints_them(&machine, &root).iter())
+        .map(|line| format!("{line}\n"))
+        .collect();
+    let status = machine.at(&root, "status", &[]);
+    assert_eq!(status.code, 2, "{}{}", status.stdout, status.stderr);
+    assert_eq!(status.stderr, format!("{errors}{}", closing("status")));
+    // Once the definitions plan, the daemon that could not plan goes on as
+    // one started then would, with no `tay up`: it looks after what runs as
+    // it runs, and what ended while no plan had it is started again as its
+    // `restart` says.
     let daemon = machine.daemon_pid(&root);
     fs::write(root.join("tay.yaml"), stack).unwrap();
-    let up = machine.at(&root, "up", &[]);
-    assert_eq!(up.code, 0, "{}{}", up.stdout, up.stderr);
-    assert_eq!(machine.daemon_pid(&root), daemon);
+    let status = machine.at(&root, "status", &[]);
+    assert_eq!(status.code, 0, "{}{}", status.stdout, status.stderr);
+    assert_eq!(status.stderr, "");
     let status = machine.settled(&root);
     assert!(Machine::state(&status, "staying").starts_with("ready "));
-    assert!(Machine::state(&status, "leaving").starts_with("ready "));
-    // What ran was looked after again as it ran, not started again.
+    assert!(Machine::state(&status, "leaving").starts_with("ready attempt 2, "));
+    assert_eq!(machine.daemon_pid(&root), daemon);
     assert_eq!(child(&root, "staying"), staying);
     assert!(alive(staying));
     assert_ne!(child(&root, "leaving"), leaving);

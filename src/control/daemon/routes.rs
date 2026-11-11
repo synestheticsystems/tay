@@ -52,6 +52,11 @@ pub async fn route(
             },
         ));
     }
+    // What a daemon with no plan says is true of the definitions as they
+    // are now. Who it is, and an exit, are not about them.
+    if !matches!(path.as_str(), protocol::DAEMON | protocol::EXIT) {
+        daemon.plan_again_if_none().await;
+    }
     Ok(match (request.method().clone(), path.as_str()) {
         (Method::GET, protocol::DAEMON) => json(StatusCode::OK, &daemon.about),
         (Method::GET, protocol::STATUS) => status(&daemon).await,

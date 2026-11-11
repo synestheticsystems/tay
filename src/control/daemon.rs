@@ -15,6 +15,7 @@
 
 mod change;
 mod down;
+mod finding;
 mod listen;
 mod log;
 mod restart;
@@ -41,12 +42,11 @@ use crate::definition::read::THIS_TAY;
 use crate::diagnostic::Diagnostics;
 use crate::diagnostic::source::Sources;
 use crate::disk::{
-    self, Asked, Asking, Counts, DiskError, Environment, Identity, Intent, Layout, Lock, Machine,
+    self, Asking, Counts, DiskError, Environment, Identity, Intent, Layout, Lock, Machine,
     daemon_socket,
 };
-use crate::engine::{self, Supervisor, Told, UnitState};
-use crate::module::Occasion;
-use crate::plan::{self, Options, Plan, PlannedUnit};
+use crate::engine::{Supervisor, Told, UnitState};
+use crate::plan::{self, Options, Plan};
 
 use change::{Change, NotBegun};
 use down::{Down, WentDown};
@@ -79,6 +79,9 @@ pub struct Daemon {
     outage: Mutex<Option<protocol::Outage>>,
     /// Why it has no plan, while it has none.
     no_plan: Mutex<Option<NoPlan>>,
+    /// Held while it plans again for want of a plan, so that two commands
+    /// that ask at once do not both go on from it.
+    planning: tokio::sync::Mutex<()>,
 }
 
 /// Why the daemon exits.
@@ -224,12 +227,14 @@ async fn start(
             journal,
             outage: Mutex::default(),
             no_plan: Mutex::default(),
+            planning: tokio::sync::Mutex::default(),
         }
     });
     *daemon
         .no_plan
         .lock()
-        .expect("why there is no plan is not poisoned") = found_again(&daemon.supervisor).await;
+        .expect("why there is no plan is not poisoned") =
+        finding::found_again(&daemon.supervisor).await;
     tokio::spawn(Arc::clone(&daemon).follow_docker());
     // The socket is made, and its path written, once the daemon can answer
     // on it: until then a command finds nothing listening, and waits for
@@ -256,71 +261,6 @@ fn listen_on(path: PathBuf) -> Result<(UnixListener, Socket), CannotStart> {
     let metadata = std::fs::symlink_metadata(&path).map_err(listen_failed)?;
     let identity = (metadata.dev(), metadata.ino());
     Ok((listener, Socket { path, identity }))
-}
-
-/// Finds the units again as the daemon starts: those `tay plan` would
-/// list, with what the environment remembers being asked for, each as it is
-/// found, and each that runs that the plan does not have. What runs is
-/// looked after again whether or not the environment is meant to be up,
-/// and what is made is checked when it is. Without a plan, what runs is
-/// found all the same and looked after by nothing, and why there is no
-/// plan is given.
-async fn found_again(supervisor: &Arc<Supervisor>) -> Option<NoPlan> {
-    let layout = &supervisor.environment.layout;
-    let planned = match Asked::read(layout) {
-        Ok(asked) => {
-            let options = options(
-                asked.asking(Asked::default()),
-                std::env::var_os("HOME").map(PathBuf::from),
-            );
-            planned(layout.root(), &options).map_err(NoPlan::Errors)
-        }
-        Err(error) => Err(NoPlan::Unread {
-            problem: error.to_string(),
-        }),
-    };
-    let planned = match planned {
-        Ok(plan) => plan,
-        Err(no_plan) => {
-            let why = match &no_plan {
-                NoPlan::Errors(errors) => errors.lines.join("\n"),
-                NoPlan::Unread { problem } => problem.clone(),
-            };
-            log(&format!(
-                "there is no plan, so what runs is found and looked after by nothing:\n{why}"
-            ));
-            if let Err(why) = engine::find_without_plan(supervisor).await {
-                log(&format!("what is left of the units cannot be told: {why}"));
-            }
-            return Some(no_plan);
-        }
-    };
-    if planned.uses_host_listen {
-        supervisor.learn_host_listen(Occasion::FindingAgain).await;
-    }
-    let production = planned.production;
-    let plan: Vec<Arc<PlannedUnit>> = planned.units.into_iter().map(Arc::new).collect();
-    supervisor.take_in(&plan);
-    let up = match Intent::read(layout) {
-        Ok(intent) => intent == Intent::Up,
-        Err(error) => {
-            log(&format!("{error}; the environment is taken to be down"));
-            false
-        }
-    };
-    engine::find_again(supervisor, &plan, up).await;
-    // Nothing on a server is watched.
-    if up && !production {
-        for problem in supervisor.watch(&plan).await {
-            log(&problem);
-        }
-    }
-    if let Err(why) = engine::find_unplanned(supervisor).await {
-        log(&format!(
-            "what is left of units the plan does not have cannot be told: {why}"
-        ));
-    }
-    None
 }
 
 /// What the daemon plans with: `asked`, with the choices of whoever has

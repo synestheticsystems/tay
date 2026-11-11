@@ -6,10 +6,10 @@
 //! when the definitions changed while no daemon ran. A container of such a
 //! unit that has ended is left too, and goes the same way. A daemon that
 //! has no plan sets apart everything it finds so, and looks after none of
-//! it until a `tay up` plans.
+//! it until the definitions plan.
 //!
 //! Such a unit is `failed`: nothing checks it, so it cannot become ready
-//! until a `tay up` changes that, and its detail says what of it is left.
+//! without a change to the plan, and its detail says what of it is left.
 //! Whether it is up is judged by whether anything of it is left, never by
 //! that state.
 
@@ -30,7 +30,7 @@ const STILL_LEFT: &str =
 
 /// What a unit a daemon with no plan found is while something of it is
 /// left.
-const NO_PLAN: &str = "something of it is left, and the daemon has no plan, so nothing looks after it until `tay up` plans";
+const NO_PLAN: &str = "something of it is left, and the daemon has no plan, so nothing looks after it until the definitions plan";
 
 /// Sets apart, as unplanned, each unit of which anything is left, found
 /// where units run, that the plan does not have; one set apart before,

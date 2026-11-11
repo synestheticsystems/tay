@@ -170,7 +170,7 @@ A new daemon reads each unit's record and tries its lock.
 | Free | Has an ending | Ended while no daemon ran. Its exit code and time are known, and its restart policy applies |
 | Free | No ending | Gone with no record. Reported as exactly that; anything left of its process group is stopped |
 
-A daemon started while the definitions have errors cannot plan. It still finds what runs of the environment, and looks after none of it until the definitions plan again: nothing that ends is started again, and the next `tay up` that plans takes everything up from there. Until then `tay status` shows the errors with each unit found running and exits with code 2, `tay restart` and `tay wipe` of a unit are refused with the same errors, and `tay down` stops everything it finds.
+A daemon started while the definitions have errors cannot plan. It still finds what runs of the environment, and looks after none of it while it has no plan: nothing that ends is started again. It plans again each time a command asks it anything, so what it says is true of the definitions as they are then, and once they plan it goes on as a daemon started at that moment would. Until then `tay status` shows the errors with each unit found running and exits with code 2, `tay restart` and `tay wipe` of a unit are refused with the same errors, and `tay down` stops everything it finds.
 
 ### `command` on the host
 

@@ -182,7 +182,7 @@ pub enum Event {
     /// The definitions, planned again by the daemon, have errors.
     Errors(DefinitionErrors),
     /// The change was not begun: the daemon has no plan, as said, and
-    /// looks after nothing until a `tay up` plans.
+    /// looks after nothing until the definitions plan.
     NoPlan(NoPlan),
     /// What a change that brings units up came to: `tay up`, or another
     /// that ends by bringing up what it stopped; how long the change took
@@ -234,16 +234,17 @@ pub struct DefinitionErrors {
     pub too_old: bool,
 }
 
-/// Why a daemon has no plan, while it has none: it started while the
-/// definitions did not plan, and no `tay up` has planned since.
+/// Why a daemon has no plan, while it has none: when it last planned, as a
+/// command asked it something, the definitions did not plan.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "no_plan", rename_all = "snake_case")]
 pub enum NoPlan {
     /// The definitions have errors.
     Errors(DefinitionErrors),
-    /// What the environment remembers being asked for cannot be read, as
-    /// said.
-    Unread { problem: String },
+    /// Something other than the definitions kept it from planning, as said:
+    /// what the environment remembers being asked for cannot be read, or tay
+    /// failed while planning.
+    Problem { problem: String },
 }
 
 /// A value an action produced, by name: `None` for one declared secret,
