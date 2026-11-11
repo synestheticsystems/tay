@@ -39,7 +39,7 @@ Every command takes `--root FOLDER`, and `--json` where it prints something a pr
 
 With no unit named it brings up what the choices list under `up`. With units named it brings up those and what they need, and leaves everything else as it is.
 
-**What an environment was asked for stays asked.** The profile, each `--set` and the units named on `tay up` are remembered by the environment, so a later plain `tay up`, a `tay status`, a `tay plan` and a daemon started afresh all see the same stack. A new `--set` for the same place replaces the remembered one, and `--profile` replaces the remembered profile. `tay status` lists what is remembered.
+**What an environment was asked for stays asked.** The profile, each `--set` and the units named on `tay up` are remembered by the environment, so a later plain `tay up`, a `tay status`, a `tay plan` and a daemon started afresh all see the same stack. A new `--set` for the same place replaces the remembered one, and `--profile` replaces the remembered profile. `tay status` lists what is remembered, and names the profile in force with what chose it: the command line (now or remembered), the environment's file, or the stack's default. *Naming the profile whatever chose it is not built yet: today `tay status` names one only when it is remembered.*
 
 When a unit fails, `tay up` names it, gives the reason and the last lines it wrote, and names every unit that was waiting on it. A unit that failed an attempt and then became ready counts as ready, and the earlier attempts are shown.
 
@@ -97,7 +97,7 @@ It keeps two facts about intent on disk: whether the environment is meant to be 
 
 ```
 .tay/
-  choices.yaml            this environment's choices; people write it
+  choices.yaml            this environment's choices and its profile; people write it
   id                      the environment's id
   daemon.lock             held while the daemon runs
   state/
@@ -207,7 +207,7 @@ Docker is a container's parent: it keeps the exit code, says whether the contain
 
 **Logs.** The daemon copies each container's output into the unit's log, with Docker's time for each line, from where it last stopped. A daemon that was away loses nothing Docker still has. Before a container is removed, what remains of its output is copied.
 
-**`tay down`** stops and removes the environment's containers and its network, and keeps its volumes: data is kept. A volume Docker made by itself for a path an image declares and the unit does not name belongs to that one container and is removed with it, whenever tay removes a container.
+**`tay down`** stops and removes the environment's containers and its network, and keeps its volumes: data is kept. A volume Docker made by itself for a path an image declares and the unit does not name belongs to that one container and is removed with it, whenever tay removes a container. Unnamed volumes that an earlier tay left behind carry no label, and this one does not find them.
 
 **When Docker itself stops,** as it does when it is upgraded or restarted, every container ends with it, and none of that is a unit's doing. While Docker does not answer, nothing that ends or cannot start is counted against a unit; when it answers again, the daemon brings the environment up as `tay up` would, if it is meant to be up, and says in its log and in `tay status` when Docker stopped answering and when the environment was brought up again. Host processes are not touched. *Not built yet: today the units are left failed until a person runs `tay up`.*
 
@@ -233,7 +233,7 @@ Each of these is one change, taken by the daemon in turn like any other.
 - The action's own lines go to standard output as they are written, and `tay run` exits as the action did. tay's own lines go to standard error.
 - An action's values are given to whoever asked and are not kept: `tay run` prints each value the action produced, by name, after the action's output. A value declared secret prints as `<secret>`, never as itself, so an action that hands a person a credential writes it to a file of its own and gives the file's path.
 
-**`tay set PLACE=VALUE...`** and **`tay unset PLACE...`** change what the environment remembers being asked for, in the places `--set` takes, and nothing else: no unit is touched until the next `tay up`. `tay up --set` is the same thing followed by `up`. `tay unset` forgets one place, so the profile's or the stack's value holds again; a place with nothing remembered is an error. `tay set` plans the stack with the new values before remembering them, and remembers nothing if it no longer plans. `tay set` with nothing after it lists what is remembered: the profile, the units and each place. A secret setting's value is never printed. Neither command starts a daemon: with none running, the change is made under the daemon's own lock.
+**`tay set PLACE=VALUE...`** and **`tay unset PLACE...`** change what the environment remembers being asked for, in the places `--set` takes, and nothing else: no unit is touched until the next `tay up`. `tay up --set` is the same thing followed by `up`. `tay unset` forgets one place, so the profile's or the stack's value holds again; a place with nothing remembered is an error. `tay set` plans the stack with the new values before remembering them, and remembers nothing if it no longer plans. `tay set` with nothing after it lists what is remembered: the profile, the units and each place. A secret setting's value is never printed. Neither command starts a daemon: with none running, the change is made under the daemon's own lock. `profile` is a place for both as well: `tay set profile=<name>` remembers a profile as `--profile` does, and `tay unset profile` forgets the remembered one, so that the environment's file or the stack's default chooses again. *`profile` as a place is not built yet: today only `tay wipe --all` forgets a remembered profile.*
 
 **`tay wipe UNIT... --yes`** removes what a unit keeps, so that it starts from nothing:
 
