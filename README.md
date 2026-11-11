@@ -96,7 +96,7 @@ cargo install --git https://github.com/synestheticsystems/tay --locked
 
 ## Status
 
-The placeholder era is over. Version 0.1 is young, and it runs real stacks: Tay was written to replace a product's own development tool, and brings that product's stack of about a hundred units up on a developer's Mac and on a Linux server.
+Tay is young, and it runs real stacks: it was written to replace a product's own development tool, and brings that product's stack of about a hundred units up on a developer's Mac and on a Linux server.
 
 Its two contracts are [docs/definition-format.md](docs/definition-format.md), what a stack's definitions may say, and [docs/engine.md](docs/engine.md), what Tay does with them. A sentence in either that says something is not built yet means exactly that.
 
