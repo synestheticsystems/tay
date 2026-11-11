@@ -138,6 +138,8 @@ fn the_daemon_listens_on_a_socket_for_this_account_alone_speaking_http_with_json
         serde_json::from_str(answer.split("\r\n\r\n").nth(1).unwrap()).unwrap();
     assert_eq!(body["id"], id.as_str());
     assert_eq!(body["tay"], env!("CARGO_PKG_VERSION"));
+    // One started detached says that no service manager runs it.
+    assert_eq!(body["served"], false);
     let elsewhere = ask("GET /v2/daemon HTTP/1.1\r\nHost: tay\r\nConnection: close\r\n\r\n");
     assert!(
         elsewhere.starts_with("HTTP/1.1 404 Not Found\r\n"),

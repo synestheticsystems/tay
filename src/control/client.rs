@@ -1,6 +1,7 @@
 //! The commands' side of an environment's daemon: finding the daemon,
-//! starting one when none answers, replacing one of an older tay, making
-//! way for `tay serve`, and asking it for what each command does.
+//! starting one when none answers, replacing one of an older tay or waiting
+//! for its service manager to, making way for `tay serve`, and asking it for
+//! what each command does.
 //!
 //! A socket file alone proves nothing: only a daemon that answers on it as
 //! the daemon of this environment does. Whether a daemon runs is decided by
@@ -28,6 +29,12 @@ use start::{NotStarted, START, Started};
 /// How often a command looks again for a daemon that is starting or
 /// ending.
 const RETRY: Duration = Duration::from_millis(50);
+
+/// How long a command waits for a service manager to start a daemon of
+/// this tay in place of the one it asked to exit: a service manager may
+/// wait seconds before it starts a service again, as launchd waits ten, and
+/// the daemon then has as long to start as one started detached.
+const SERVED_AGAIN: Duration = Duration::from_secs(30);
 
 /// A daemon that answers for an environment.
 pub struct Client {
@@ -60,6 +67,15 @@ pub enum ClientError {
     Newer { theirs: String },
     #[error("the daemon (process {pid}) said it would exit and has not within {} seconds", START.as_secs())]
     StillRunning { pid: u32 },
+    #[error(
+        "the daemon of tay {theirs}, which a service manager runs, was asked to exit for this tay {THIS_TAY}, and none has answered in its place within {} seconds: start its service again, with this tay at the path it runs",
+        SERVED_AGAIN.as_secs()
+    )]
+    NotServedAgain { theirs: String },
+    #[error(
+        "the service manager started a daemon of tay {theirs} in place of the one asked to exit, not one of this tay {THIS_TAY}: put this tay at the path its service runs, and start the service again"
+    )]
+    ServedAgainAs { theirs: String },
     #[error("the daemon went away before it had finished")]
     WentAway,
     #[error("the daemon began to exit as this command reached it; run the command again")]
@@ -103,14 +119,15 @@ impl Client {
 
     /// The daemon of `environment`, started if none answers, and started
     /// again when the one that answers is of an older tay; the older one is
-    /// asked to exit, which leaves the stack as it is. A daemon of a newer
-    /// tay is left alone.
+    /// asked to exit, which leaves the stack as it is, and when a service
+    /// manager runs it, the service manager starts the new one. A daemon of
+    /// a newer tay is left alone.
     pub async fn ensure(environment: &Environment) -> Result<Client, ClientError> {
         environment
             .machine
             .make_socket_folder(environment.id.as_str())?;
         if let Some(client) = Client::find(environment).await?
-            && let Some(client) = client.of_this_tay().await?
+            && let Some(client) = client.of_this_tay(environment).await?
         {
             return Ok(client);
         }
@@ -123,7 +140,7 @@ impl Client {
         let mut started = false;
         loop {
             if let Some(client) = Client::find(environment).await?
-                && let Some(client) = client.of_this_tay().await?
+                && let Some(client) = client.of_this_tay(environment).await?
             {
                 return Ok(client);
             }
@@ -194,7 +211,7 @@ impl Client {
         let until = Instant::now() + START;
         loop {
             if let Some(client) = Client::find(environment).await?
-                && let Some(client) = client.of_this_tay().await?
+                && let Some(client) = client.of_this_tay(environment).await?
             {
                 return client.ask_to_remember(change).await;
             }
@@ -228,8 +245,11 @@ impl Client {
 
     /// This client, when its daemon is of this tay. A daemon of an older
     /// tay is asked to exit and is waited for; one of a newer tay is an
-    /// error.
-    async fn of_this_tay(self) -> Result<Option<Client>, ClientError> {
+    /// error. In place of an older one that a service manager runs, the
+    /// daemon of this tay that the service manager starts, from the same
+    /// path, is waited for, and none is started here, in someone's
+    /// session, where no service manager would know of it.
+    async fn of_this_tay(self, environment: &Environment) -> Result<Option<Client>, ClientError> {
         if self.daemon.tay == THIS_TAY {
             return Ok(Some(self));
         }
@@ -239,7 +259,39 @@ impl Client {
             });
         }
         self.exit().await?;
-        Ok(None)
+        match self.daemon.served {
+            false => Ok(None),
+            true => Client::served_again(environment, self.daemon.tay)
+                .await
+                .map(Some),
+        }
+    }
+
+    /// The daemon a service manager starts for `environment` in place of
+    /// the one of tay `theirs` that was asked to exit, once it answers.
+    async fn served_again(
+        environment: &Environment,
+        theirs: String,
+    ) -> Result<Client, ClientError> {
+        let until = Instant::now() + SERVED_AGAIN;
+        loop {
+            match Client::find(environment).await {
+                Ok(Some(client)) if client.daemon.tay == THIS_TAY => return Ok(client),
+                Ok(Some(client)) => {
+                    return Err(ClientError::ServedAgainAs {
+                        theirs: client.daemon.tay,
+                    });
+                }
+                // A daemon that listens and does not answer yet is still
+                // finding its units again.
+                Ok(None) | Err(ClientError::NoAnswer(NoAnswer::TooLate(_))) => {}
+                Err(error) => return Err(error),
+            }
+            if Instant::now() >= until {
+                return Err(ClientError::NotServedAgain { theirs });
+            }
+            tokio::time::sleep(RETRY).await;
+        }
     }
 
     /// Brings up what `request` asks for, giving each event to `event` as

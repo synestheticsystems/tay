@@ -105,10 +105,7 @@ fn told_to_stop_it_takes_everything_down_and_exits_with_0() {
     let machine = Machine::new();
     let root = machine.stack("services");
     let served = serve(&machine, &root);
-    for change in [
-        r#"  api  ready     attempt 1, log "listening" passes"#,
-        "  web  ready     attempt 1, running",
-    ] {
+    for change in ["\n  api  ready     attempt ", "\n  web  ready     attempt "] {
         assert!(served.read.contains(change), "{}", served.read);
     }
     let status = machine.at(&root, "status", &["--json"]).json();

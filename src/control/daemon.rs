@@ -203,6 +203,8 @@ async fn start(
         root: environment.layout.root().to_path_buf(),
         id: environment.id.to_string(),
         started: clock::now(),
+        // Only a daemon `tay serve` runs has a journal.
+        served: journal.is_some(),
     };
     log(&format!(
         "started: tay {THIS_TAY}, process {}, for {}",

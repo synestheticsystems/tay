@@ -49,6 +49,12 @@ pub struct About {
     pub id: String,
     /// When it started, in seconds since 1970.
     pub started: u64,
+    /// Whether a service manager runs it, through `tay serve`. A command
+    /// of a newer tay then waits for the service manager to start the new
+    /// daemon, rather than start one of its own. A tay that does not say
+    /// runs none so.
+    #[serde(default)]
+    pub served: bool,
 }
 
 /// What `tay up` asks for: what its own command line adds to what the
