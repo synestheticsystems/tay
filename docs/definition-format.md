@@ -239,9 +239,9 @@ Gives `number`.
 | `name` | The file's name, written out: no reference. Default: the unit's name |
 | `folder` | A named folder to write it in, written out: no reference. File units that name the same folder write side by side. Default: a folder named after the unit |
 | `mode` | Permissions, as a string such as `"0600"`. Default `"0644"`, or `"0600"` if the content uses a secret. A `mode` that is written wins |
-| `overwrite` | `false` for a file another program rewrites: tay writes it once and then leaves it alone. Default `true` |
+| `overwrite` | `false` for a file another program rewrites: tay writes it once and then leaves it alone, without reading it again. Default `true` |
 
-The file is written inside the environment's state folder, at `files/<folder>/<name>`, never among the checkout's own files. Gives `path` and `dir`, the folder. Two file units with the same `folder` and the same `name` are an error. Using `dir` brings in this unit's file only: a unit that wants the folder's other files needs their units.
+The file is written inside the environment's state folder, at `files/<folder>/<name>`, never among the checkout's own files. It belongs to the account tay runs as. On Linux a container sees a mounted file's real owner and mode, so a file that holds a secret, readable by its owner alone, cannot be read by a container that runs as another user: give that container its secret through its environment (`secret_env`), or have a step of the stack give that user a copy of its own. Docker on a Mac hides file owners from containers, so only a Linux machine shows this. Gives `path` and `dir`, the folder. Two file units with the same `folder` and the same `name` are an error. Using `dir` brings in this unit's file only: a unit that wants the folder's other files needs their units.
 
 ### `secret`: a value generated once and kept
 
@@ -395,6 +395,8 @@ What comes up, which way each unit runs, and the values of settings are choices.
 2. the profile (`stack/profiles/<name>.yaml`);
 3. this person's own file (`~/.config/tay/<stack>.yaml`), read only when the profile is not a production one;
 4. this environment's file (`.tay/choices.yaml`), then what the environment remembers being asked for by earlier `tay up`s, and then each `--set` on the command line, in the order written.
+
+Which profile is used is itself chosen: by `--profile` on the command line, now or remembered from an earlier `tay up`; otherwise by `profile: <name>` in this environment's file; otherwise by the stack's `default_profile`. The environment's file is the one place a person writes it, because that file is kept when everything else the environment keeps is wiped: a server whose profile was only remembered would plan the default profile after `tay wipe --all`. Written in a profile or in a person's own file, `profile` is an error. *`profile` in the environment's file is not built yet.*
 
 ```yaml
 # stack/profiles/dev.yaml

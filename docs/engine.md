@@ -52,7 +52,7 @@ When a unit fails, `tay up` names it, gives the reason and the last lines it wro
 | 2 | The definitions have errors, or what was asked does not fit this stack: a unit that does not exist, a restart of a unit that is made, an argument an action does not declare |
 | 3 | This tay is too old for the definitions |
 | 4 | Refused as things stand: another change is running (the message says which, and since when), or what was asked needs something that is not up, or could only be done by disturbing a unit that is up (the message says what) |
-| 5 | The daemon could not be started or reached |
+| 5 | The daemon could not be started or reached; for `tay serve`, it could not be the daemon or could not go on |
 
 `tay run` is the one exception: when the action ran to an end, `tay run` exits with the action's own status, whatever number that is. When the action never ran, it exits with one of the codes above, and tay's message on standard error says which case it is.
 
@@ -83,7 +83,7 @@ When a unit fails, `tay up` names it, gives the reason and the last lines it wro
 One daemon per environment. The first command that needs it starts it, detached from the terminal and from the shell that ran the command, so it survives both.
 
 - **It owns the changes.** It starts units in order, watches them, applies restart policies, runs the checks and writes the records.
-- **It listens on a Unix socket** and speaks HTTP with JSON bodies, under `/v1/`. It opens no TCP port. Who may control an environment is decided by the socket's file permissions alone. The socket is in a short folder of its own named by the environment's id, because a socket's path is limited to about a hundred bytes.
+- **It listens on a Unix socket** and speaks HTTP with JSON bodies, under `/v1/`. It opens no TCP port. Who may control an environment is decided by the socket's file permissions alone. The socket is in a short folder of its own named by the environment's id, because a socket's path is limited to about a hundred bytes. Where that folder is depends on the account's session, so the daemon writes the socket's path in `.tay/`, and a command finds the daemon by what is written there: a daemon started by a service manager and a person's own shell then agree on it whatever variables each was started with. *Finding it by what is written is not built yet: today a command works the folder out for itself, and on a server must be run with the service's own environment.*
 - **Its lifetime is a lock** on `.tay/daemon.lock`, held for as long as it runs and released by the system if it dies. A socket file whose lock is free is stale and is replaced.
 - **One change at a time.** A second `up` that asks for exactly what the running one asks for joins it and gets the same result. `down` is always accepted and cancels what is running, so there is always a way to stop. Any other change, a different `up` included, is refused with exit code 4.
 - **Versions.** A command and a daemon of different versions do not talk past each other: the command asks an older daemon to exit, which leaves the stack running, and starts its own. A command older than the daemon is refused with exit code 5 and changes nothing.
@@ -131,13 +131,13 @@ An environment leaves the machine's list when a check finds nothing of it left: 
 - The preferred number is tried once, the first time. After that the environment keeps what it got: kept beats preferred.
 - Other numbers come from a range the system does not hand out by itself.
 - Choosing goes through one lock and the machine's list, so two environments starting at once cannot get the same number.
-- A number is free when no program listens on it, on any address of the machine. A connection that a stopped program left closing holds nothing, so a unit started again finds its number free.
+- A number is free when no program listens on it, on any address of the machine. A number an ordinary user may not take, as one below 1024 on Linux, is judged by the system's tables of what listens alone: tay never holds such a port itself, Docker does. *Not built yet: today such a port fails its unit for an ordinary user.* A connection that a stopped program left closing holds nothing, so a unit started again finds its number free.
 - A kept port is the environment's own for as long as a unit of the environment that uses it runs, whatever the change being made: `tay restart` of another unit, `tay run`, and the bring-up after a `tay wipe` never choose a new number for it.
 - If a kept port turns out to be taken, by something that is not this environment, when the stack comes up: a `fixed` port fails its unit and names the holder as well as tay can; any other port is chosen again, and `tay up` says so.
 
 **`secret`.** Generated once and kept in `state/secrets/`. Its value never appears in any output, in the stored plan, or in the argument list of anything tay starts. Kept beats written, as for a port: if a secret's `length` or `encoding` is changed after it was generated, the stored value stays, because whatever already holds it (a database's own password, say) would not change with it, and `tay up` says that the two no longer match. `tay wipe` on the secret makes a new one. If its `kind` is changed, the stored value cannot give what the unit must give, so the unit fails and says to wipe it.
 
-**`file`.** Written whole and then moved into place, so no reader sees half a file. Written again only when its content would differ, and never when `overwrite` is `false` and it exists.
+**`file`.** Written whole and then moved into place, so no reader sees half a file. Written again only when its content would differ, and never when `overwrite` is `false` and it exists. Such a file belongs to the program that rewrites it from then on: tay does not read it again, it is ready when it exists, and in the fingerprint of a unit that uses it it counts as there or not there, never by its content. So a program that takes the file as its own, or changes it, fails nothing and restarts nothing. *Not built yet: today tay still reads it.*
 
 ## Units that run
 
@@ -207,7 +207,9 @@ Docker is a container's parent: it keeps the exit code, says whether the contain
 
 **Logs.** The daemon copies each container's output into the unit's log, with Docker's time for each line, from where it last stopped. A daemon that was away loses nothing Docker still has. Before a container is removed, what remains of its output is copied.
 
-**`tay down`** stops and removes the environment's containers and its network, and keeps its volumes: data is kept.
+**`tay down`** stops and removes the environment's containers and its network, and keeps its volumes: data is kept. A volume Docker made by itself for a path an image declares and the unit does not name belongs to that one container and is removed with it, whenever tay removes a container. *Not built yet: today such volumes are left behind.*
+
+**When Docker itself stops,** as it does when it is upgraded or restarted, every container ends with it, and none of that is a unit's doing. While Docker does not answer, nothing that ends or cannot start is counted against a unit; when it answers again, the daemon brings the environment up as `tay up` would, if it is meant to be up, and says in its log and in `tay status` when Docker stopped answering and when the environment was brought up again. Host processes are not touched. *Not built yet: today the units are left failed until a person runs `tay up`.*
 
 **A command in a container.** With `in`, the command runs inside the named unit's running container, as `user` if given. With `image`, it runs as a container of its own on the environment's network, with `run` in place of the image's entrypoint, and is removed when it ends. Either way its `check` runs the same way first, its secrets reach it through its environment, and the file named by `TAY_VALUES` is fetched from where the command ran.
 
@@ -286,22 +288,24 @@ A server has to bring its stack back after a reboot with no one logged in, resta
 
 - **Being started is being asked to be up.** `tay serve` brings the environment up whatever was last recorded of whether it is meant to be up. The service manager's own switch (enabled or not, started or not) is the record that counts on a server.
 - **It prints each change of state**, for as long as it runs, one line per change as `tay up` does, so the service manager's log holds the stack's history. Units' own output stays in their logs.
-- **Told to stop** (the signal a service manager sends, `SIGTERM`), it takes the environment down in order, as `tay down` does, and exits with 0.
+- **Told to stop** (the signal a service manager sends, `SIGTERM`, or an interrupt from a terminal), it takes the environment down in order, as `tay down` does, and exits as `tay down` would: with 0, or with 1 if something was left that could not be stopped. A hang-up (`SIGHUP`) does not stop it.
 - **`tay down`** by a person does the same through the socket: the stack stops, `tay serve` exits with 0, and a service manager told to restart only on failure leaves it stopped until it is started again. So down means down, on a server too.
 - **If it dies**, nothing in the stack stops. The service manager starts it again, and it adopts what is running, as any new daemon does. It exits with a status other than 0 only when it could not be the daemon or could not go on.
 - **If a daemon already runs** for the environment, started by a plain `tay up` in someone's session, `tay serve` asks it to exit, which leaves the stack running, and takes its place.
 - **Every other command works as always**, through the socket: `tay status`, `tay up` (which joins and returns when the stack is ready, so an install script can wait on it), `tay restart`, `tay logs`. Who may use them is decided by the socket's permissions: the account `tay serve` runs as.
-- **A newer tay.** A command newer than a daemon that is being served does not start a daemon of its own in the person's session. It asks the old one to exit, waits for the service manager to start the new one from the same path, and says so if that does not happen (exit code 5).
+- **A newer tay.** A command newer than a daemon that is being served does not start a daemon of its own in the person's session. It asks the old one to exit, waits up to thirty seconds for the service manager to start the new one from the same path, and says so if that does not happen (exit code 5).
+- **It tells the service manager when it answers.** `tay serve` reports itself ready to systemd once its socket answers, so that `systemctl start` returns only then, and a `tay up` run right after it joins the bring-up instead of starting a daemon of its own. *Not built yet: today the unit is `Type=simple`, and a `tay up` run in the same instant can be cancelled.*
 
 With systemd, the whole of it is:
 
 ```
 [Unit]
 Description=<stack> (tay)
-Requires=docker.service
+Wants=docker.service
 After=docker.service network-online.target
 
 [Service]
+Type=notify
 User=<account in the docker group>
 ExecStart=/usr/local/bin/tay serve --root /srv/<stack>
 Restart=on-failure
@@ -312,4 +316,4 @@ KillMode=mixed
 WantedBy=multi-user.target
 ```
 
-`KillMode=mixed` sends the stop signal to `tay serve` alone, which stops the stack itself. A production profile runs nothing on the host, so nothing of the stack is in the service's own process group to be killed with it.
+`KillMode=mixed` sends the stop signal to `tay serve` alone, which stops the stack itself. A production profile runs nothing on the host, so nothing of the stack is in the service's own process group to be killed with it. The unit wants Docker and starts after it, and does not require it: a service that requires Docker is stopped for good whenever Docker restarts, and what `tay serve` does when Docker stops is said under "Containers".
