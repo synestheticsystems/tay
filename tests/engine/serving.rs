@@ -2,9 +2,10 @@
 //! manager. It brings up what the environment remembers being asked for,
 //! whatever was recorded of whether it is meant to be up, tells a service
 //! manager that waits for it once it answers, prints each change of
-//! state, and takes everything down when told to stop by
-//! `SIGTERM` or `SIGINT`, or by `tay down` through its socket, exiting with
-//! 0, or with 1 when it cannot record that the environment is down. A
+//! state, and takes everything down when told to stop by `SIGTERM` or
+//! `SIGINT`, exiting with 0, or with 1 when it cannot record that the
+//! environment is down, or by `tay down` through its socket, exiting with 0
+//! whatever the down came to, which that `tay down` says and exits with. A
 //! hang-up does not stop it. Killed, it leaves the stack running, and
 //! the next daemon adopts it. It takes the place of a daemon that runs, and
 //! exits with another status only when it could not be the daemon or could
@@ -259,6 +260,44 @@ fn tay_down_from_another_process_takes_everything_down_and_it_exits_with_0() {
         assert!(!alive(program));
     }
     assert!(machine.processes().is_empty());
+}
+
+#[test]
+fn tay_down_that_cannot_record_that_the_environment_is_down_exits_with_1_and_it_still_exits_with_0()
+{
+    let machine = Machine::new();
+    let root = machine.stack("services");
+    let served = serve(&machine, &root);
+    let programs = programs(&root, &["api", "web"]);
+    let state = root.join(".tay/state");
+    let _full = Unwritable::make(&state);
+    let down = machine.spawn(&root, "down", &[]);
+    let ended = served.finish_within(ENDS);
+    let down = down.finish();
+    // The person who asked is told, by the command they ran.
+    let unrecorded = |command: &str| {
+        format!(
+            "{command}: that the environment is down cannot be recorded: `{}` cannot be written: Permission denied (os error 13); the next command will take the environment for up and start its units again\n",
+            state.join("intent").display()
+        )
+    };
+    assert_eq!(down.code, 1, "{}{}", down.stdout, down.stderr);
+    assert_eq!(down.stderr, unrecorded("tay down"));
+    // A service manager told to restart `tay serve` on failure would bring
+    // the stack back up, so it says the same and exits with 0.
+    assert_eq!(ended.code, 0, "{}{}", ended.stdout, ended.stderr);
+    assert_eq!(ended.stderr, unrecorded("tay serve"));
+    assert!(
+        ended.stdout.ends_with(
+            "  api  stopped   stopped by `tay down`\ntay serve: nothing is left running.\n"
+        ),
+        "{}",
+        ended.stdout
+    );
+    for (program, _) in programs {
+        assert!(!alive(program));
+    }
+    assert_eq!(intent(&root), "up\n");
 }
 
 #[test]

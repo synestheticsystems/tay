@@ -22,9 +22,14 @@ use crate::disk::{Asked, Layout};
 
 /// How `tay serve` ended, once it was the daemon.
 pub enum Served {
-    /// It took the environment down, told to stop or by `tay down` or
-    /// `tay wipe --all`, and what that came to.
-    Down(WentDown),
+    /// It took the environment down, and what that came to.
+    Down {
+        went: WentDown,
+        /// Whether a person asked for it through the socket, with
+        /// `tay down` or `tay wipe --all`, whose own command says what it
+        /// came to and exits with it; otherwise it was told to stop.
+        asked: bool,
+    },
     /// It could not go on, and why, as a person reads it.
     CannotGoOn(String),
 }
@@ -69,7 +74,10 @@ pub async fn serve(
         }) => Served::CannotGoOn(
             "the environment's folder has gone, so what it ran was stopped".to_string(),
         ),
-        Some(Exiting::TookDown { went, .. }) => Served::Down(went),
+        Some(Exiting::TookDown { because, went }) => Served::Down {
+            asked: matches!(because, Down::Asked | Down::Wiped),
+            went,
+        },
         Some(Exiting::MakingWay) => Served::CannotGoOn(
             "it was asked to exit, so that another daemon takes its place: one of another version of tay, or another `tay serve`; the stack runs on".to_string(),
         ),
