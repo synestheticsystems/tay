@@ -1,24 +1,27 @@
 //! What each unit that runs was started from, kept in its folder of the
 //! state folder whenever its module says it starts its own program: the
-//! fingerprint of its settings its module takes, with the content of each
-//! file the plan says it uses. A unit that runs when the environment is
-//! brought up again is compared with what it would be started from now.
+//! fingerprint of its settings its module takes, with each file the plan
+//! says it uses, as the unit that writes or builds that file says it is
+//! taken. A unit that runs when the environment is brought up again is
+//! compared with what it would be started from now.
 
 use std::path::Path;
 use std::sync::Arc;
 
 use super::supervisor::Supervisor;
+use super::units::Units;
 use crate::disk::{DiskError, write_whole};
-use crate::module::{Fingerprint, Running, Taking, UnitPlace};
-use crate::plan::PlannedUnit;
+use crate::module::{Fingerprint, Operations, Running, Taking, UnitKind, UnitPlace};
+use crate::plan::{PlannedUnit, UsedFile};
+use crate::value::{Filled, Placeholder, Unfilled};
 
 /// The file in a unit's folder of the state folder that keeps what it was
 /// started from.
 const KEPT: &str = "started-from.json";
 
 /// `settings`, what `planned` is started from as its module says, with
-/// the content of each file the plan says it uses, as each is now; why
-/// not, when a file's path cannot be filled or the file cannot be read.
+/// each file the plan says it uses, as each is now; why not, when a file's
+/// path cannot be filled or the file cannot be taken.
 pub fn with_files(
     supervisor: &Supervisor,
     planned: &PlannedUnit,
@@ -30,22 +33,56 @@ pub fn with_files(
         .mechanism
         .iter()
         .flat_map(|mechanism| &mechanism.files);
-    let given = supervisor.given();
+    let units = supervisor.snapshot();
+    let given = units.given();
+    let mut fill = |placeholder: &Placeholder| supervisor.fill(placeholder, &given);
     for file in files {
-        let path = file
-            .path
-            .fill(&mut |placeholder| supervisor.fill(placeholder, &given))
-            .map_err(|why| {
-                format!(
-                    "the path of the file `{}` cannot be filled: {why}",
-                    file.name
-                )
-            })?;
-        taking
-            .file(&file.name, Path::new(&path.reveal()))
-            .map_err(|error| error.to_string())?;
+        let path = file.path.fill(&mut fill).map_err(|why| {
+            format!(
+                "the path of the file `{}` cannot be filled: {why}",
+                file.name
+            )
+        })?;
+        take(
+            &units,
+            file,
+            Path::new(&path.reveal()),
+            &mut fill,
+            &mut taking,
+        )?;
     }
     Ok(taking.taken())
+}
+
+/// Takes `file`, at `path`, into `taking`, as the unit that writes or
+/// builds it says: one a unit that is made writes as that unit's module
+/// says, and one a command builds by its content.
+fn take(
+    units: &Units,
+    file: &UsedFile,
+    path: &Path,
+    fill: &mut dyn FnMut(&Placeholder) -> Result<Filled, Unfilled>,
+    taking: &mut Taking,
+) -> Result<(), String> {
+    let writer = units
+        .get(&file.of)
+        .and_then(|known| known.planned.mechanism.as_ref())
+        .filter(|mechanism| matches!(mechanism.kind, UnitKind::Made));
+    let Some(writer) = writer else {
+        return taking
+            .file(&file.name, path)
+            .map_err(|error| error.to_string());
+    };
+    match writer.operations(fill) {
+        Ok(Operations::Made(made)) => made
+            .take_written(taking, &file.name, path)
+            .map_err(|failure| failure.to_string()),
+        Ok(Operations::Running(_)) => unreachable!("a unit whose kind is made is made"),
+        Err(why) => Err(format!(
+            "what writes the file `{}` cannot be filled: {why}",
+            file.name
+        )),
+    }
 }
 
 /// What changed in what `planned`, which runs, would be started from now

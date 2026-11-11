@@ -1,6 +1,6 @@
 //! `file` units: written whole and then moved into place, written again
 //! only when the content would differ, never when `overwrite` is false and
-//! the file exists, and given its mode.
+//! the file exists, nor then read again, and given its mode.
 
 use std::fs;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
@@ -82,6 +82,24 @@ fn a_file_with_overwrite_false_is_never_written_again_once_it_exists() {
         fs::read_to_string(&once).unwrap(),
         "rewritten by another program\n"
     );
+}
+
+#[test]
+fn a_file_with_overwrite_false_is_not_read_again_and_stays_ready_once_another_program_took_it() {
+    let machine = Machine::new();
+    let root = machine.stack("files");
+    assert_eq!(machine.at(&root, "up", &[]).code, 0);
+    // Taken by another program as its own, so that tay may not read it.
+    let once = file(&root, "written-once");
+    fs::set_permissions(&once, fs::Permissions::from_mode(0o000)).unwrap();
+    let up = machine.at(&root, "up", &[]);
+    assert_eq!(up.code, 0, "{}{}", up.stdout, up.stderr);
+    assert_eq!(
+        up.last_change("written-once"),
+        "ready left as it is, since `overwrite` is false"
+    );
+    let status = machine.at(&root, "status", &["--json"]).json();
+    assert_eq!(Machine::state(&status, "written-once"), "ready written");
 }
 
 #[test]

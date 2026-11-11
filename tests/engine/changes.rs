@@ -1,9 +1,10 @@
 //! When something changes: at `tay up` on an environment that is up, each
 //! unit that runs is compared with what it was started from, its settings
-//! and the files it uses that tay knows of. One that differs is started
-//! again, and `tay up` says what changed, by name, never showing a secret;
-//! one that only receives a value from a unit that changed is started again
-//! only if the value it receives changed; everything else is left running.
+//! and the files it uses that tay knows of, a file tay does not overwrite
+//! by its being there alone. One that differs is started again, and
+//! `tay up` says what changed, by name, never showing a secret; one that
+//! only receives a value from a unit that changed is started again only if
+//! the value it receives changed; everything else is left running.
 
 use std::path::Path;
 use std::time::Duration;
@@ -83,6 +84,30 @@ fn a_unit_that_uses_a_file_tay_writes_is_started_again_when_its_content_changed(
         changed.stdout
     );
     said(&root, "reader", "| reads bye");
+}
+
+#[test]
+fn a_unit_that_uses_a_file_tay_does_not_overwrite_is_left_running_when_the_file_is_rewritten() {
+    let machine = Machine::new();
+    let root = machine.stack("changes");
+    assert_eq!(machine.at(&root, "up", &["conf-owner"]).code, 0);
+    said(&root, "conf-owner", "| owns ");
+    let owner = child(&root, "conf-owner");
+    // Rewritten, as the program it belongs to may: what uses it was started
+    // from its being there alone.
+    let conf = root.join(".tay/state/files/kept-conf/kept-conf");
+    std::fs::write(&conf, "rewritten by its owner\n").unwrap();
+    let again = machine.at(&root, "up", &[]);
+    assert_eq!(again.code, 0, "{}{}", again.stdout, again.stderr);
+    assert!(
+        !again
+            .changes()
+            .iter()
+            .any(|line| line.starts_with("conf-owner ")),
+        "{}",
+        again.stdout
+    );
+    assert_eq!(child(&root, "conf-owner"), owner);
 }
 
 #[test]

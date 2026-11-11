@@ -39,6 +39,16 @@ units:
       command: [sh, -c, "echo reads $(cat $CONF); trap 'exit 0' TERM; sleep 3600 & wait"]
       env: { CONF: "${conf.path}" }
 
+  kept-conf:
+    uses: file
+    with: { content: "${settings.greeting}\n", overwrite: false }
+  conf-owner:
+    doc: Is given a file that it owns once tay has written it, as a program that rewrites its own configuration does.
+    uses: process
+    with:
+      command: [sh, -c, "echo owns $CONF; trap 'exit 0' TERM; sleep 3600 & wait"]
+      env: { CONF: "${kept-conf.path}" }
+
   build:
     doc: Builds a program that says what it is told, each time it is brought up.
     uses: command

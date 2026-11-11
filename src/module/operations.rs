@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
 use std::future::Future;
+use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -94,6 +95,13 @@ pub trait Made: Send + Sync {
     /// The unit as it exists now, from a check made now; why not, when it
     /// does not exist or is not right.
     fn check(&self, place: &UnitPlace) -> Result<Exists, Failure>;
+
+    /// Takes into `taking`, as `name`, the file at `path` that this unit
+    /// writes, for a unit that uses it: by its content, unless the unit's
+    /// module says its content is not tay's to read.
+    fn take_written(&self, taking: &mut Taking, name: &str, path: &Path) -> Result<(), Failure> {
+        Ok(taking.file(name, path)?)
+    }
 }
 
 /// A unit that is made, as it exists and is right: the values it gives,

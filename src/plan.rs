@@ -27,7 +27,7 @@ use crate::syntax::names::NameAt;
 pub use action::ActionRun;
 pub use model::{
     Because, Given, OpenedBy, Plan, PlannedMechanism, PlannedUnit, PublishedPort, Readiness, Seen,
-    Unreachable,
+    Unreachable, UsedFile,
 };
 
 use action::Arguments;

@@ -137,7 +137,7 @@ An environment leaves the machine's list when a check finds nothing of it left: 
 
 **`secret`.** Generated once and kept in `state/secrets/`. Its value never appears in any output, in the stored plan, or in the argument list of anything tay starts. Kept beats written, as for a port: if a secret's `length` or `encoding` is changed after it was generated, the stored value stays, because whatever already holds it (a database's own password, say) would not change with it, and `tay up` says that the two no longer match. `tay wipe` on the secret makes a new one. If its `kind` is changed, the stored value cannot give what the unit must give, so the unit fails and says to wipe it.
 
-**`file`.** Written whole and then moved into place, so no reader sees half a file. Written again only when its content would differ, and never when `overwrite` is `false` and it exists. Such a file belongs to the program that rewrites it from then on: tay does not read it again, it is ready when it exists, and in the fingerprint of a unit that uses it it counts as there or not there, never by its content. So a program that takes the file as its own, or changes it, fails nothing and restarts nothing. *Not built yet: today tay still reads it.*
+**`file`.** Written whole and then moved into place, so no reader sees half a file. Written again only when its content would differ, and never when `overwrite` is `false` and it exists. Such a file belongs to the program that rewrites it from then on: tay does not read it again, it is ready when it exists, and in the fingerprint of a unit that uses it it counts as there or not there, never by its content. So a program that takes the file as its own, or changes it, fails nothing and restarts nothing.
 
 ## Units that run
 

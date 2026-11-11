@@ -1,7 +1,8 @@
 //! What a unit that runs was started from: each of its settings by the
 //! name its module gives it, and each file it uses that tay knows of by the
-//! name the plan gives it, each as a digest. Only digests are kept, so no
-//! value is, a secret least of all; and each is salted with the
+//! name the plan gives it, each as a digest, but for a file that is another
+//! program's once written, which is kept as there or not. Only digests are
+//! kept, so no value is, a secret least of all; and each is salted with the
 //! environment's id, so that the fingerprints of two environments cannot
 //! be compared to find a secret they share.
 
@@ -20,6 +21,9 @@ use crate::value::Filled;
 /// What a file that is not there is kept as, in place of a digest of its
 /// content.
 const MISSING: &str = "missing";
+
+/// What a file taken by its being there alone is kept as, when it is.
+const THERE: &str = "there";
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Fingerprint {
@@ -147,6 +151,19 @@ impl Taking {
         Ok(())
     }
 
+    /// Takes the file `name`, at `path`, as there or not there, never by
+    /// its content: for a file that belongs to another program once it is
+    /// written, which may take it as its own and rewrite it.
+    pub fn presence(&mut self, name: impl Into<String>, path: &Path) -> Result<(), DiskError> {
+        let taken = match std::fs::symlink_metadata(path) {
+            Ok(_) => THERE,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => MISSING,
+            Err(error) => return Err(DiskError::io(path, "looked at")(error)),
+        };
+        self.taken.files.insert(name.into(), taken.to_string());
+        Ok(())
+    }
+
     pub fn taken(self) -> Fingerprint {
         self.taken
     }
@@ -167,6 +184,7 @@ fn hex(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::PermissionsExt;
 
     /// The fingerprint, salted with `salt`, of a unit started with the
     /// secret `token` and the file at `path`.
@@ -199,6 +217,26 @@ mod tests {
         std::fs::remove_file(&path).unwrap();
         let gone = taken("env-a", "other", &path);
         assert_eq!(now.changed(&gone).to_string(), "the file `conf`");
+    }
+
+    #[test]
+    fn a_file_taken_by_its_presence_changes_only_by_coming_or_going() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("conf");
+        let taken = || {
+            let mut taking = Taking::salted_with("env-a", Fingerprint::default());
+            taking.presence("conf", &path).unwrap();
+            taking.taken()
+        };
+        std::fs::write(&path, "one").unwrap();
+        let was = taken();
+        // Rewritten, and taken by another program as its own, so that tay
+        // may not read it.
+        std::fs::write(&path, "two").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+        assert!(was.changed(&taken()).is_empty());
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(was.changed(&taken()).to_string(), "the file `conf`");
     }
 
     #[test]

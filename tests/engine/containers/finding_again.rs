@@ -3,8 +3,10 @@
 //! it again, copying what it wrote while no daemon ran into its log with
 //! Docker's times. And at `tay up`, a container whose settings have changed
 //! is replaced, its volumes kept, while one whose settings have not is left
-//! running, its image judged by what it is, not by the name it is given.
+//! running, its image judged by what it is, not by the name it is given,
+//! and a file it took as its own judged by its being there.
 
+use std::os::unix::fs::MetadataExt;
 use std::time::Duration;
 
 use super::container;
@@ -111,6 +113,40 @@ fn a_container_whose_settings_changed_is_replaced_keeping_its_volume_and_one_unc
     assert!(eventually(Duration::from_secs(20), || {
         log(&root, "keeper-data").contains("| mode two, start 2")
     }));
+}
+
+#[test]
+fn a_container_that_takes_a_file_tay_does_not_overwrite_as_its_own_is_left_running() {
+    let machine = Machine::with_docker();
+    let root = machine.stack("containers");
+    let up = machine.at(&root, "up", &["taker"]);
+    assert_eq!(up.code, 0, "{}{}", up.stdout, up.stderr);
+    assert!(eventually(Duration::from_secs(20), || {
+        log(&root, "taker").contains("| took it")
+    }));
+    // On Linux a container changes the file's real owner, after which tay
+    // may not read it; Docker on a Mac hides owners from containers.
+    if cfg!(target_os = "linux") {
+        let conf = root.join(".tay/state/files/taken-conf/taken-conf");
+        assert_eq!(std::fs::metadata(&conf).unwrap().uid(), 4321);
+        assert!(std::fs::read(&conf).is_err());
+    }
+    let first = container(&machine, &root, "taker").unwrap()["Id"].clone();
+    let again = machine.at(&root, "up", &["taker"]);
+    assert_eq!(again.code, 0, "{}{}", again.stdout, again.stderr);
+    assert_eq!(
+        again.last_change("taken-conf"),
+        "ready left as it is, since `overwrite` is false"
+    );
+    assert!(
+        !again
+            .changes()
+            .iter()
+            .any(|line| line.starts_with("taker ")),
+        "{}",
+        again.stdout
+    );
+    assert_eq!(container(&machine, &root, "taker").unwrap()["Id"], first);
 }
 
 #[test]

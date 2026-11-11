@@ -1,6 +1,9 @@
 //! Writing a file unit's file: whole and then moved into place, so no
 //! reader sees half a file; again only when its content would differ; and
-//! never again when `overwrite` is false and it exists.
+//! never again when `overwrite` is false and it exists. Such a file belongs
+//! to the program that rewrites it from then on, which may take it as its
+//! own: tay never reads it again, and a unit that uses it was started from
+//! its being there, not from its content.
 
 use std::fs::{self, Permissions};
 use std::io;
@@ -9,7 +12,9 @@ use std::path::{Path, PathBuf};
 
 use super::{DIR, FileSettings, PATH};
 use crate::disk::{DiskError, write_whole};
-use crate::module::operations::{self, Exists, Failure, Made, UnitPlace, Values, WrongType};
+use crate::module::operations::{
+    self, Exists, Failure, Made, Taking, UnitPlace, Values, WrongType,
+};
 use crate::value::Filled;
 
 /// A file's mode when `mode` does not say, and when its content holds a
@@ -49,8 +54,8 @@ struct Wanted {
 impl Made for FileSettings<Filled> {
     fn make(&self, place: &UnitPlace, _: bool) -> Result<Exists, Failure> {
         let wanted = self.wanted(place)?;
-        let detail = match on_disk(&wanted.path)? {
-            None => {
+        let detail = match on_disk(&wanted)? {
+            OnDisk::Missing => {
                 let folder = wanted
                     .path
                     .parent()
@@ -59,37 +64,45 @@ impl Made for FileSettings<Filled> {
                 write(&wanted)?;
                 "written"
             }
-            Some(_) if !wanted.overwrite => "left as it is, since `overwrite` is false",
-            Some((content, _)) if content != wanted.content.as_bytes() => {
+            OnDisk::Left => "left as it is, since `overwrite` is false",
+            OnDisk::Read { content, .. } if content != wanted.content.as_bytes() => {
                 write(&wanted)?;
                 "written again"
             }
-            Some((_, mode)) if mode != wanted.mode => {
+            OnDisk::Read { mode, .. } if mode != wanted.mode => {
                 fs::set_permissions(&wanted.path, Permissions::from_mode(wanted.mode))
                     .map_err(DiskError::io(&wanted.path, "given its mode"))?;
                 "given its mode"
             }
-            Some(_) => "as written before",
+            OnDisk::Read { .. } => "as written before",
         };
         Ok(exists(&wanted, detail))
     }
 
     fn check(&self, place: &UnitPlace) -> Result<Exists, Failure> {
         let wanted = self.wanted(place)?;
-        match on_disk(&wanted.path)? {
-            None => Err(FileError::Missing(wanted.path).into()),
-            Some(_) if !wanted.overwrite => Ok(exists(&wanted, "written")),
-            Some((content, _)) if content != wanted.content.as_bytes() => {
+        match on_disk(&wanted)? {
+            OnDisk::Missing => Err(FileError::Missing(wanted.path).into()),
+            OnDisk::Left => Ok(exists(&wanted, "written")),
+            OnDisk::Read { content, .. } if content != wanted.content.as_bytes() => {
                 Err(FileError::Differs(wanted.path).into())
             }
-            Some((_, mode)) if mode != wanted.mode => Err(FileError::Mode {
+            OnDisk::Read { mode, .. } if mode != wanted.mode => Err(FileError::Mode {
                 path: wanted.path,
                 found: mode,
                 wanted: wanted.mode,
             }
             .into()),
-            Some(_) => Ok(exists(&wanted, "written")),
+            OnDisk::Read { .. } => Ok(exists(&wanted, "written")),
         }
+    }
+
+    fn take_written(&self, taking: &mut Taking, name: &str, path: &Path) -> Result<(), Failure> {
+        match self.overwrite()? {
+            true => taking.file(name, path)?,
+            false => taking.presence(name, path)?,
+        }
+        Ok(())
     }
 }
 
@@ -103,27 +116,53 @@ impl FileSettings<Filled> {
             None if self.content.is_secret() => SECRET_MODE,
             None => MODE,
         };
-        let overwrite = match &self.overwrite {
-            Some(overwrite) => operations::boolean(overwrite, "overwrite")?,
-            None => true,
-        };
         Ok(Wanted {
             path: self.path(place),
             content: self.content.reveal(),
             mode,
-            overwrite,
+            overwrite: self.overwrite()?,
         })
+    }
+
+    /// Whether the file is written again whenever its content would differ.
+    fn overwrite(&self) -> Result<bool, WrongType> {
+        match &self.overwrite {
+            Some(overwrite) => operations::boolean(overwrite, "overwrite"),
+            None => Ok(true),
+        }
     }
 }
 
-/// The file's content and mode, when there is one at `path`.
-fn on_disk(path: &Path) -> Result<Option<(Vec<u8>, u32)>, FileError> {
+/// The unit's file as tay finds it.
+enum OnDisk {
+    Missing,
+    /// There, and not read: once written, a file tay does not write again
+    /// is the program's that rewrites it.
+    Left,
+    Read {
+        content: Vec<u8>,
+        mode: u32,
+    },
+}
+
+/// What is at the path of the file `wanted` describes.
+fn on_disk(wanted: &Wanted) -> Result<OnDisk, FileError> {
+    let path = &wanted.path;
+    let missing = |error: &io::Error| error.kind() == io::ErrorKind::NotFound;
+    if !wanted.overwrite {
+        return match fs::symlink_metadata(path) {
+            Ok(_) => Ok(OnDisk::Left),
+            Err(error) if missing(&error) => Ok(OnDisk::Missing),
+            Err(error) => Err(DiskError::io(path, "looked at")(error).into()),
+        };
+    }
     match fs::read(path) {
         Ok(content) => {
             let metadata = fs::metadata(path).map_err(DiskError::io(path, "read"))?;
-            Ok(Some((content, metadata.permissions().mode() & 0o7777)))
+            let mode = metadata.permissions().mode() & 0o7777;
+            Ok(OnDisk::Read { content, mode })
         }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) if missing(&error) => Ok(OnDisk::Missing),
         Err(error) => Err(DiskError::io(path, "read")(error).into()),
     }
 }
