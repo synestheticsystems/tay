@@ -7,6 +7,12 @@
 //! again only if the file it uses changed. On Linux, where the system
 //! watches one folder at a time, a folder git ignores is not watched at
 //! all.
+//!
+//! The system tells of a saved file when it can, which on a loaded machine
+//! may be many seconds later, and may tell of files saved together in more
+//! than one go. So a test waits on what tay says it took in: each run
+//! again is said in the daemon's log with the files it was for, and the
+//! build is to have run once for each, never more.
 
 use std::fs;
 use std::path::Path;
@@ -18,6 +24,10 @@ use crate::harness::{Machine, child, eventually, log};
 /// Long enough for changes to have been gathered and run for, on a loaded
 /// machine, when nothing is to come of them.
 const QUIET: Duration = Duration::from_secs(3);
+
+/// How long the system may take to tell of a saved file, however loaded
+/// the machine is, before a test gives up on tay ever taking it in.
+const TOLD: Duration = Duration::from_secs(180);
 
 /// Makes the stack at `root` a repository of git's, which ignores
 /// `src/ignored/`.
@@ -48,6 +58,53 @@ fn said(root: &Path, unit: &str, said: &str) {
     );
 }
 
+/// For each time tay ran `unit` again for files that changed, in order,
+/// the files it named, as its daemon's log says it.
+fn ran_again_for(root: &Path, unit: &str) -> Vec<Vec<String>> {
+    let log = fs::read_to_string(root.join(".tay/logs/tay/daemon.log")).unwrap_or_default();
+    let again = format!("  {unit}: starting (attempt 1, starting; ");
+    log.lines()
+        .filter_map(|line| line.split_once(&again))
+        .map(|(_, because)| {
+            (because.split('`').skip(1).step_by(2))
+                .map(str::to_string)
+                .collect()
+        })
+        .collect()
+}
+
+/// Waits until tay says it has run `unit` again for each of `files`,
+/// however late the system tells it of them.
+fn taken_in(root: &Path, unit: &str, files: &[&str]) {
+    let mut again = Vec::new();
+    let taken = eventually(TOLD, || {
+        again = ran_again_for(root, unit);
+        let named = || again.iter().flatten();
+        files.iter().all(|file| named().any(|named| named == file))
+    });
+    assert!(taken, "`{unit}` ran again for each of {files:?}: {again:?}");
+}
+
+/// Waits until the build is ready having run once as it was brought up
+/// and once for each time tay said it ran it again, and gives those: it
+/// fails a test in which the build ran more often than tay said.
+fn ran_once_for_each(machine: &Machine, root: &Path) -> Vec<Vec<String>> {
+    let (mut again, mut ran) = (Vec::new(), 0);
+    let settled = eventually(TOLD, || {
+        again = ran_again_for(root, "build");
+        ran = runs(root);
+        ran == 1 + again.len() && {
+            let status = machine.at(root, "status", &["--json"]).json();
+            Machine::state(&status, "build").starts_with("ready")
+        }
+    });
+    assert!(
+        settled,
+        "the build ran {ran} times: once as it was brought up, and once for each of {again:?}"
+    );
+    again
+}
+
 /// The stack `watching`, brought up, with the build run once.
 fn brought_up(machine: &Machine, units: &[&str]) -> std::path::PathBuf {
     let root = machine.stack("watching");
@@ -58,21 +115,31 @@ fn brought_up(machine: &Machine, units: &[&str]) -> std::path::PathBuf {
 }
 
 #[test]
-fn files_saved_together_run_a_command_once_and_files_git_ignores_not_at_all() {
+fn files_saved_together_run_a_command_once_for_what_it_takes_in_and_files_git_ignores_not_at_all() {
     let machine = Machine::new();
     let root = brought_up(&machine, &[]);
     assert_eq!(runs(&root), 1);
+    // The file git ignores is saved first: the system tells of changes in
+    // the order they are made, so by the time tay has taken in those saved
+    // after it, it has judged that one too.
     fs::create_dir(root.join("src/ignored")).unwrap();
     fs::write(root.join("src/ignored/notes.txt"), "noted\n").unwrap();
-    std::thread::sleep(QUIET);
-    assert_eq!(runs(&root), 1);
     for (file, says) in [("one", "uno"), ("two", "dos"), ("three", "tres")] {
         fs::write(root.join(format!("src/{file}.txt")), format!("{says}\n")).unwrap();
     }
+    taken_in(
+        &root,
+        "build",
+        &["src/one.txt", "src/two.txt", "src/three.txt"],
+    );
     said(&root, "first", "| one says uno");
     said(&root, "second", "| two says dos");
-    std::thread::sleep(QUIET);
-    assert_eq!(runs(&root), 2);
+    let again = ran_once_for_each(&machine, &root);
+    let ignored = again
+        .iter()
+        .flatten()
+        .filter(|file| file.contains("ignored"));
+    assert_eq!(ignored.count(), 0, "{again:?}");
 }
 
 #[test]
@@ -82,6 +149,7 @@ fn once_a_build_is_done_only_what_uses_a_file_it_changed_is_started_again() {
     said(&root, "second", "| two says two");
     let second = child(&root, "second");
     fs::write(root.join("src/one.txt"), "uno\n").unwrap();
+    taken_in(&root, "build", &["src/one.txt"]);
     said(&root, "first", "| one says uno");
     let daemon = fs::read_to_string(root.join(".tay/logs/tay/daemon.log")).unwrap();
     assert!(
@@ -101,6 +169,7 @@ fn a_build_that_fails_says_its_last_lines_and_leaves_what_uses_it_on_the_last_go
     said(&root, "first", "| one says one");
     let first = child(&root, "first");
     fs::write(root.join("src/fail"), "told to\n").unwrap();
+    taken_in(&root, "build", &["src/fail"]);
     let failed = machine.until_state(&root, "build", Duration::from_secs(30), |state| {
         state.starts_with("failed")
     });
@@ -112,11 +181,13 @@ fn a_build_that_fails_says_its_last_lines_and_leaves_what_uses_it_on_the_last_go
     assert!(Machine::state(&status, "first").starts_with("ready"));
     assert_eq!(child(&root, "first"), first);
     // The next change runs it again.
+    let failing = ran_again_for(&root, "build").len();
     fs::remove_file(root.join("src/fail")).unwrap();
-    machine.until_state(&root, "build", Duration::from_secs(30), |state| {
-        state.starts_with("ready")
-    });
-    assert_eq!(runs(&root), 3);
+    assert!(
+        eventually(TOLD, || ran_again_for(&root, "build").len() > failing),
+        "the build ran again"
+    );
+    ran_once_for_each(&machine, &root);
 }
 
 #[test]
@@ -149,6 +220,7 @@ fn a_watched_process_is_started_again_when_its_file_changes() {
     said(&root, "ticker", "| ticks 1");
     let first = child(&root, "ticker");
     fs::write(root.join("src/ticker.txt"), "2\n").unwrap();
+    taken_in(&root, "ticker", &["src/ticker.txt"]);
     said(&root, "ticker", "| ticks 2");
     assert_ne!(child(&root, "ticker"), first);
 }
@@ -211,8 +283,6 @@ fn on_linux_a_folder_git_ignores_is_not_watched_and_one_made_later_is() {
     assert!(!watched(&machine, &root).contains(&inode("src/ignored/later")));
     assert_eq!(runs(&root), 1);
     fs::write(root.join("src/later/deep/notes.txt"), "noted\n").unwrap();
-    assert!(
-        eventually(Duration::from_secs(30), || runs(&root) == 2),
-        "the build ran again"
-    );
+    taken_in(&root, "build", &["src/later/deep/notes.txt"]);
+    ran_once_for_each(&machine, &root);
 }
