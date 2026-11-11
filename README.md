@@ -86,11 +86,7 @@ Tay runs on macOS and Linux. Container units need Docker; nothing else does.
 cargo install tay --locked
 ```
 
-needs Rust 1.93 or later. Built programs for Linux and macOS are attached to each [release](https://github.com/synestheticsystems/tay/releases). To build the newest source instead:
-
-```
-cargo install --git https://github.com/synestheticsystems/tay --locked
-```
+needs Rust 1.93 or later. Built programs for Linux and macOS are attached to each [release](https://github.com/synestheticsystems/tay/releases).
 
 [View on crates.io](https://crates.io/crates/tay)
 
