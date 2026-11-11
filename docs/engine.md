@@ -39,7 +39,7 @@ Every command takes `--root FOLDER`, and `--json` where it prints something a pr
 
 With no unit named it brings up what the choices list under `up`. With units named it brings up those and what they need, and leaves everything else as it is.
 
-**What an environment was asked for stays asked.** The profile, each `--set` and the units named on `tay up` are remembered by the environment, so a later plain `tay up`, a `tay status`, a `tay plan` and a daemon started afresh all see the same stack. A new `--set` for the same place replaces the remembered one, and `--profile` replaces the remembered profile. `tay status` lists what is remembered, and names the profile in force with what chose it: the command line (now or remembered), the environment's file, or the stack's default.
+**What an environment was asked for stays asked.** The profile, each `--set` and the units named on `tay up` are remembered by the environment, so a later plain `tay up`, a `tay status`, a `tay plan` and a daemon started afresh all see the same stack. A new `--set` for the same place replaces the remembered one, and `--profile` replaces the remembered profile. `tay status` lists what is remembered, and names the profile in force with what chose it: the command line (now or remembered), the environment's file, or the stack's default. It names the profile a plan made now would use: after `tay set profile=<name>` it names the new one, which the units take at the next `tay up`.
 
 When a unit fails, `tay up` names it, gives the reason and the last lines it wrote, and names every unit that was waiting on it. A unit that failed an attempt and then became ready counts as ready, and the earlier attempts are shown.
 
@@ -100,6 +100,8 @@ It keeps two facts about intent on disk: whether the environment is meant to be 
   choices.yaml            this environment's choices and its profile; people write it
   id                      the environment's id
   daemon.lock             held while the daemon runs
+  daemon.socket           the path of the daemon's socket, written once it listens
+  bootstrap.lock          held by the command that starts the daemon, and by `tay serve` as it takes its place
   state/
     intent                up or down
     asked                 the profile, the `--set`s and the units last asked for
@@ -209,7 +211,7 @@ Docker is a container's parent: it keeps the exit code, says whether the contain
 
 **`tay down`** stops and removes the environment's containers and its network, and keeps its volumes: data is kept. A volume Docker made by itself for a path an image declares and the unit does not name belongs to that one container and is removed with it, whenever tay removes a container. Unnamed volumes that an earlier tay left behind carry no label, and this one does not find them.
 
-**When Docker itself stops,** as it does when it is upgraded or restarted, every container ends with it, and none of that is a unit's doing. While Docker does not answer, nothing that ends or cannot start is counted against a unit; when it answers again, the daemon brings the environment up as `tay up` would, if it is meant to be up, and says in its log and in `tay status` when Docker stopped answering and when the environment was brought up again. Host processes are not touched.
+**When Docker itself stops,** as it does when it is upgraded or restarted, every container ends with it, and none of that is a unit's doing. While Docker does not answer, nothing that ends or cannot start is counted against a unit; when it answers again, the daemon brings the environment up as `tay up` would, if it is meant to be up, and says in its log and in `tay status` when Docker stopped answering and when the environment was brought up again. Host processes are not touched. A `tay up` run while Docker does not answer cannot tell what is left in Docker, so it exits with code 1 and the units go on waiting. Two things this does not cover: a Docker set to keep containers running through its own restart has them replaced all the same, and a Docker that hangs without closing its connections is not noticed.
 
 **A command in a container.** With `in`, the command runs inside the named unit's running container, as `user` if given. With `image`, it runs as a container of its own on the environment's network, with `run` in place of the image's entrypoint, and is removed when it ends. Either way its `check` runs the same way first, its secrets reach it through its environment, and the file named by `TAY_VALUES` is fetched from where the command ran.
 
