@@ -190,7 +190,7 @@ Three of them **run** something: `process`, `container` and `command`. The other
 | `build` | `{ context, dockerfile, args }`: build the image from a folder |
 | `command`, `entrypoint` | Lists, replacing the image's own |
 | `env`, `secret_env` | As for `process` |
-| `volumes` | Named volumes this unit owns: a mapping from a name to a path in the container, or to `{ to, owner }` where `owner` is the numeric user the volume is given to |
+| `volumes` | Named volumes this unit owns: a mapping from a name to a path in the container, or to `{ to, owner }` where `owner` is the numeric user the volume is given to. tay gives it by running `chown` as root from the unit's own image, once, when the volume is made; an image with no `chown` cannot have an `owner`, and a `command` unit of the stack must give the volume instead |
 | `mounts` | A list. Each is `{ from, to, readonly }`, a host file or folder made visible in the container, or `{ volume, to, readonly }`, a volume another unit owns, written `"unit/name"`. `readonly` defaults to `true` |
 | `tmpfs` | A list of paths in the container that are kept in memory |
 | `publish` | A mapping from a container port to a host port, or to the long form `{ port, address, always }`. See "When a published port is opened" |

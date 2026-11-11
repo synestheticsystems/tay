@@ -128,6 +128,8 @@ An environment leaves the machine's list when a check finds nothing of it left: 
 - The preferred number is tried once, the first time. After that the environment keeps what it got: kept beats preferred.
 - Other numbers come from a range the system does not hand out by itself.
 - Choosing goes through one lock and the machine's list, so two environments starting at once cannot get the same number.
+- A number is free when no program listens on it, on any address of the machine. A connection that a stopped program left closing holds nothing, so a unit started again finds its number free.
+- A kept port is the environment's own for as long as a unit of the environment that uses it runs, whatever the change being made: `tay restart` of another unit, `tay run`, and the bring-up after a `tay wipe` never choose a new number for it.
 - If a kept port turns out to be taken, by something that is not this environment, when the stack comes up: a `fixed` port fails its unit and names the holder as well as tay can; any other port is chosen again, and `tay up` says so.
 
 **`secret`.** Generated once and kept in `state/secrets/`. Its value never appears in any output, in the stored plan, or in the argument list of anything tay starts. Kept beats written, as for a port: if a secret's `length` or `encoding` is changed after it was generated, the stored value stays, because whatever already holds it (a database's own password, say) would not change with it, and `tay up` says that the two no longer match. `tay wipe` on the secret makes a new one. If its `kind` is changed, the stored value cannot give what the unit must give, so the unit fails and says to wipe it.
@@ -208,7 +210,7 @@ Docker is a container's parent: it keeps the exit code, says whether the contain
 
 **The host, seen from a container,** has one name on every system, so a definition never has to know which Docker it runs on. `${host.listen}` is the address a host process must listen on for containers to reach it and other machines not to.
 
-**Units the plan no longer has.** A unit that is running and is not in the plan any more is stopped at the next `tay up`, which says so, and `tay status` shows it until then. This holds for processes as for containers.
+**Units the plan no longer has.** A unit that is running and is not in the plan any more is stopped at the next `tay up`, which says so, and `tay status` shows it until then. This holds for processes as for containers. So `tay status` shows the units of the plan, each unit that still runs though the plan no longer has it, and each unit whose `undo` is still waiting (below); a port, a file, a secret or a group that the plan no longer has is not shown, since nothing of it runs.
 
 **An environment leaves the machine's list** only when no process, container, volume or network of it is left.
 
