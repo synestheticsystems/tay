@@ -69,7 +69,13 @@ pub async fn ask(
     let stdin = child.stdin.take();
     let asked = async move {
         if let Some(mut stdin) = stdin {
-            stdin.write_all(key.as_bytes()).await?;
+            // A helper that ends without reading what it is asked has
+            // answered all the same: what it wrote and how it ended say
+            // what, so its closed input is no failure to ask it.
+            match stdin.write_all(key.as_bytes()).await {
+                Err(error) if error.kind() != std::io::ErrorKind::BrokenPipe => return Err(error),
+                _ => {}
+            }
         }
         child.wait_with_output().await
     };
@@ -201,6 +207,21 @@ mod tests {
         stand_in::helper(bin.path(), "empty", &format!("echo '{NOTHING}'; exit 1"));
         assert!(
             ask("empty", GHCR, &stand_in::path(bin.path()))
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_helper_that_ends_without_reading_what_it_is_asked_has_answered_all_the_same() {
+        let bin = bin();
+        stand_in::helper(bin.path(), "empty", &format!("echo '{NOTHING}'; exit 1"));
+        // More than a pipe holds, so that writing it cannot end before the
+        // helper has, and meets its closed input every time.
+        let registry = "r".repeat(1 << 20);
+        assert!(
+            ask("empty", &registry, &stand_in::path(bin.path()))
                 .await
                 .unwrap()
                 .is_none()
